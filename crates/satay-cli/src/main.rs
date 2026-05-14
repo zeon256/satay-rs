@@ -2,6 +2,7 @@
 
 use std::ffi::OsStr;
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command as ProcessCommand, ExitStatus};
 
@@ -44,7 +45,7 @@ enum Error {
     ReadInput {
         path: PathBuf,
         #[source]
-        source: std::io::Error,
+        source: io::Error,
     },
 
     #[error(transparent)]
@@ -54,20 +55,20 @@ enum Error {
     CreateOutputDir {
         path: PathBuf,
         #[source]
-        source: std::io::Error,
+        source: io::Error,
     },
 
     #[error("failed to write `{}`: {source}", path.display())]
     WriteOutput {
         path: PathBuf,
         #[source]
-        source: std::io::Error,
+        source: io::Error,
     },
 
     #[error("failed to run rustfmt: {source}")]
     RunRustfmt {
         #[source]
-        source: std::io::Error,
+        source: io::Error,
     },
 
     #[error("rustfmt failed for `{}` with status {status}", path.display())]

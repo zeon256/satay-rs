@@ -333,7 +333,9 @@ paths:
     .expect_err("nullable parameters are unsupported");
 
     match err {
-        satay_codegen::Error::NullableParameterUnsupported { wire_name, .. } => {
+        satay_codegen::Error::Validation(
+            satay_codegen::ValidationError::NullableParameterUnsupported { wire_name, .. },
+        ) => {
             assert_eq!(wire_name, "userId");
         }
         other => panic!("unexpected error: {other}"),
@@ -364,7 +366,9 @@ paths:
     .expect_err("default response bodies are unsupported");
 
     match err {
-        satay_codegen::Error::DefaultResponseBodyUnsupported { context, .. } => {
+        satay_codegen::Error::Validation(
+            satay_codegen::ValidationError::DefaultResponseBodyUnsupported { context, .. },
+        ) => {
             assert_eq!(context, "operation `ping` responses");
         }
         other => panic!("unexpected error: {other}"),
