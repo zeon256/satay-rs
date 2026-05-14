@@ -190,6 +190,7 @@ fn generated_constrained_fixture_enforces_openapi_bounds() {
     assert!(generated.contains("#[nutype::nutype("));
     assert!(generated.contains("validate(greater_or_equal = 0, less_or_equal = 130)"));
     assert!(generated.contains("validate(len_char_min = 1, len_char_max = 80)"));
+    assert!(generated.contains("regex = \"^[a-zA-Z0-9-]+$\""));
 
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();
@@ -216,7 +217,8 @@ json = ["serde", "dep:serde_json", "satay-runtime/json"]
 
 [dependencies]
 http = "1"
-nutype = {{ version = "0.7", features = ["serde"] }}
+nutype = {{ version = "0.7", features = ["serde", "regex"] }}
+regex = "1"
 satay-runtime = {{ path = {runtime_path}, default-features = false }}
 serde = {{ version = "1", features = ["derive"], optional = true }}
 serde_json = {{ version = "1", optional = true }}
@@ -241,6 +243,14 @@ mod tests {
         assert!(UserName::try_new(String::new()).is_err());
         assert!(UserName::try_new("a".repeat(81)).is_err());
         assert!(GetUserTagsParameter::try_new(Vec::new()).is_err());
+    }
+
+    #[test]
+    fn regex_validation_rejects_invalid_patterns() {
+        assert!(Email::try_new("not-an-email".to_owned()).is_err());
+        assert!(Email::try_new("user@domain.com".to_owned()).is_ok());
+        assert!(Slug::try_new("hello world".to_owned()).is_err());
+        assert!(Slug::try_new("hello-world".to_owned()).is_ok());
     }
 
     #[test]

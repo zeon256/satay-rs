@@ -36,14 +36,24 @@ Satay currently targets OpenAPI 3.0.x and a deliberately small, typed subset.
 - `serde` derives and field renames behind the generated crate's `serde` feature.
 - Validation constraints rendered through `nutype` for:
   - string `minLength` / `maxLength`
+  - string `pattern` (via `nutype`'s `regex` validator)
   - integer and number `minimum` / `maximum` with `exclusiveMinimum` / `exclusiveMaximum`
   - array `minItems` / `maxItems`
 
-Generated code that represents OpenAPI validation constraints uses `nutype` newtypes. Add this dependency to crates that compile constrained generated clients:
+Generated code that represents OpenAPI validation constraints uses `nutype` newtypes. Add these dependencies to crates that compile constrained generated clients:
 
 ```toml
 nutype = { version = "0.7", features = ["serde"] }
 ```
+
+When the OpenAPI spec contains string `pattern` constraints, also add:
+
+```toml
+nutype = { version = "0.7", features = ["serde", "regex"] }
+regex = "1"
+```
+
+> **Note:** OpenAPI `pattern` uses ECMA-262 (JavaScript) regex syntax, while `nutype` uses the Rust `regex` crate. Most common patterns (character classes, quantifiers, anchors) are compatible. However, ECMA features like lookahead, lookbehind, and backreferences are not supported by the Rust `regex` engine and will cause a compile error in the generated code.
 
 ## Not supported yet
 
@@ -62,7 +72,6 @@ These are known gaps rather than silent compatibility promises:
 - Map schemas / `additionalProperties`.
 - `oneOf`, `anyOf`, `allOf`, and discriminator-based polymorphism.
 - Non-string enums.
-- String `pattern`.
 - Numeric `multipleOf`.
 - Array `uniqueItems`.
 - Object `minProperties` / `maxProperties`.

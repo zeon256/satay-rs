@@ -390,11 +390,10 @@ fn parse_string_validation(
     schema: &Map<String, Value>,
     context: &str,
 ) -> Result<Option<Validation>, ValidationError> {
-    if schema.contains_key("pattern") {
-        return Err(ValidationError::UnsupportedPattern {
-            context: context.to_owned(),
-        });
-    }
+    let pattern = schema
+        .get("pattern")
+        .and_then(Value::as_str)
+        .map(|s| s.to_owned());
 
     let min_length = optional_u64_keyword(schema, "minLength", context)?;
     let max_length = optional_u64_keyword(schema, "maxLength", context)?;
@@ -408,10 +407,11 @@ fn parse_string_validation(
         });
     }
 
-    if min_length.is_some() || max_length.is_some() {
+    if pattern.is_some() || min_length.is_some() || max_length.is_some() {
         Ok(Some(Validation::String {
             min_length,
             max_length,
+            pattern,
         }))
     } else {
         Ok(None)
@@ -1609,9 +1609,11 @@ components:
             Validation::String {
                 min_length,
                 max_length,
+                pattern,
             } => {
                 assert_eq!(*min_length, Some(1));
                 assert_eq!(*max_length, None);
+                assert_eq!(*pattern, None);
             }
             other => panic!("expected DisplayNameValue string validation, got {other:?}"),
         }
@@ -1620,9 +1622,11 @@ components:
             Validation::String {
                 min_length,
                 max_length,
+                pattern,
             } => {
                 assert_eq!(*min_length, Some(2));
                 assert_eq!(*max_length, None);
+                assert_eq!(*pattern, None);
             }
             other => panic!("expected tag item string validation, got {other:?}"),
         }

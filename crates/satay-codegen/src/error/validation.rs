@@ -117,14 +117,6 @@ pub enum ValidationError {
     #[error("{context} must declare `type`, `$ref`, or `enum`")]
     MissingSchemaType { context: String },
 
-    /// A schema uses `pattern`, which relies on ECMA regex syntax that is not safely supported.
-    ///
-    /// Error message: `{context} uses `pattern`; OpenAPI patterns use ECMA regex syntax and are not safely supported yet`
-    #[error(
-        "{context} uses `pattern`; OpenAPI patterns use ECMA regex syntax and are not safely supported yet"
-    )]
-    UnsupportedPattern { context: String },
-
     /// A schema uses a composition keyword (`allOf`, `anyOf`, `oneOf`) that is outside MVP scope.
     ///
     /// Error message: `{context} uses `{keyword}`, which is not in the MVP scope`

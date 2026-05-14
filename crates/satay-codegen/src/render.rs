@@ -80,8 +80,13 @@ fn render_validation(validation: &Validation) -> TokenStream {
         Validation::String {
             min_length,
             max_length,
+            pattern,
         } => {
             let mut validators = Vec::new();
+            if let Some(pattern) = pattern {
+                let pattern = lit_str(pattern);
+                validators.push(quote!(regex = #pattern));
+            }
             if let Some(min_length) = min_length {
                 let min_length = Literal::u64_unsuffixed(*min_length);
                 validators.push(quote!(len_char_min = #min_length));

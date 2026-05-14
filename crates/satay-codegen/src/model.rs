@@ -31,6 +31,7 @@ pub(crate) enum Validation {
     String {
         min_length: Option<u64>,
         max_length: Option<u64>,
+        pattern: Option<String>,
     },
     Integer {
         minimum: Option<IntegerLimit>,
