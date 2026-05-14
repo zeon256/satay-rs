@@ -10,6 +10,8 @@ Satay generates typed Rust OpenAPI clients without choosing your HTTP client.
 
 Satay is Sans-IO by design. Generated code builds HTTP requests and decodes HTTP responses, but never sends bytes over the network. Bring your own transport: `reqwest`, `ureq`, `hyper`, tests, WASM, or custom runtime code.
 
+Satay tries to up the ante: instead of dumping plain structs and `String` fields, it generates newtypes that carry validation in their types. String fields with `pattern` constraints become `nutype`-powered types that reject bad values at parse time. Bounded integers get their own wrapper types. If the spec says a value can't exceed 100, the generated type literally won't let you construct a 150. The constraint lives in the type, not in a runtime check you hope somebody remembers.
+
 ```bash
 satay generate --input openapi.yaml --output src/generated --rustfmt
 ```

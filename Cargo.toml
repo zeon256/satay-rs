@@ -12,6 +12,7 @@ edition = "2024"
 
 [workspace.dependencies]
 argh = "0.1"
+fast-float = "0.2"
 http = "1"
 indexmap = "2"
 prettyplease = "0.2"
@@ -23,6 +24,7 @@ serde_yaml = "0.9"
 syn = { version = "2", features = ["full"] }
 tempfile = "3"
 thiserror = "2"
+time = { version = "0.3", features = ["formatting", "parsing"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
