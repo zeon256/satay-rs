@@ -1,5 +1,11 @@
 # Satay
 
+<p align="center">
+  <img src="logo.png" alt="satay-rs logo" width="300">
+  <br>
+  <sub><i>Disclaimer: I can't design. This logo was generated using ChatGPT.</i></sub>
+</p>
+
 Satay generates typed Rust OpenAPI clients without choosing your HTTP client.
 
 Satay is Sans-IO by design. Generated code builds HTTP requests and decodes HTTP responses, but never sends bytes over the network. Bring your own transport: `reqwest`, `ureq`, `hyper`, tests, WASM, or custom runtime code.
