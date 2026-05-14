@@ -41,6 +41,7 @@ Satay targets OpenAPI 3.0.x and a small, typed subset.
 - Optional fields and optional request bodies.
 - `serde` derives and field renames behind the generated crate's `serde` feature.
 - Satay-specific `x-satay.parse-as` hints for string fields whose wire values should become stronger Rust types.
+- Satay-specific `x-satay.treat-error-as-none` hints for struct fields where deserialization errors should produce `None` instead of failing.
 - Validation constraints rendered through `nutype` for:
   - string `minLength` / `maxLength`
   - string `pattern` (via `nutype`'s `regex` validator)
@@ -103,6 +104,43 @@ pub struct Reading {
 The wire format stays a string — serde deserializes from a JSON string and serializes back to one — but the Rust type is `u32`, `f64`, `u8`, or `OffsetDateTime`.
 
 Supported `parse-as` values are `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, and `offset-datetime`. Float parsing uses `fast-float`; `offset-datetime` generates `satay_runtime::OffsetDateTime`.
+
+### `treat-error-as-none`
+
+Use `x-satay.treat-error-as-none` on a struct field to make the generated field type `Option<T>`. When deserialization of the field's value fails (for example, an API returns empty strings where a number is expected), the field resolves to `None` instead of returning an error.
+
+```yaml
+BusServiceArrival:
+  type: object
+  required:
+    - ServiceNo
+    - NextBus
+  properties:
+    ServiceNo:
+      type: string
+    NextBus:
+      $ref: "#/components/schemas/BusArrivalTiming"
+      x-satay:
+        treat-error-as-none: true
+```
+
+When `treat-error-as-none` is `true`, the generated Rust field becomes `Option<BusArrivalTiming>` with a custom deserializer that catches any error and returns `None`:
+
+```rust
+pub struct BusServiceArrival {
+    pub service_no: String,
+    #[cfg_attr(feature = "serde", serde(
+        rename = "NextBus",
+        deserialize_with = "satay_runtime::treat_error_as_none::deserialize",
+        serialize_with = "satay_runtime::treat_error_as_none::serialize",
+        default,
+        skip_serializing_if = "Option::is_none"
+    ))]
+    pub next_bus: Option<BusArrivalTiming>,
+}
+```
+
+This is useful for APIs that return empty or malformed values in nested objects when data is unavailable, rather than omitting the field or returning `null`. The `treat-error-as-none` extension requires the generated crate's `json` feature.
 
 ## Action Builders
 

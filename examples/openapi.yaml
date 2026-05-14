@@ -165,12 +165,18 @@ components:
 
         NextBus:
           $ref: "#/components/schemas/BusArrivalTiming"
+          x-satay:
+            treat-error-as-none: true
 
         NextBus2:
           $ref: "#/components/schemas/BusArrivalTiming"
+          x-satay:
+            treat-error-as-none: true
 
         NextBus3:
           $ref: "#/components/schemas/BusArrivalTiming"
+          x-satay:
+            treat-error-as-none: true
 
     BusArrivalTiming:
       type: object

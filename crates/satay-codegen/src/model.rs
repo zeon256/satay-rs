@@ -80,6 +80,7 @@ pub(crate) struct Field {
     pub(crate) rust_name: String,
     pub(crate) ty: TypeRef,
     pub(crate) required: bool,
+    pub(crate) treat_error_as_none: bool,
 }
 
 #[derive(Debug)]

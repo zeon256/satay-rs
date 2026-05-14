@@ -850,7 +850,7 @@ fn struct_attrs(serde: bool) -> Vec<syn::Attribute> {
 
 fn render_struct_field(field: &Field, serde: bool) -> syn::Field {
     let name = ident(&field.rust_name);
-    let ty = rust_field_type(&field.ty, field.required);
+    let ty = rust_field_type(&field.ty, field.required, field.treat_error_as_none);
     let attrs = field_attrs(field, serde);
 
     parse_quote!(#(#attrs)* pub #name: #ty)
@@ -866,10 +866,13 @@ fn field_attrs(field: &Field, serde: bool) -> Vec<syn::Attribute> {
         let wire_name = lit_str(&field.wire_name);
         serde_attrs.push(quote!(rename = #wire_name));
     }
-    if let Some(module) = parsed_string_serde_module(field) {
+    if field.treat_error_as_none {
+        serde_attrs.push(quote!(deserialize_with = "satay_runtime::treat_error_as_none::deserialize"));
+        serde_attrs.push(quote!(serialize_with = "satay_runtime::treat_error_as_none::serialize"));
+    } else if let Some(module) = parsed_string_serde_module(field) {
         serde_attrs.push(quote!(with = #module));
     }
-    if !field.required {
+    if !field.required || field.treat_error_as_none {
         serde_attrs.push(quote!(default));
         serde_attrs.push(quote!(skip_serializing_if = "Option::is_none"));
     }
@@ -968,6 +971,7 @@ fn input_fields(operation: &Operation) -> Vec<Field> {
         rust_name: parameter.rust_name.clone(),
         ty: parameter.ty.clone(),
         required: parameter.required,
+        treat_error_as_none: false,
     }));
     if let Some(body) = &operation.request_body {
         input_fields.push(Field {
@@ -975,6 +979,7 @@ fn input_fields(operation: &Operation) -> Vec<Field> {
             rust_name: body.field_name.clone(),
             ty: body.ty.clone(),
             required: body.required,
+            treat_error_as_none: false,
         });
     }
 
@@ -1099,7 +1104,7 @@ fn render_response_variant(response: &ResponseCase) -> syn::Variant {
 fn render_parts_function(operation: &Operation) -> syn::ItemFn {
     let body_type = operation.request_body.as_ref().map_or_else(
         || parse_quote!(()),
-        |body| rust_field_type(&body.ty, body.required),
+        |body| rust_field_type(&body.ty, body.required, false),
     );
     let parts_fn = ident(&format!("{}_parts", operation.fn_name));
     let input_name = ident(if operation_uses_input(operation) {
@@ -1500,8 +1505,8 @@ fn parse_as_serde_module(parse_as: ParseAs) -> &'static str {
     }
 }
 
-fn rust_field_type(ty: &TypeRef, required: bool) -> syn::Type {
-    if required || ty.is_nullable() {
+fn rust_field_type(ty: &TypeRef, required: bool, treat_error_as_none: bool) -> syn::Type {
+    if (required && !treat_error_as_none) || ty.is_nullable() {
         rust_type(ty)
     } else {
         let ty = rust_type(ty);
@@ -1599,12 +1604,14 @@ mod tests {
                         rust_name: "id".to_owned(),
                         ty: TypeRef::String,
                         required: true,
+                        treat_error_as_none: false,
                     },
                     Field {
                         wire_name: "tag_count".to_owned(),
                         rust_name: "tag_count".to_owned(),
                         ty: TypeRef::I32,
                         required: false,
+                        treat_error_as_none: false,
                     },
                 ]),
             }],

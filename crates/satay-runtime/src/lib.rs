@@ -370,6 +370,35 @@ pub mod serde_string {
     }
 }
 
+#[cfg(feature = "json")]
+pub mod treat_error_as_none {
+    use serde::de::DeserializeOwned;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S, T>(value: &Option<T>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: Serialize,
+    {
+        match value {
+            Some(inner) => inner.serialize(serializer),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: DeserializeOwned,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match T::deserialize(value) {
+            Ok(parsed) => Ok(Some(parsed)),
+            Err(_) => Ok(None),
+        }
+    }
+}
+
 pub fn insert_header(
     headers: &mut http::HeaderMap,
     name: &'static str,

@@ -321,11 +321,13 @@ fn parse_struct_fields(
             registry,
             Some(&format!("{schema_name} {wire_name}")),
         )?;
+        let treat_error_as_none = parse_satay_treat_error_as_none(property_schema, &format!("property `{schema_name}.{wire_name}`"))?;
         fields.push(Field {
             wire_name: wire_name.clone(),
             rust_name,
             ty,
             required: required.contains(wire_name),
+            treat_error_as_none,
         });
     }
 
@@ -506,6 +508,25 @@ fn parse_satay_parse_as(
             context: context.to_owned(),
             parse_as: value.to_owned(),
         })
+}
+
+fn parse_satay_treat_error_as_none(
+    schema: &Value,
+    context: &str,
+) -> Result<bool, ValidationError> {
+    let Some(obj) = schema.as_object() else {
+        return Ok(false);
+    };
+    let Some(satay) = optional_object(obj, "x-satay", context)? else {
+        return Ok(false);
+    };
+    let Some(value) = satay.get("treat-error-as-none") else {
+        return Ok(false);
+    };
+    value.as_bool().ok_or_else(|| ValidationError::InvalidBooleanKeyword {
+        context: context.to_owned(),
+        keyword: "treat-error-as-none",
+    })
 }
 
 fn satay_parse_as_wire(parse_as: ParseAs) -> &'static str {
@@ -1911,6 +1932,57 @@ components:
                     field(fields, "estimatedArrival").ty,
                     TypeRef::ParsedString(ParseAs::OffsetDateTime)
                 );
+            }
+            other => panic!("expected Arrival struct, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_x_satay_treat_error_as_none() {
+        let api = parse_valid(
+            r#"
+openapi: 3.0.3
+paths:
+  /arrival:
+    get:
+      operationId: getArrival
+      responses:
+        '200':
+          description: Arrival
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Arrival'
+components:
+  schemas:
+    Arrival:
+      type: object
+      required:
+        - timing
+      properties:
+        timing:
+          $ref: '#/components/schemas/Timing'
+          x-satay:
+            treat-error-as-none: true
+        optionalTiming:
+          $ref: '#/components/schemas/Timing'
+    Timing:
+      type: object
+      required:
+        - value
+      properties:
+        value:
+          type: string
+"#,
+        );
+
+        let arrival = component(&api, "Arrival");
+        match &arrival.kind {
+            ComponentKind::Struct(fields) => {
+                let timing = field(fields, "timing");
+                assert!(timing.treat_error_as_none);
+                let optional_timing = field(fields, "optionalTiming");
+                assert!(!optional_timing.treat_error_as_none);
             }
             other => panic!("expected Arrival struct, got {other:?}"),
         }
