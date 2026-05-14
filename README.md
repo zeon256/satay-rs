@@ -10,7 +10,7 @@ Satay generates typed Rust OpenAPI clients without choosing your HTTP client.
 
 Satay is Sans-IO by design. Generated code builds HTTP requests and decodes HTTP responses, but never sends bytes over the network. Bring your own transport: `reqwest`, `ureq`, `hyper`, tests, WASM, or custom runtime code.
 
-Satay tries to up the ante: instead of dumping plain structs and `String` fields, it generates newtypes that carry validation in their types. String fields with `pattern` constraints become `nutype`-powered types that reject bad values at parse time. Bounded integers get their own wrapper types. If the spec says a value can't exceed 100, the generated type literally won't let you construct a 150. The constraint lives in the type, not in a runtime check you hope somebody remembers.
+Satay tries to up the ante: instead of dumping plain structs and `String` fields, it generates newtypes that carry validation in their types. String fields with `pattern` constraints become `nutype`-powered types that reject bad values at parse time. Bounded integers get their own wrapper types. If the spec says a value can't exceed 100, you can't construct a 150. The constraint is in the type, not a runtime check you hope somebody remembers.
 
 ```bash
 satay generate --input openapi.yaml --output src/generated --rustfmt
@@ -160,7 +160,7 @@ impl GetUserAction<'_> {
 
 ## Current support
 
-Satay currently targets OpenAPI 3.0.x and a deliberately small, typed subset.
+Satay targets OpenAPI 3.0.x and a small, typed subset.
 
 - YAML or JSON OpenAPI documents.
 - `components.schemas` as Rust structs, string enums, primitive aliases, and constrained newtypes.
@@ -204,9 +204,9 @@ regex = "1"
 
 ## Satay Extensions
 
-Satay accepts namespaced OpenAPI vendor extensions under `x-satay` when the OpenAPI shape alone is not enough to produce the Rust type you want.
+Satay accepts OpenAPI vendor extensions under `x-satay` when the spec's shape alone can't produce the Rust type you want.
 
-Use `x-satay.parse-as` on `type: string` schemas when an API sends a value as a JSON string but the generated Rust field should be a stronger type. This steers codegen while preserving the wire format: serde deserializes from a string and serializes back to a string.
+Use `x-satay.parse-as` on `type: string` schemas when an API sends a value as a JSON string but the Rust field should be a stronger type. Serde deserializes from a string and serializes back to a string, so the wire format stays the same.
 
 ```yaml
 BusStopCode:
@@ -229,7 +229,7 @@ Supported `parse-as` values are `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `
 
 ## Action Builders
 
-Generated action builders keep request construction and response decoding Sans-IO while reducing boilerplate:
+Action builders handle request construction and response decoding without IO, with less boilerplate than calling the `_parts` functions directly:
 
 ```rust
 let api = generated::Api::new()
@@ -277,12 +277,12 @@ These are known gaps rather than silent compatibility promises:
 
 ## Roadmap
 
-- Broaden schema coverage: maps, inline objects, composition, and discriminators.
-- Broaden parameter support: header/cookie parameters and OpenAPI style/explode encoding.
-- Broaden body support beyond JSON: form data, multipart, and bytes.
-- Improve reference handling with validated schema references and remote reference loading.
-- Add OpenAPI 3.1 support once the schema subset is explicit and tested.
-- Add first-class examples for common transports while keeping generated clients Sans-IO.
+- Schema coverage: maps, inline objects, composition, and discriminators.
+- Parameter support: header/cookie parameters and OpenAPI style/explode encoding.
+- Body support beyond JSON: form data, multipart, and bytes.
+- Validated schema references and remote reference loading.
+- OpenAPI 3.1 support once the schema subset is explicit and tested.
+- First-class examples for common transports, keeping generated clients Sans-IO.
 
 ## Examples
 
