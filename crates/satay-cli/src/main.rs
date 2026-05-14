@@ -139,6 +139,8 @@ fn generate(input: &Path, output: &Path, rustfmt: bool) -> Result<(), Error> {
 #[instrument(fields(path = %path.display()), err)]
 fn run_rustfmt(path: &Path) -> Result<(), Error> {
     let status = ProcessCommand::new("rustfmt")
+        .arg("--edition")
+        .arg("2024")
         .arg(path)
         .status()
         .map_err(|source| Error::RunRustfmt { source })?;
