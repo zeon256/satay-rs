@@ -36,7 +36,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 arrival.bus_stop_code
             );
             for service in arrival.services.iter().take(8) {
-                println!("{} ({:?}) - Reaching at {:?}", service.service_no, service.operator, service.next_bus);
+                println!(
+                    "{} ({:?}) - Reaching at {:?}",
+                    service.service_no, service.operator, service.next_bus
+                );
             }
         }
         GetBusArrivalResponse::UnexpectedStatus(status, body) => {

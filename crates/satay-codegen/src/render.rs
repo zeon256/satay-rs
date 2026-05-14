@@ -311,7 +311,7 @@ fn build_api_operation_use(api: &Api) -> Option<syn::ItemUse> {
             collect_type_refs(&field.ty, &mut names);
         }
     }
-    names.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+    names.sort_by_key(|a| a.to_string());
     names.dedup();
 
     Some(parse_quote!(use super::{#(#names),*};))
@@ -582,7 +582,7 @@ fn build_json_types_use(api: &Api, operation: &Operation) -> Option<syn::ItemUse
 }
 
 fn build_types_use(api: &Api, mut all_names: Vec<Ident>) -> Option<syn::ItemUse> {
-    all_names.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+    all_names.sort_by_key(|a| a.to_string());
     all_names.dedup();
 
     // Filter: only import names that are in the types module (components and constrained types)
