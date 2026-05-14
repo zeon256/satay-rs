@@ -3,6 +3,8 @@
 use http::header::{self, CONTENT_TYPE, HeaderName, HeaderValue};
 #[cfg(feature = "json")]
 use serde::de;
+pub use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use tracing::{debug, instrument};
 
@@ -163,6 +165,211 @@ pub fn append_query_pair(out: &mut String, first: &mut bool, key: &str, value: &
     append_percent_encoded(out, value.as_bytes());
 }
 
+pub fn format_offset_datetime(value: &OffsetDateTime) -> String {
+    value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
+}
+
+#[cfg(feature = "serde")]
+pub mod serde_string {
+    use std::fmt;
+    use std::str::FromStr;
+
+    use serde::Deserialize;
+    use serde::de;
+    use time::format_description::well_known::Rfc3339;
+
+    use crate::OffsetDateTime;
+
+    macro_rules! string_from_str_module {
+        ($module:ident, $ty:ty) => {
+            pub mod $module {
+                pub fn serialize<S>(value: &$ty, serializer: S) -> Result<S::Ok, S::Error>
+                where
+                    S: serde::Serializer,
+                {
+                    super::serialize_display(value, serializer)
+                }
+
+                pub fn deserialize<'de, D>(deserializer: D) -> Result<$ty, D::Error>
+                where
+                    D: serde::Deserializer<'de>,
+                {
+                    super::deserialize_from_str(deserializer)
+                }
+
+                pub mod option {
+                    pub fn serialize<S>(
+                        value: &Option<$ty>,
+                        serializer: S,
+                    ) -> Result<S::Ok, S::Error>
+                    where
+                        S: serde::Serializer,
+                    {
+                        super::super::serialize_option_display(value, serializer)
+                    }
+
+                    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<$ty>, D::Error>
+                    where
+                        D: serde::Deserializer<'de>,
+                    {
+                        super::super::deserialize_option_from_str(deserializer)
+                    }
+                }
+            }
+        };
+    }
+
+    macro_rules! string_float_module {
+        ($module:ident, $ty:ty) => {
+            pub mod $module {
+                pub fn serialize<S>(value: &$ty, serializer: S) -> Result<S::Ok, S::Error>
+                where
+                    S: serde::Serializer,
+                {
+                    super::serialize_display(value, serializer)
+                }
+
+                pub fn deserialize<'de, D>(deserializer: D) -> Result<$ty, D::Error>
+                where
+                    D: serde::Deserializer<'de>,
+                {
+                    let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+                    fast_float::parse::<$ty, _>(&value).map_err(serde::de::Error::custom)
+                }
+
+                pub mod option {
+                    pub fn serialize<S>(
+                        value: &Option<$ty>,
+                        serializer: S,
+                    ) -> Result<S::Ok, S::Error>
+                    where
+                        S: serde::Serializer,
+                    {
+                        super::super::serialize_option_display(value, serializer)
+                    }
+
+                    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<$ty>, D::Error>
+                    where
+                        D: serde::Deserializer<'de>,
+                    {
+                        let value =
+                            <Option<String> as serde::Deserialize>::deserialize(deserializer)?;
+                        value
+                            .map(|value| {
+                                fast_float::parse::<$ty, _>(&value)
+                                    .map_err(serde::de::Error::custom)
+                            })
+                            .transpose()
+                    }
+                }
+            }
+        };
+    }
+
+    string_from_str_module!(as_u8, u8);
+    string_from_str_module!(as_u16, u16);
+    string_from_str_module!(as_u32, u32);
+    string_from_str_module!(as_u64, u64);
+    string_from_str_module!(as_i8, i8);
+    string_from_str_module!(as_i16, i16);
+    string_from_str_module!(as_i32, i32);
+    string_from_str_module!(as_i64, i64);
+    string_float_module!(as_f32, f32);
+    string_float_module!(as_f64, f64);
+
+    pub mod as_offset_datetime {
+        use serde::ser;
+
+        use super::*;
+
+        pub fn serialize<S>(value: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            let value = value.format(&Rfc3339).map_err(ser::Error::custom)?;
+            serializer.serialize_str(&value)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+            OffsetDateTime::parse(&value, &Rfc3339).map_err(serde::de::Error::custom)
+        }
+
+        pub mod option {
+            use super::*;
+
+            pub fn serialize<S>(
+                value: &Option<OffsetDateTime>,
+                serializer: S,
+            ) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                match value {
+                    Some(value) => super::serialize(value, serializer),
+                    None => serializer.serialize_none(),
+                }
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<OffsetDateTime>, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let value = <Option<String> as serde::Deserialize>::deserialize(deserializer)?;
+                value
+                    .map(|value| {
+                        OffsetDateTime::parse(&value, &Rfc3339).map_err(serde::de::Error::custom)
+                    })
+                    .transpose()
+            }
+        }
+    }
+
+    fn serialize_display<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        T: fmt::Display,
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&value.to_string())
+    }
+
+    fn serialize_option_display<T, S>(value: &Option<T>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        T: fmt::Display,
+        S: serde::Serializer,
+    {
+        match value {
+            Some(value) => serialize_display(value, serializer),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    fn deserialize_from_str<'de, T, D>(deserializer: D) -> Result<T, D::Error>
+    where
+        T: FromStr,
+        T::Err: fmt::Display,
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        value.parse::<T>().map_err(de::Error::custom)
+    }
+
+    fn deserialize_option_from_str<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
+    where
+        T: FromStr,
+        T::Err: fmt::Display,
+        D: serde::Deserializer<'de>,
+    {
+        let value = Option::<String>::deserialize(deserializer)?;
+        value
+            .map(|value| value.parse::<T>().map_err(de::Error::custom))
+            .transpose()
+    }
+}
+
 pub fn insert_header(
     headers: &mut http::HeaderMap,
     name: &'static str,
@@ -265,10 +472,7 @@ mod tests {
             body,
         };
         assert_eq!(parts.status, http::StatusCode::OK);
-        assert_eq!(
-            parts.headers.get(CONTENT_TYPE).unwrap(),
-            "application/json"
-        );
+        assert_eq!(parts.headers.get(CONTENT_TYPE).unwrap(), "application/json");
         assert_eq!(parts.body, br#"{"ok":true}"#);
     }
 }

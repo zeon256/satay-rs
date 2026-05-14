@@ -9,7 +9,8 @@ use crate::ident::{
 use crate::model::{
     Api, ApiKeyLocation, ApiKeySecurityScheme, Component, ComponentKind, ConstrainedType,
     EnumVariant, Field, FloatLimit, HttpMethod, IntegerLimit, Operation, Parameter,
-    ParameterLocation, PathSegment, RequestBody, ResponseCase, TypeRef, Validation, is_array_type,
+    ParameterLocation, ParseAs, PathSegment, RequestBody, ResponseCase, TypeRef, Validation,
+    is_array_type,
 };
 
 pub(crate) fn parse_api(document: &Value) -> Result<Api, ValidationError> {
@@ -393,6 +394,18 @@ fn parse_type_ref_base(
     registry: &mut TypeRegistry,
     type_name_hint: Option<&str>,
 ) -> Result<TypeRef, ValidationError> {
+    if let Some(parse_as) = parse_satay_parse_as(schema, context)? {
+        let schema_type = schema.get("type").and_then(Value::as_str);
+        if schema_type != Some("string") {
+            return Err(ValidationError::SatayParseAsRequiresString {
+                context: context.to_owned(),
+                parse_as: satay_parse_as_wire(parse_as).to_owned(),
+                kind: schema_type.unwrap_or("missing").to_owned(),
+            });
+        }
+        return Ok(TypeRef::ParsedString(parse_as));
+    }
+
     if schema.contains_key("enum") {
         let mut variants = parse_string_enum(schema, context)?;
         variants.retain(|v| !v.wire_name.is_empty());
@@ -464,9 +477,50 @@ fn parse_validation(
         TypeRef::I32 | TypeRef::I64 => parse_integer_validation(schema, base, context),
         TypeRef::F32 | TypeRef::F64 => parse_number_validation(schema, base, context),
         TypeRef::Array(_) => parse_array_validation(schema, context),
-        TypeRef::Bool | TypeRef::Named(_) | TypeRef::Constrained { .. } | TypeRef::Nullable(_) => {
-            Ok(None)
-        }
+        TypeRef::ParsedString(_)
+        | TypeRef::Bool
+        | TypeRef::Named(_)
+        | TypeRef::Constrained { .. }
+        | TypeRef::Nullable(_) => Ok(None),
+    }
+}
+
+fn parse_satay_parse_as(
+    schema: &Map<String, Value>,
+    context: &str,
+) -> Result<Option<ParseAs>, ValidationError> {
+    let Some(satay) = optional_object(schema, "x-satay", context)? else {
+        return Ok(None);
+    };
+    let Some(value) = satay.get("parse-as") else {
+        return Ok(None);
+    };
+    let Some(value) = value.as_str() else {
+        return Err(ValidationError::InvalidSatayParseAs {
+            context: context.to_owned(),
+        });
+    };
+    ParseAs::from_wire(value)
+        .map(Some)
+        .ok_or_else(|| ValidationError::UnsupportedSatayParseAs {
+            context: context.to_owned(),
+            parse_as: value.to_owned(),
+        })
+}
+
+fn satay_parse_as_wire(parse_as: ParseAs) -> &'static str {
+    match parse_as {
+        ParseAs::U8 => "u8",
+        ParseAs::U16 => "u16",
+        ParseAs::U32 => "u32",
+        ParseAs::U64 => "u64",
+        ParseAs::I8 => "i8",
+        ParseAs::I16 => "i16",
+        ParseAs::I32 => "i32",
+        ParseAs::I64 => "i64",
+        ParseAs::F32 => "f32",
+        ParseAs::F64 => "f64",
+        ParseAs::OffsetDateTime => "offset-datetime",
     }
 }
 
@@ -1789,6 +1843,76 @@ components:
                 }
             }
             other => panic!("expected constrained tag parameter, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_x_satay_parse_as_for_string_schemas() {
+        let api = parse_valid(
+            r#"
+openapi: 3.0.3
+paths:
+  /arrival:
+    get:
+      operationId: getArrival
+      responses:
+        '200':
+          description: Arrival
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Arrival'
+components:
+  schemas:
+    Arrival:
+      type: object
+      required:
+        - stop
+        - latitude
+        - visit
+        - estimatedArrival
+      properties:
+        stop:
+          type: string
+          minLength: 1
+          x-satay:
+            parse-as: u32
+        latitude:
+          type: string
+          x-satay:
+            parse-as: f64
+        visit:
+          type: string
+          x-satay:
+            parse-as: u8
+        estimatedArrival:
+          type: string
+          x-satay:
+            parse-as: offset-datetime
+"#,
+        );
+
+        let arrival = component(&api, "Arrival");
+        match &arrival.kind {
+            ComponentKind::Struct(fields) => {
+                assert_eq!(
+                    field(fields, "stop").ty,
+                    TypeRef::ParsedString(ParseAs::U32)
+                );
+                assert_eq!(
+                    field(fields, "latitude").ty,
+                    TypeRef::ParsedString(ParseAs::F64)
+                );
+                assert_eq!(
+                    field(fields, "visit").ty,
+                    TypeRef::ParsedString(ParseAs::U8)
+                );
+                assert_eq!(
+                    field(fields, "estimatedArrival").ty,
+                    TypeRef::ParsedString(ParseAs::OffsetDateTime)
+                );
+            }
+            other => panic!("expected Arrival struct, got {other:?}"),
         }
     }
 

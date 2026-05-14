@@ -493,6 +493,148 @@ mod tests {
 }
 
 #[test]
+fn x_satay_parse_as_generates_string_backed_deserializers() {
+    let files = satay_codegen::generate(
+        r#"
+openapi: 3.0.3
+paths:
+  /readings:
+    get:
+      operationId: getReading
+      responses:
+        '200':
+          description: Reading
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reading'
+components:
+  schemas:
+    Reading:
+      type: object
+      required:
+        - id
+        - value
+        - count
+        - seenAt
+      properties:
+        id:
+          type: string
+          x-satay:
+            parse-as: u32
+        value:
+          type: string
+          x-satay:
+            parse-as: f64
+        count:
+          type: string
+          x-satay:
+            parse-as: u8
+        seenAt:
+          type: string
+          x-satay:
+            parse-as: offset-datetime
+"#,
+    )
+    .expect("generate parse-as fixture");
+
+    let types_rs = find_file(&files, "types.rs");
+    assert!(types_rs.contents.contains("pub id: u32"));
+    assert!(types_rs.contents.contains("pub value: f64"));
+    assert!(types_rs.contents.contains("pub count: u8"));
+    assert!(
+        types_rs
+            .contents
+            .contains("pub seen_at: satay_runtime::OffsetDateTime")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("with = \"satay_runtime::serde_string::as_u32\"")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("with = \"satay_runtime::serde_string::as_f64\"")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("with = \"satay_runtime::serde_string::as_offset_datetime\"")
+    );
+
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+
+    let runtime_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("codegen crate has parent")
+        .join("satay-runtime");
+    let runtime_path = toml_string(&runtime_path.to_string_lossy());
+
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::*;
+
+    #[test]
+    fn decodes_and_encodes_string_backed_values() {
+        let response = satay_runtime::ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: br#"{"id":"42","value":"1.25","count":"7","seenAt":"2024-08-14T16:41:48+08:00"}"#
+                .to_vec(),
+        };
+        let decoded = decode_get_reading_response(response).expect("decoded response");
+
+        match decoded {
+            GetReadingResponse::Ok(reading) => {
+                assert_eq!(reading.id, 42);
+                assert_eq!(reading.value, 1.25);
+                assert_eq!(reading.count, 7);
+                assert_eq!(reading.seen_at.offset().whole_hours(), 8);
+
+                let encoded = serde_json::to_value(&reading).unwrap();
+                assert_eq!(
+                    encoded,
+                    serde_json::json!({
+                        "id": "42",
+                        "value": "1.25",
+                        "count": "7",
+                        "seenAt": "2024-08-14T16:41:48+08:00"
+                    })
+                );
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+}
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
+    let output = process::Command::new(&cargo)
+        .arg("test")
+        .arg("--quiet")
+        .current_dir(crate_dir)
+        .output()
+        .expect("run cargo test for parse-as generated crate");
+
+    if !output.status.success() {
+        panic!(
+            "parse-as generated crate tests failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
 fn nullable_parameters_are_rejected_instead_of_generating_invalid_rust() {
     let err = satay_codegen::generate(
         r#"

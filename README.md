@@ -38,6 +38,7 @@ Satay currently targets OpenAPI 3.0.x and a deliberately small, typed subset.
 - Repeated query parameters for array query values.
 - Optional fields and optional request bodies.
 - `serde` derives and field renames behind the generated crate's `serde` feature.
+- Satay-specific `x-satay.parse-as` hints for string fields whose wire values should become stronger Rust types.
 - Validation constraints rendered through `nutype` for:
   - string `minLength` / `maxLength`
   - string `pattern` (via `nutype`'s `regex` validator)
@@ -58,6 +59,31 @@ regex = "1"
 ```
 
 > **Note:** OpenAPI `pattern` uses ECMA-262 (JavaScript) regex syntax, while `nutype` uses the Rust `regex` crate. Most common patterns (character classes, quantifiers, anchors) are compatible. However, ECMA features like lookahead, lookbehind, and backreferences are not supported by the Rust `regex` engine and will cause a compile error in the generated code.
+
+## Satay Extensions
+
+Satay accepts namespaced OpenAPI vendor extensions under `x-satay` when the OpenAPI shape alone is not enough to produce the Rust type you want.
+
+Use `x-satay.parse-as` on `type: string` schemas when an API sends a value as a JSON string but the generated Rust field should be a stronger type. This steers codegen while preserving the wire format: serde deserializes from a string and serializes back to a string.
+
+```yaml
+BusStopCode:
+  type: string
+  x-satay:
+    parse-as: u32
+
+Latitude:
+  type: string
+  x-satay:
+    parse-as: f64
+
+EstimatedArrival:
+  type: string
+  x-satay:
+    parse-as: offset-datetime
+```
+
+Supported `parse-as` values are `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, and `offset-datetime`. Float parsing uses `fast-float`; `offset-datetime` generates `satay_runtime::OffsetDateTime`.
 
 ## Action Builders
 

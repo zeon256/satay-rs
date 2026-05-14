@@ -85,6 +85,30 @@ pub enum ValidationError {
     #[error("{context} uses unsupported number format `{format}`")]
     UnsupportedNumberFormat { context: String, format: String },
 
+    /// An `x-satay.parse-as` value is not a supported target type.
+    ///
+    /// Error message: `{context} uses unsupported x-satay.parse-as `{parse_as}``
+    #[error("{context} uses unsupported x-satay.parse-as `{parse_as}`")]
+    UnsupportedSatayParseAs { context: String, parse_as: String },
+
+    /// An `x-satay.parse-as` value is not a string.
+    ///
+    /// Error message: `{context}.x-satay.parse-as must be a string`
+    #[error("{context}.x-satay.parse-as must be a string")]
+    InvalidSatayParseAs { context: String },
+
+    /// `x-satay.parse-as` was applied to a non-string schema.
+    ///
+    /// Error message: `{context} uses x-satay.parse-as `{parse_as}` on `{kind}`; only string schemas can be parsed as another Rust type`
+    #[error(
+        "{context} uses x-satay.parse-as `{parse_as}` on `{kind}`; only string schemas can be parsed as another Rust type"
+    )]
+    SatayParseAsRequiresString {
+        context: String,
+        parse_as: String,
+        kind: String,
+    },
+
     /// An array schema is missing the required `items` field.
     ///
     /// Error message: `{context} array schema must declare `items``

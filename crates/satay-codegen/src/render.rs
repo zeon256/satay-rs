@@ -6,7 +6,7 @@ use syn::{Ident, Item, LitStr, parse_quote};
 use crate::ident::type_ident;
 use crate::model::{
     Api, ApiKeyLocation, ApiKeySecurityScheme, Component, ComponentKind, ConstrainedType,
-    EnumVariant, Field, FloatLimit, IntegerLimit, Operation, Parameter, ParameterLocation,
+    EnumVariant, Field, FloatLimit, IntegerLimit, Operation, Parameter, ParameterLocation, ParseAs,
     PathSegment, ResponseCase, TypeRef, Validation, is_array_type,
 };
 
@@ -191,9 +191,15 @@ fn render_top_mod(api: &Api) -> syn::File {
 
 fn render_types_file(api: &Api) -> syn::File {
     let mut items = Vec::new();
-    items.push(parse_quote!(
-        use std::fmt;
-    ));
+    if api
+        .components
+        .iter()
+        .any(|component| matches!(component.kind, ComponentKind::Enum(_)))
+    {
+        items.push(parse_quote!(
+            use std::fmt;
+        ));
+    }
     for component in &api.components {
         render_component(component, &mut items);
     }
@@ -606,6 +612,7 @@ fn collect_type_refs(ty: &TypeRef, names: &mut Vec<Ident>) {
         TypeRef::Array(inner) => collect_type_refs(inner, names),
         TypeRef::Nullable(inner) => collect_type_refs(inner, names),
         TypeRef::String
+        | TypeRef::ParsedString(_)
         | TypeRef::I32
         | TypeRef::I64
         | TypeRef::F32
@@ -859,6 +866,9 @@ fn field_attrs(field: &Field, serde: bool) -> Vec<syn::Attribute> {
         let wire_name = lit_str(&field.wire_name);
         serde_attrs.push(quote!(rename = #wire_name));
     }
+    if let Some(module) = parsed_string_serde_module(field) {
+        serde_attrs.push(quote!(with = #module));
+    }
     if !field.required {
         serde_attrs.push(quote!(default));
         serde_attrs.push(quote!(skip_serializing_if = "Option::is_none"));
@@ -868,6 +878,17 @@ fn field_attrs(field: &Field, serde: bool) -> Vec<syn::Attribute> {
     } else {
         vec![parse_quote!(#[cfg_attr(feature = "serde", serde(#(#serde_attrs),*))])]
     }
+}
+
+fn parsed_string_serde_module(field: &Field) -> Option<LitStr> {
+    let parse_as = parsed_string_type(field.ty.non_nullable())?;
+    let module = parse_as_serde_module(parse_as);
+    let module = if !field.required || field.ty.is_nullable() {
+        format!("{module}::option")
+    } else {
+        module.to_owned()
+    };
+    Some(lit_str(&module))
 }
 
 fn render_enum(name: &str, variants: &[EnumVariant]) -> Vec<syn::Item> {
@@ -1374,6 +1395,7 @@ fn operation_uses_input(operation: &Operation) -> bool {
 fn value_expr(base: syn::Expr, ty: &TypeRef) -> syn::Expr {
     match ty.non_nullable() {
         TypeRef::String => parse_quote!(#base.as_str()),
+        TypeRef::ParsedString(parse_as) => parsed_string_value_expr(base, *parse_as),
         TypeRef::Named(_) => parse_quote!(#base.as_ref()),
         TypeRef::Constrained { inner, .. } => constrained_value_expr(base, inner.non_nullable()),
         TypeRef::I32 | TypeRef::I64 | TypeRef::F32 | TypeRef::F64 | TypeRef::Bool => {
@@ -1386,6 +1408,7 @@ fn value_expr(base: syn::Expr, ty: &TypeRef) -> syn::Expr {
 fn constrained_value_expr(base: syn::Expr, inner: &TypeRef) -> syn::Expr {
     match inner {
         TypeRef::String | TypeRef::Named(_) => parse_quote!(#base.as_ref()),
+        TypeRef::ParsedString(parse_as) => parsed_string_value_expr(base, *parse_as),
         TypeRef::I32 | TypeRef::I64 | TypeRef::F32 | TypeRef::F64 | TypeRef::Bool => {
             parse_quote!(&#base.to_string())
         }
@@ -1398,6 +1421,7 @@ fn constrained_value_expr(base: syn::Expr, inner: &TypeRef) -> syn::Expr {
 fn rust_type(ty: &TypeRef) -> syn::Type {
     match ty {
         TypeRef::String => parse_quote!(String),
+        TypeRef::ParsedString(parse_as) => parse_as_rust_type(*parse_as),
         TypeRef::I32 => parse_quote!(i32),
         TypeRef::I64 => parse_quote!(i64),
         TypeRef::F32 => parse_quote!(f32),
@@ -1418,6 +1442,61 @@ fn rust_type(ty: &TypeRef) -> syn::Type {
             let inner = rust_type(inner);
             parse_quote!(Option<#inner>)
         }
+    }
+}
+
+fn parsed_string_type(ty: &TypeRef) -> Option<ParseAs> {
+    match ty {
+        TypeRef::ParsedString(parse_as) => Some(*parse_as),
+        _ => None,
+    }
+}
+
+fn parsed_string_value_expr(base: syn::Expr, parse_as: ParseAs) -> syn::Expr {
+    match parse_as {
+        ParseAs::OffsetDateTime => parse_quote!(&satay_runtime::format_offset_datetime(&#base)),
+        ParseAs::U8
+        | ParseAs::U16
+        | ParseAs::U32
+        | ParseAs::U64
+        | ParseAs::I8
+        | ParseAs::I16
+        | ParseAs::I32
+        | ParseAs::I64
+        | ParseAs::F32
+        | ParseAs::F64 => parse_quote!(&#base.to_string()),
+    }
+}
+
+fn parse_as_rust_type(parse_as: ParseAs) -> syn::Type {
+    match parse_as {
+        ParseAs::U8 => parse_quote!(u8),
+        ParseAs::U16 => parse_quote!(u16),
+        ParseAs::U32 => parse_quote!(u32),
+        ParseAs::U64 => parse_quote!(u64),
+        ParseAs::I8 => parse_quote!(i8),
+        ParseAs::I16 => parse_quote!(i16),
+        ParseAs::I32 => parse_quote!(i32),
+        ParseAs::I64 => parse_quote!(i64),
+        ParseAs::F32 => parse_quote!(f32),
+        ParseAs::F64 => parse_quote!(f64),
+        ParseAs::OffsetDateTime => parse_quote!(satay_runtime::OffsetDateTime),
+    }
+}
+
+fn parse_as_serde_module(parse_as: ParseAs) -> &'static str {
+    match parse_as {
+        ParseAs::U8 => "satay_runtime::serde_string::as_u8",
+        ParseAs::U16 => "satay_runtime::serde_string::as_u16",
+        ParseAs::U32 => "satay_runtime::serde_string::as_u32",
+        ParseAs::U64 => "satay_runtime::serde_string::as_u64",
+        ParseAs::I8 => "satay_runtime::serde_string::as_i8",
+        ParseAs::I16 => "satay_runtime::serde_string::as_i16",
+        ParseAs::I32 => "satay_runtime::serde_string::as_i32",
+        ParseAs::I64 => "satay_runtime::serde_string::as_i64",
+        ParseAs::F32 => "satay_runtime::serde_string::as_f32",
+        ParseAs::F64 => "satay_runtime::serde_string::as_f64",
+        ParseAs::OffsetDateTime => "satay_runtime::serde_string::as_offset_datetime",
     }
 }
 
@@ -1534,12 +1613,8 @@ mod tests {
         };
 
         let file = render_types_file(&api);
-        assert_eq!(file.items.len(), 2);
-        let Item::Use(use_item) = &file.items[0] else {
-            panic!("expected use item");
-        };
-        let _ = use_item;
-        let Item::Struct(item) = &file.items[1] else {
+        assert_eq!(file.items.len(), 1);
+        let Item::Struct(item) = &file.items[0] else {
             panic!("expected struct item");
         };
         assert_eq!(item.ident, "Pet");
