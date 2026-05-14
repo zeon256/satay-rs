@@ -1297,3 +1297,524 @@ fn ends_with_ignore_ascii_case(value: &str, suffix: &str) -> bool {
     let suffix = suffix.as_bytes();
     value.len() >= suffix.len() && value[value.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_valid(spec: &str) -> Api {
+        let document = parse_document(spec).expect("document parses");
+        parse_api(&document).expect("OpenAPI validates")
+    }
+
+    fn parse_invalid(spec: &str) -> ValidationError {
+        let document = parse_document(spec).expect("document parses");
+        parse_api(&document).expect_err("OpenAPI must be rejected")
+    }
+
+    fn component<'a>(api: &'a Api, rust_name: &str) -> &'a Component {
+        api.components
+            .iter()
+            .find(|component| component.rust_name == rust_name)
+            .unwrap_or_else(|| panic!("missing component {rust_name}"))
+    }
+
+    fn field<'a>(fields: &'a [Field], wire_name: &str) -> &'a Field {
+        fields
+            .iter()
+            .find(|field| field.wire_name == wire_name)
+            .unwrap_or_else(|| panic!("missing field {wire_name}"))
+    }
+
+    fn parameter<'a>(operation: &'a Operation, wire_name: &str) -> &'a Parameter {
+        operation
+            .parameters
+            .iter()
+            .find(|parameter| parameter.wire_name == wire_name)
+            .unwrap_or_else(|| panic!("missing parameter {wire_name}"))
+    }
+
+    fn assert_literal_segment(segment: &PathSegment, expected: &str) {
+        match segment {
+            PathSegment::Literal(actual) => assert_eq!(actual, expected),
+            other => panic!("expected literal path segment {expected:?}, got {other:?}"),
+        }
+    }
+
+    fn assert_parameter_segment(segment: &PathSegment, expected: &str) {
+        match segment {
+            PathSegment::Parameter(actual) => assert_eq!(actual, expected),
+            other => panic!("expected parameter path segment {expected:?}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_components_operations_and_json_media_types_into_ir() {
+        let api = parse_valid(
+            r#"
+openapi: 3.0.3
+paths:
+  /users/{userId}:
+    parameters:
+      - name: userId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: body
+        in: query
+        schema:
+          type: boolean
+    get:
+      operationId: getUser
+      parameters:
+        - name: body
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+        - name: includeDetails
+          in: query
+          required: true
+          schema:
+            type: boolean
+      requestBody:
+        required: true
+        content:
+          application/vnd.acme.user+json; charset=utf-8:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '404':
+          description: Missing
+        '200':
+          description: Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+components:
+  schemas:
+    UpdateUserRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+    User:
+      type: object
+      required:
+        - id
+        - status
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum:
+            - active
+            - suspended
+        age:
+          type: integer
+          format: int64
+"#,
+        );
+
+        assert_eq!(api.components.len(), 2);
+        assert!(api.constrained_types.is_empty());
+
+        let update_user_request = component(&api, "UpdateUserRequest");
+        match &update_user_request.kind {
+            ComponentKind::Struct(fields) => {
+                assert_eq!(fields.len(), 1);
+                let name = field(fields, "name");
+                assert_eq!(name.rust_name, "name");
+                assert_eq!(name.ty, TypeRef::String);
+                assert!(name.required);
+            }
+            other => panic!("expected UpdateUserRequest struct, got {other:?}"),
+        }
+
+        let user = component(&api, "User");
+        match &user.kind {
+            ComponentKind::Struct(fields) => {
+                assert_eq!(fields.len(), 3);
+
+                let id = field(fields, "id");
+                assert_eq!(id.ty, TypeRef::String);
+                assert!(id.required);
+
+                let status = field(fields, "status");
+                assert_eq!(status.ty, TypeRef::String);
+                assert!(status.required);
+
+                let age = field(fields, "age");
+                assert_eq!(age.ty, TypeRef::I64);
+                assert!(!age.required);
+            }
+            other => panic!("expected User struct, got {other:?}"),
+        }
+
+        assert_eq!(api.operations.len(), 1);
+        let operation = &api.operations[0];
+        assert_eq!(operation.fn_name, "get_user");
+        assert_eq!(operation.input_name, "GetUserInput");
+        assert_eq!(operation.response_name, "GetUserResponse");
+        assert_eq!(operation.method, HttpMethod::Get);
+        assert_eq!(operation.path, "/users/{userId}");
+        assert_eq!(operation.path_segments.len(), 2);
+        assert_literal_segment(&operation.path_segments[0], "/users/");
+        assert_parameter_segment(&operation.path_segments[1], "userId");
+
+        assert_eq!(operation.parameters.len(), 3);
+        let user_id = parameter(operation, "userId");
+        assert_eq!(user_id.location, ParameterLocation::Path);
+        assert_eq!(user_id.rust_name, "user_id");
+        assert_eq!(user_id.ty, TypeRef::String);
+        assert!(user_id.required);
+
+        let body = parameter(operation, "body");
+        assert_eq!(body.location, ParameterLocation::Query);
+        assert_eq!(body.rust_name, "body");
+        assert_eq!(body.ty, TypeRef::I32);
+        assert!(!body.required);
+
+        let include_details = parameter(operation, "includeDetails");
+        assert_eq!(include_details.location, ParameterLocation::Query);
+        assert_eq!(include_details.rust_name, "include_details");
+        assert_eq!(include_details.ty, TypeRef::Bool);
+        assert!(include_details.required);
+
+        let request_body = operation.request_body.as_ref().expect("request body");
+        assert_eq!(request_body.field_name, "body_2");
+        assert_eq!(
+            request_body.content_type,
+            "application/vnd.acme.user+json; charset=utf-8"
+        );
+        assert_eq!(
+            request_body.ty,
+            TypeRef::Named("UpdateUserRequest".to_owned())
+        );
+        assert!(request_body.required);
+
+        assert_eq!(operation.responses.len(), 2);
+        assert_eq!(operation.responses[0].status, 200);
+        assert_eq!(operation.responses[0].variant_name, "Ok");
+        assert_eq!(
+            operation.responses[0].body,
+            Some(TypeRef::Named("User".to_owned()))
+        );
+        assert_eq!(operation.responses[1].status, 404);
+        assert_eq!(operation.responses[1].variant_name, "NotFound");
+        assert_eq!(operation.responses[1].body, None);
+    }
+
+    #[test]
+    fn lifts_inline_constraints_into_generated_types() {
+        let api = parse_valid(
+            r#"
+openapi: 3.0.3
+paths:
+  /users/{id}:
+    get:
+      operationId: getUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tag
+          in: query
+          schema:
+            type: array
+            minItems: 1
+            items:
+              type: string
+              minLength: 2
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Age:
+      type: integer
+      format: int32
+      minimum: 0
+      maximum: 130
+    DisplayName:
+      type: string
+      nullable: true
+      minLength: 1
+"#,
+        );
+
+        let age = component(&api, "Age");
+        match &age.kind {
+            ComponentKind::Nutype(constrained) => {
+                assert_eq!(constrained.rust_name, "Age");
+                assert_eq!(constrained.inner, TypeRef::I32);
+                match &constrained.validation {
+                    Validation::Integer { minimum, maximum } => {
+                        assert_eq!(
+                            minimum,
+                            &Some(IntegerLimit {
+                                value: 0,
+                                exclusive: false,
+                            })
+                        );
+                        assert_eq!(
+                            maximum,
+                            &Some(IntegerLimit {
+                                value: 130,
+                                exclusive: false,
+                            })
+                        );
+                    }
+                    other => panic!("expected Age integer validation, got {other:?}"),
+                }
+            }
+            other => panic!("expected Age nutype, got {other:?}"),
+        }
+
+        let display_name = component(&api, "DisplayName");
+        match &display_name.kind {
+            ComponentKind::Alias(TypeRef::Nullable(inner)) => match inner.as_ref() {
+                TypeRef::Constrained { rust_name, inner } => {
+                    assert_eq!(rust_name, "DisplayNameValue");
+                    assert_eq!(inner.as_ref(), &TypeRef::String);
+                }
+                other => panic!("expected constrained nullable DisplayName, got {other:?}"),
+            },
+            other => panic!("expected DisplayName nullable alias, got {other:?}"),
+        }
+
+        let generated_names = api
+            .constrained_types
+            .iter()
+            .map(|constrained| constrained.rust_name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            generated_names,
+            [
+                "DisplayNameValue",
+                "GetUserTagParameterItem",
+                "GetUserTagParameter",
+            ]
+        );
+
+        match &api.constrained_types[0].validation {
+            Validation::String {
+                min_length,
+                max_length,
+            } => {
+                assert_eq!(*min_length, Some(1));
+                assert_eq!(*max_length, None);
+            }
+            other => panic!("expected DisplayNameValue string validation, got {other:?}"),
+        }
+
+        match &api.constrained_types[1].validation {
+            Validation::String {
+                min_length,
+                max_length,
+            } => {
+                assert_eq!(*min_length, Some(2));
+                assert_eq!(*max_length, None);
+            }
+            other => panic!("expected tag item string validation, got {other:?}"),
+        }
+
+        match &api.constrained_types[2].validation {
+            Validation::Array {
+                min_items,
+                max_items,
+            } => {
+                assert_eq!(*min_items, Some(1));
+                assert_eq!(*max_items, None);
+            }
+            other => panic!("expected tag array validation, got {other:?}"),
+        }
+
+        let operation = &api.operations[0];
+        let tag = parameter(operation, "tag");
+        match &tag.ty {
+            TypeRef::Constrained { rust_name, inner } => {
+                assert_eq!(rust_name, "GetUserTagParameter");
+                match inner.as_ref() {
+                    TypeRef::Array(item) => match item.as_ref() {
+                        TypeRef::Constrained { rust_name, inner } => {
+                            assert_eq!(rust_name, "GetUserTagParameterItem");
+                            assert_eq!(inner.as_ref(), &TypeRef::String);
+                        }
+                        other => panic!("expected constrained tag item, got {other:?}"),
+                    },
+                    other => panic!("expected constrained tag array, got {other:?}"),
+                }
+            }
+            other => panic!("expected constrained tag parameter, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_validation_bounds_before_rendering() {
+        let err = parse_invalid(
+            r#"
+openapi: 3.0.3
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Broken:
+      type: string
+      minLength: 4
+      maxLength: 2
+"#,
+        );
+        match err {
+            ValidationError::InvalidStringLengthBounds {
+                context,
+                min_length,
+                max_length,
+            } => {
+                assert_eq!(context, "schema `Broken`");
+                assert_eq!(min_length, 4);
+                assert_eq!(max_length, 2);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r#"
+openapi: 3.0.3
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Broken:
+      type: integer
+      format: int32
+      exclusiveMinimum: true
+"#,
+        );
+        match err {
+            ValidationError::ExclusiveLimitRequiresBound {
+                context,
+                exclusive_keyword,
+                keyword,
+            } => {
+                assert_eq!(context, "schema `Broken`");
+                assert_eq!(exclusive_keyword, "exclusiveMinimum");
+                assert_eq!(keyword, "minimum");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r#"
+openapi: 3.0.3
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Broken:
+      type: number
+      minimum: 5
+      maximum: 5
+      exclusiveMinimum: true
+      exclusiveMaximum: true
+"#,
+        );
+        match err {
+            ValidationError::EmptyNumberBounds { context } => {
+                assert_eq!(context, "schema `Broken`");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn reports_reference_and_path_validation_errors() {
+        let err = parse_invalid(
+            r#"
+openapi: 3.0.3
+paths:
+  /users/{userId}:
+    get:
+      operationId: getUser
+      parameters:
+        - name: accountId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: No content
+"#,
+        );
+        match err {
+            ValidationError::UndeclaredPathParameter { path, name } => {
+                assert_eq!(path, "/users/{userId}");
+                assert_eq!(name, "userId");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r##"
+openapi: 3.0.3
+paths:
+  /users/{id}:
+    get:
+      operationId: getUser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/Missing'
+      responses:
+        '204':
+          description: No content
+components:
+  parameters: {}
+"##,
+        );
+        match err {
+            ValidationError::ResolveReference {
+                reference,
+                context,
+                source,
+            } => {
+                assert_eq!(reference, "#/components/parameters/Missing");
+                assert_eq!(context, "operation `getUser` parameters");
+                match *source {
+                    ValidationError::MissingJsonPointerToken { token } => {
+                        assert_eq!(token, "Missing");
+                    }
+                    other => panic!("unexpected reference source: {other}"),
+                }
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+}
