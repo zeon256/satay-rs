@@ -24,12 +24,16 @@ Satay currently targets OpenAPI 3.0.x and a deliberately small, typed subset.
 - `components.schemas` as Rust structs, string enums, primitive aliases, and constrained newtypes.
 - Schema types: `string`, `integer` (`int32`, `int64`, or no format), `number` (`float`, `double`, or no format), `boolean`, arrays, nullable values, and local `#/components/schemas/...` references.
 - Operations for standard HTTP methods with explicit `operationId`, or inferred names from method + path.
-- Path and query parameters declared with `schema`.
+- Path, query, and header parameters declared with `schema`.
 - Path-level parameters with operation-level overrides.
 - JSON request bodies using `application/json` or structured JSON media types such as `application/problem+json`.
 - Generated `<operation>_parts` functions that return `satay_runtime::RequestParts<B>` without requiring an HTTP client.
+- Generated input constructors and chainable setters for optional operation inputs.
+- Generated `SERVER_URL` from the first OpenAPI `servers` entry.
 - Generated `encode_<operation>` helpers, behind the generated crate's `json` feature, that produce `http::Request<Vec<u8>>`.
 - Generated `decode_<operation>_response` helpers, behind the generated crate's `json` feature, that decode known JSON responses and preserve unknown statuses as `UnexpectedStatus(http::StatusCode, Vec<u8>)`.
+- Generated `ApiClient`, behind the generated crate's `json` and `reqwest` features, for projects that want a ready-to-use `reqwest` transport.
+- Header and query `apiKey` security schemes for the generated `ApiClient`.
 - Percent-encoded path and query values.
 - Repeated query parameters for array query values.
 - Optional fields and optional request bodies.
@@ -55,14 +59,40 @@ regex = "1"
 
 > **Note:** OpenAPI `pattern` uses ECMA-262 (JavaScript) regex syntax, while `nutype` uses the Rust `regex` crate. Most common patterns (character classes, quantifiers, anchors) are compatible. However, ECMA features like lookahead, lookbehind, and backreferences are not supported by the Rust `regex` engine and will cause a compile error in the generated code.
 
+## Optional reqwest client
+
+Satay remains Sans-IO by default. To compile the generated `ApiClient`, define a `reqwest` feature in the crate that includes generated code:
+
+```toml
+[features]
+default = ["serde", "json"]
+serde = ["dep:serde", "satay-runtime/serde"]
+json = ["serde", "dep:serde_json", "satay-runtime/json"]
+reqwest = ["json", "dep:reqwest"]
+
+[dependencies]
+reqwest = { version = "0.12", optional = true, default-features = false, features = ["rustls-tls"] }
+```
+
+The client uses generated input builders and still returns the generated response enum:
+
+```rust
+let api = generated::ApiClient::new(reqwest::Client::new())
+    .account_key(std::env::var("LTA_ACCOUNT_KEY")?);
+
+let response = api
+    .get_bus_arrival(GetBusArrivalInput::new("83139"))
+    .await?;
+```
+
 ## Not supported yet
 
 These are known gaps rather than silent compatibility promises:
 
 - OpenAPI 3.1.
 - Remote or file `$ref`s.
-- Built-in HTTP transport, retries, authentication, or server/base-URL selection.
-- Header and cookie parameters.
+- Retries, non-API-key authentication, server variables, or automatic server selection beyond the first `servers` entry.
+- Cookie parameters.
 - `content` parameters; parameters must use `schema`.
 - Nullable parameters.
 - Array path parameters and OpenAPI parameter style/explode variants beyond repeated query pairs.

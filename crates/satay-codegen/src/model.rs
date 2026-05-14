@@ -1,8 +1,23 @@
 #[derive(Debug)]
 pub(crate) struct Api {
+    pub(crate) server_url: String,
+    pub(crate) api_key_security_schemes: Vec<ApiKeySecurityScheme>,
     pub(crate) components: Vec<Component>,
     pub(crate) constrained_types: Vec<ConstrainedType>,
     pub(crate) operations: Vec<Operation>,
+}
+
+#[derive(Debug)]
+pub(crate) struct ApiKeySecurityScheme {
+    pub(crate) location: ApiKeyLocation,
+    pub(crate) wire_name: String,
+    pub(crate) rust_name: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ApiKeyLocation {
+    Header,
+    Query,
 }
 
 #[derive(Debug)]

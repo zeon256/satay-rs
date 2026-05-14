@@ -6,7 +6,6 @@
 #[non_exhaustive]
 pub enum ValidationError {
     // -- Document and component shape validation --
-
     /// The OpenAPI version is not supported.
     ///
     /// Error message: `unsupported OpenAPI version `{version}`; Satay MVP supports OpenAPI 3.0`
@@ -38,7 +37,6 @@ pub enum ValidationError {
     MissingPaths,
 
     // -- Enum and schema type validation --
-
     /// A schema uses an enum with a non-string type.
     ///
     /// Error message: `{context} uses enum type `{kind}`; only string enums are supported`
@@ -127,7 +125,6 @@ pub enum ValidationError {
     },
 
     // -- Schema constraint validation --
-
     /// A string schema specifies a `minLength` greater than its `maxLength`.
     ///
     /// Error message: `{context} has minLength {min_length} greater than maxLength {max_length}`
@@ -233,7 +230,6 @@ pub enum ValidationError {
     EmptyNumberBounds { context: String },
 
     // -- Operation, parameter, and response validation --
-
     /// An operation does not declare any responses.
     ///
     /// Error message: `operation `{operation_id}` must declare responses`
@@ -367,7 +363,6 @@ pub enum ValidationError {
     UnusedPathParameter { path: String, name: String },
 
     // -- Reference resolution and JSON shape validation --
-
     /// A `$ref` could not be resolved because the referenced component failed validation.
     ///
     /// Error message: `failed to resolve reference `{reference}` in {context}: {source}`

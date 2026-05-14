@@ -4,9 +4,9 @@ use std::collections::BTreeSet;
 use syn::{Ident, Item, LitStr, parse_quote};
 
 use crate::model::{
-    Api, Component, ComponentKind, ConstrainedType, EnumVariant, Field, FloatLimit, IntegerLimit,
-    Operation, Parameter, ParameterLocation, PathSegment, ResponseCase, TypeRef, Validation,
-    is_array_type,
+    Api, ApiKeyLocation, ApiKeySecurityScheme, Component, ComponentKind, ConstrainedType,
+    EnumVariant, Field, FloatLimit, IntegerLimit, Operation, Parameter, ParameterLocation,
+    PathSegment, ResponseCase, TypeRef, Validation, is_array_type,
 };
 
 const PREAMBLE: &str = "\
@@ -21,7 +21,11 @@ pub struct GeneratedFile {
 }
 
 pub(crate) fn render_api(api: &Api) -> Vec<GeneratedFile> {
-    tracing::info!(components = api.components.len(), operations = api.operations.len(), "rendering API");
+    tracing::info!(
+        components = api.components.len(),
+        operations = api.operations.len(),
+        "rendering API"
+    );
     let mut files = Vec::new();
 
     let top_mod = render_top_mod(api);
@@ -37,6 +41,12 @@ pub(crate) fn render_api(api: &Api) -> Vec<GeneratedFile> {
             contents: format_file(types_file),
         });
     }
+
+    let client_file = render_client_file(api);
+    files.push(GeneratedFile {
+        relative_path: "client.rs".to_owned(),
+        contents: format_file(client_file),
+    });
 
     for operation in &api.operations {
         let dir = &operation.fn_name;
@@ -116,12 +126,27 @@ fn add_blank_lines_between_members(code: &str) -> String {
 
 fn render_top_mod(api: &Api) -> syn::File {
     let mut items: Vec<syn::Item> = Vec::new();
+    let server_url = lit_str(&api.server_url);
+    items.push(parse_quote!(pub const SERVER_URL: &str = #server_url;));
 
     let has_types = !api.components.is_empty() || !api.constrained_types.is_empty();
     if has_types {
-        items.push(parse_quote!(pub mod types;));
-        items.push(parse_quote!(pub use types::*;));
+        items.push(parse_quote!(
+            pub mod types;
+        ));
+        items.push(parse_quote!(
+            pub use types::*;
+        ));
     }
+
+    items.push(parse_quote!(
+        #[cfg(all(feature = "json", feature = "reqwest"))]
+        mod client;
+    ));
+    items.push(parse_quote!(
+        #[cfg(all(feature = "json", feature = "reqwest"))]
+        pub use client::*;
+    ));
 
     for operation in &api.operations {
         let module = ident(&operation.fn_name);
@@ -138,7 +163,9 @@ fn render_top_mod(api: &Api) -> syn::File {
 
 fn render_types_file(api: &Api) -> syn::File {
     let mut items = Vec::new();
-    items.push(parse_quote!(use std::fmt;));
+    items.push(parse_quote!(
+        use std::fmt;
+    ));
     for component in &api.components {
         render_component(component, &mut items);
     }
@@ -158,10 +185,20 @@ fn render_endpoint_mod(_operation: &Operation) -> syn::File {
         shebang: None,
         attrs: vec![],
         items: vec![
-            parse_quote!(mod parts;),
-            parse_quote!(#[cfg(feature = "json")] mod json;),
-            parse_quote!(pub use parts::*;),
-            parse_quote!(#[cfg(feature = "json")] pub use json::*;),
+            parse_quote!(
+                mod parts;
+            ),
+            parse_quote!(
+                #[cfg(feature = "json")]
+                mod json;
+            ),
+            parse_quote!(
+                pub use parts::*;
+            ),
+            parse_quote!(
+                #[cfg(feature = "json")]
+                pub use json::*;
+            ),
         ],
     }
 }
@@ -171,6 +208,7 @@ fn render_endpoint_parts_file(api: &Api, operation: &Operation) -> syn::File {
     let use_types = build_types_use(api, operation);
     items.push(Item::Use(use_types));
     items.push(Item::Struct(render_input(operation)));
+    items.push(Item::Impl(render_input_impl(operation)));
     items.push(Item::Enum(render_response(operation)));
     items.push(Item::Fn(render_parts_function(operation)));
 
@@ -188,7 +226,9 @@ fn render_endpoint_json_file(api: &Api, operation: &Operation) -> syn::File {
     let input_name = ident(&operation.input_name);
     let response_name = ident(&operation.response_name);
     let parts_fn = ident(&format!("{}_parts", operation.fn_name));
-    items.push(Item::Use(parse_quote!(use super::parts::{#input_name, #response_name, #parts_fn};)));
+    items.push(Item::Use(
+        parse_quote!(use super::parts::{#input_name, #response_name, #parts_fn};),
+    ));
     items.push(Item::Fn(render_encode_function(operation)));
     items.push(Item::Fn(render_decode_function(operation)));
 
@@ -197,6 +237,292 @@ fn render_endpoint_json_file(api: &Api, operation: &Operation) -> syn::File {
         attrs: vec![],
         items,
     }
+}
+
+fn render_client_file(api: &Api) -> syn::File {
+    let mut items = Vec::new();
+    items.push(parse_quote!(
+        use std::fmt;
+    ));
+    items.push(parse_quote!(
+        use http::header::{HeaderName, HeaderValue};
+    ));
+    if let Some(operation_use) = build_client_operation_use(api) {
+        items.push(Item::Use(operation_use));
+    }
+    items.extend(render_client_error_items());
+    items.push(Item::Struct(render_client_struct(api)));
+    items.push(Item::Impl(render_client_impl(api)));
+
+    syn::File {
+        shebang: None,
+        attrs: vec![],
+        items,
+    }
+}
+
+fn build_client_operation_use(api: &Api) -> Option<syn::ItemUse> {
+    if api.operations.is_empty() {
+        return None;
+    }
+
+    let mut names = Vec::new();
+    for operation in &api.operations {
+        names.push(ident(&operation.input_name));
+        names.push(ident(&operation.response_name));
+        names.push(ident(&format!("encode_{}", operation.fn_name)));
+        names.push(ident(&format!("decode_{}_response", operation.fn_name)));
+    }
+
+    Some(parse_quote!(use super::{#(#names),*};))
+}
+
+fn render_client_error_items() -> Vec<syn::Item> {
+    vec![
+        parse_quote!(
+            #[derive(Debug)]
+            pub enum ClientError {
+                Runtime(satay_runtime::Error),
+                Reqwest(reqwest::Error),
+                InvalidHeaderName(http::header::InvalidHeaderName),
+                InvalidHeaderValue(http::header::InvalidHeaderValue),
+                InvalidUri(http::uri::InvalidUri),
+            }
+        ),
+        parse_quote!(
+            impl fmt::Display for ClientError {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    match self {
+                        Self::Runtime(source) => write!(f, "satay runtime error: {source}"),
+                        Self::Reqwest(source) => write!(f, "reqwest error: {source}"),
+                        Self::InvalidHeaderName(source) => {
+                            write!(f, "invalid API key header name: {source}")
+                        }
+                        Self::InvalidHeaderValue(source) => {
+                            write!(f, "invalid API key header value: {source}")
+                        }
+                        Self::InvalidUri(source) => write!(f, "invalid request URI: {source}"),
+                    }
+                }
+            }
+        ),
+        parse_quote!(
+            impl std::error::Error for ClientError {
+                fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+                    match self {
+                        Self::Runtime(source) => Some(source),
+                        Self::Reqwest(source) => Some(source),
+                        Self::InvalidHeaderName(source) => Some(source),
+                        Self::InvalidHeaderValue(source) => Some(source),
+                        Self::InvalidUri(source) => Some(source),
+                    }
+                }
+            }
+        ),
+        parse_quote!(
+            impl From<satay_runtime::Error> for ClientError {
+                fn from(source: satay_runtime::Error) -> Self {
+                    Self::Runtime(source)
+                }
+            }
+        ),
+        parse_quote!(
+            impl From<reqwest::Error> for ClientError {
+                fn from(source: reqwest::Error) -> Self {
+                    Self::Reqwest(source)
+                }
+            }
+        ),
+        parse_quote!(
+            impl From<http::header::InvalidHeaderName> for ClientError {
+                fn from(source: http::header::InvalidHeaderName) -> Self {
+                    Self::InvalidHeaderName(source)
+                }
+            }
+        ),
+        parse_quote!(
+            impl From<http::header::InvalidHeaderValue> for ClientError {
+                fn from(source: http::header::InvalidHeaderValue) -> Self {
+                    Self::InvalidHeaderValue(source)
+                }
+            }
+        ),
+        parse_quote!(
+            impl From<http::uri::InvalidUri> for ClientError {
+                fn from(source: http::uri::InvalidUri) -> Self {
+                    Self::InvalidUri(source)
+                }
+            }
+        ),
+    ]
+}
+
+fn render_client_struct(api: &Api) -> syn::ItemStruct {
+    let auth_fields = api.api_key_security_schemes.iter().map(|scheme| {
+        let name = ident(&scheme.rust_name);
+        quote!(#name: Option<String>)
+    });
+
+    parse_quote!(
+        pub struct ApiClient {
+            http: reqwest::Client,
+            base_url: String,
+            #(#auth_fields,)*
+        }
+    )
+}
+
+fn render_client_impl(api: &Api) -> syn::ItemImpl {
+    let auth_initializers = api.api_key_security_schemes.iter().map(|scheme| {
+        let name = ident(&scheme.rust_name);
+        quote!(#name: None)
+    });
+    let auth_setters = api
+        .api_key_security_schemes
+        .iter()
+        .map(render_api_key_setter)
+        .collect::<Vec<_>>();
+    let operation_methods = api
+        .operations
+        .iter()
+        .map(render_client_operation_method)
+        .collect::<Vec<_>>();
+    let apply_api_keys = render_apply_api_keys_body(api);
+
+    parse_quote!(
+        impl ApiClient {
+            pub fn new(http: reqwest::Client) -> Self {
+                Self {
+                    http,
+                    base_url: super::SERVER_URL.to_owned(),
+                    #(#auth_initializers,)*
+                }
+            }
+
+            pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
+                self.base_url = base_url.into();
+                self
+            }
+
+            #(#auth_setters)*
+
+            #(#operation_methods)*
+
+            fn apply_api_keys(&self, request: &mut http::Request<Vec<u8>>) -> Result<(), ClientError> {
+                #apply_api_keys
+                Ok(())
+            }
+
+            fn apply_base_url(&self, request: &mut http::Request<Vec<u8>>) -> Result<(), ClientError> {
+                if self.base_url.is_empty() {
+                    return Ok(());
+                }
+                let path_and_query = request.uri().to_string();
+                let base_url = self.base_url.trim_end_matches('/');
+                let separator = if path_and_query.starts_with('/') { "" } else { "/" };
+                let full_url = format!("{base_url}{separator}{path_and_query}");
+                *request.uri_mut() = full_url.parse()?;
+                Ok(())
+            }
+        }
+    )
+}
+
+fn render_api_key_setter(scheme: &ApiKeySecurityScheme) -> TokenStream {
+    let setter = if scheme.rust_name == "new" || scheme.rust_name == "base_url" {
+        ident(&format!("with_{}", scheme.rust_name))
+    } else {
+        ident(&scheme.rust_name)
+    };
+    let field = ident(&scheme.rust_name);
+
+    quote!(
+        pub fn #setter(mut self, value: impl Into<String>) -> Self {
+            self.#field = Some(value.into());
+            self
+        }
+    )
+}
+
+fn render_client_operation_method(operation: &Operation) -> TokenStream {
+    let method = ident(&operation.fn_name);
+    let input = ident(&operation.input_name);
+    let response = ident(&operation.response_name);
+    let encode_fn = ident(&format!("encode_{}", operation.fn_name));
+    let decode_fn = ident(&format!("decode_{}_response", operation.fn_name));
+
+    quote!(
+        pub async fn #method(&self, input: #input) -> Result<#response, ClientError> {
+            let mut request = #encode_fn(input)?;
+            self.apply_api_keys(&mut request)?;
+            self.apply_base_url(&mut request)?;
+            let request: reqwest::Request = request.try_into()?;
+            let response = self.http.execute(request).await?;
+
+            let status = response.status();
+            let headers = response.headers().clone();
+            let body = response.bytes().await?.to_vec();
+            let response = satay_runtime::from_raw_parts(status, headers, body)?;
+
+            Ok(#decode_fn(response)?)
+        }
+    )
+}
+
+fn render_apply_api_keys_body(api: &Api) -> TokenStream {
+    if api.api_key_security_schemes.is_empty() {
+        return quote!(let _ = request;);
+    }
+
+    let headers = api
+        .api_key_security_schemes
+        .iter()
+        .filter(|scheme| scheme.location == ApiKeyLocation::Header)
+        .map(|scheme| {
+            let field = ident(&scheme.rust_name);
+            let wire_name = lit_str(&scheme.wire_name);
+            quote!(
+                if let Some(value) = &self.#field {
+                    let name = HeaderName::from_bytes(#wire_name.as_bytes())?;
+                    let value = HeaderValue::from_str(value)?;
+                    request.headers_mut().insert(name, value);
+                }
+            )
+        })
+        .collect::<Vec<_>>();
+    let query = api
+        .api_key_security_schemes
+        .iter()
+        .filter(|scheme| scheme.location == ApiKeyLocation::Query)
+        .map(|scheme| {
+            let field = ident(&scheme.rust_name);
+            let wire_name = lit_str(&scheme.wire_name);
+            quote!(
+                if let Some(value) = &self.#field {
+                    satay_runtime::append_query_pair(&mut uri, &mut first_query, #wire_name, value);
+                    changed = true;
+                }
+            )
+        })
+        .collect::<Vec<_>>();
+    let query_block = if query.is_empty() {
+        quote!()
+    } else {
+        quote!(
+            let mut uri = request.uri().to_string();
+            let mut first_query = !uri.contains('?');
+            let mut changed = false;
+            #(#query)*
+            if changed {
+                *request.uri_mut() = uri.parse()?;
+            }
+        )
+    };
+
+    quote!(
+        #(#headers)*
+        #query_block
+    )
 }
 
 fn build_types_use(api: &Api, operation: &Operation) -> syn::ItemUse {
@@ -238,7 +564,9 @@ fn build_types_use(api: &Api, operation: &Operation) -> syn::ItemUse {
         .collect::<Vec<Ident>>();
 
     if names.is_empty() {
-        return parse_quote!(use super::super::types;);
+        return parse_quote!(
+            use super::super::types;
+        );
     }
 
     parse_quote!(use super::super::types::{#(#names),*};)
@@ -254,7 +582,12 @@ fn collect_type_refs(ty: &TypeRef, names: &mut Vec<Ident>) {
         }
         TypeRef::Array(inner) => collect_type_refs(inner, names),
         TypeRef::Nullable(inner) => collect_type_refs(inner, names),
-        TypeRef::String | TypeRef::I32 | TypeRef::I64 | TypeRef::F32 | TypeRef::F64 | TypeRef::Bool => {}
+        TypeRef::String
+        | TypeRef::I32
+        | TypeRef::I64
+        | TypeRef::F32
+        | TypeRef::F64
+        | TypeRef::Bool => {}
     }
 }
 
@@ -577,6 +910,12 @@ fn render_enum_as_str_arm(variant: &EnumVariant) -> syn::Arm {
 }
 
 fn render_input(operation: &Operation) -> syn::ItemStruct {
+    let input_fields = input_fields(operation);
+
+    render_struct(&operation.input_name, &input_fields, false)
+}
+
+fn input_fields(operation: &Operation) -> Vec<Field> {
     let mut input_fields = Vec::with_capacity(
         operation.parameters.len() + usize::from(operation.request_body.is_some()),
     );
@@ -595,7 +934,90 @@ fn render_input(operation: &Operation) -> syn::ItemStruct {
         });
     }
 
-    render_struct(&operation.input_name, &input_fields, false)
+    input_fields
+}
+
+fn render_input_impl(operation: &Operation) -> syn::ItemImpl {
+    let input_name = ident(&operation.input_name);
+    let fields = input_fields(operation);
+    let required_fields = fields
+        .iter()
+        .filter(|field| field.required)
+        .collect::<Vec<_>>();
+    let new_args = required_fields.iter().map(|field| {
+        let name = ident(&field.rust_name);
+        let ty = input_builder_arg_type(&field.ty);
+        quote!(#name: #ty)
+    });
+    let initializers = fields.iter().map(|field| {
+        let name = ident(&field.rust_name);
+        if field.required {
+            let value = input_builder_value(quote!(#name), &field.ty);
+            quote!(#name: #value)
+        } else {
+            quote!(#name: None)
+        }
+    });
+    let setters = fields
+        .iter()
+        .filter(|field| !field.required)
+        .map(render_input_setter)
+        .collect::<Vec<_>>();
+
+    parse_quote!(
+        impl #input_name {
+            pub fn new(#(#new_args),*) -> Self {
+                Self {
+                    #(#initializers),*
+                }
+            }
+
+            #(#setters)*
+        }
+    )
+}
+
+fn render_input_setter(field: &Field) -> TokenStream {
+    let setter_name = if field.rust_name == "new" {
+        ident("with_new")
+    } else {
+        ident(&field.rust_name)
+    };
+    let name = ident(&field.rust_name);
+    let ty = input_builder_arg_type(&field.ty);
+    if field.ty.is_nullable() {
+        quote!(
+            pub fn #setter_name(mut self, #name: #ty) -> Self {
+                self.#name = #name;
+                self
+            }
+        )
+    } else {
+        let value = input_builder_value(quote!(#name), &field.ty);
+        quote!(
+            pub fn #setter_name(mut self, #name: #ty) -> Self {
+                self.#name = Some(#value);
+                self
+            }
+        )
+    }
+}
+
+fn input_builder_arg_type(ty: &TypeRef) -> TokenStream {
+    if ty == &TypeRef::String {
+        quote!(impl Into<String>)
+    } else {
+        let ty = rust_type(ty);
+        quote!(#ty)
+    }
+}
+
+fn input_builder_value(value: TokenStream, ty: &TypeRef) -> TokenStream {
+    if ty == &TypeRef::String {
+        quote!(#value.into())
+    } else {
+        value
+    }
 }
 
 fn render_response(operation: &Operation) -> syn::ItemEnum {
@@ -1044,6 +1466,8 @@ mod tests {
     #[test]
     fn render_file_exposes_struct_ast_without_source_comparison() {
         let api = Api {
+            server_url: String::new(),
+            api_key_security_schemes: vec![],
             components: vec![Component {
                 rust_name: "Pet".to_owned(),
                 kind: ComponentKind::Struct(vec![
@@ -1096,6 +1520,8 @@ mod tests {
     #[test]
     fn render_file_exposes_operation_items_without_source_comparison() {
         let api = Api {
+            server_url: String::new(),
+            api_key_security_schemes: vec![],
             components: vec![],
             constrained_types: vec![],
             operations: vec![Operation {
@@ -1123,8 +1549,16 @@ mod tests {
         let files = render_api(&api);
         assert!(files.iter().any(|f| f.relative_path == "mod.rs"));
         assert!(files.iter().any(|f| f.relative_path == "create_pet/mod.rs"));
-        assert!(files.iter().any(|f| f.relative_path == "create_pet/parts.rs"));
-        assert!(files.iter().any(|f| f.relative_path == "create_pet/json.rs"));
+        assert!(
+            files
+                .iter()
+                .any(|f| f.relative_path == "create_pet/parts.rs")
+        );
+        assert!(
+            files
+                .iter()
+                .any(|f| f.relative_path == "create_pet/json.rs")
+        );
     }
 
     #[test]

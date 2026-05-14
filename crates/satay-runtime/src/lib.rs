@@ -260,7 +260,10 @@ mod tests {
     #[test]
     fn builds_response_from_raw_parts() {
         let mut headers = http::HeaderMap::new();
-        headers.insert(CONTENT_TYPE, http::HeaderValue::from_static("application/json"));
+        headers.insert(
+            CONTENT_TYPE,
+            http::HeaderValue::from_static("application/json"),
+        );
         let body = br#"{"ok":true}"#.to_vec();
 
         let response = from_raw_parts(http::StatusCode::OK, headers, body).unwrap();

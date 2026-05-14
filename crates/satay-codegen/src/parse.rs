@@ -7,9 +7,9 @@ use crate::ident::{
     field_ident, function_ident, response_variant_ident, type_ident, unique_ident, variant_ident,
 };
 use crate::model::{
-    Api, Component, ComponentKind, ConstrainedType, EnumVariant, Field, FloatLimit, HttpMethod,
-    IntegerLimit, Operation, Parameter, ParameterLocation, PathSegment, RequestBody, ResponseCase,
-    TypeRef, Validation, is_array_type,
+    Api, ApiKeyLocation, ApiKeySecurityScheme, Component, ComponentKind, ConstrainedType,
+    EnumVariant, Field, FloatLimit, HttpMethod, IntegerLimit, Operation, Parameter,
+    ParameterLocation, PathSegment, RequestBody, ResponseCase, TypeRef, Validation, is_array_type,
 };
 
 pub(crate) fn parse_api(document: &Value) -> Result<Api, ValidationError> {
@@ -23,12 +23,16 @@ pub(crate) fn parse_api(document: &Value) -> Result<Api, ValidationError> {
     }
 
     let mut registry = TypeRegistry::default();
+    let server_url = parse_server_url(document)?;
+    let api_key_security_schemes = parse_api_key_security_schemes(document)?;
     reserve_component_type_names(document, &mut registry)?;
     let mut components = parse_components(document, &mut registry)?;
     let operations = parse_operations(document, &mut registry)?;
     components.extend(registry.inline_enums);
 
     Ok(Api {
+        server_url,
+        api_key_security_schemes,
         components,
         constrained_types: registry.generated,
         operations,
@@ -65,11 +69,7 @@ impl TypeRegistry {
         }
     }
 
-    fn inline_enum_ref(
-        &mut self,
-        type_name_hint: &str,
-        variants: Vec<EnumVariant>,
-    ) -> TypeRef {
+    fn inline_enum_ref(&mut self, type_name_hint: &str, variants: Vec<EnumVariant>) -> TypeRef {
         let rust_name = unique_ident(type_ident(type_name_hint), &mut self.used_names);
         self.inline_enums.push(Component {
             rust_name: rust_name.clone(),
@@ -82,6 +82,63 @@ impl TypeRegistry {
 pub(crate) fn parse_document(spec: &str) -> Result<Value, ParseError> {
     let yaml = serde_yaml::from_str::<serde_yaml::Value>(spec).map_err(ParseError::Document)?;
     serde_json::to_value(yaml).map_err(ParseError::NormalizeDocument)
+}
+
+fn parse_server_url(document: &Value) -> Result<String, ValidationError> {
+    let root = object(document, "OpenAPI document")?;
+    let Some(servers) = root.get("servers") else {
+        return Ok(String::new());
+    };
+    let servers = servers
+        .as_array()
+        .ok_or_else(|| ValidationError::ExpectedArray {
+            context: "OpenAPI document servers".to_owned(),
+        })?;
+    let Some(first) = servers.first() else {
+        return Ok(String::new());
+    };
+    let context = "OpenAPI document servers[0]";
+    let server = object(first, context)?;
+    Ok(required_str(server, "url", context)?.to_owned())
+}
+
+fn parse_api_key_security_schemes(
+    document: &Value,
+) -> Result<Vec<ApiKeySecurityScheme>, ValidationError> {
+    let root = object(document, "OpenAPI document")?;
+    let Some(components) = optional_object(root, "components", "OpenAPI document")? else {
+        return Ok(vec![]);
+    };
+    let Some(security_schemes) = optional_object(components, "securitySchemes", "components")?
+    else {
+        return Ok(vec![]);
+    };
+
+    let mut used = BTreeSet::from(["base_url".to_owned(), "http".to_owned()]);
+    let mut schemes = Vec::new();
+    for (scheme_name, scheme) in security_schemes {
+        let context = format!("security scheme `{scheme_name}`");
+        let scheme = resolve_reference(document, scheme, &context)?;
+        let scheme = object(scheme, &context)?;
+        if scheme.get("type").and_then(Value::as_str) != Some("apiKey") {
+            continue;
+        }
+
+        let location = match required_str(scheme, "in", &context)? {
+            "header" => ApiKeyLocation::Header,
+            "query" => ApiKeyLocation::Query,
+            _ => continue,
+        };
+        let wire_name = required_str(scheme, "name", &context)?.to_owned();
+        let rust_name = unique_ident(field_ident(&wire_name), &mut used);
+        schemes.push(ApiKeySecurityScheme {
+            location,
+            wire_name,
+            rust_name,
+        });
+    }
+
+    Ok(schemes)
 }
 
 fn reserve_component_type_names(
@@ -1381,6 +1438,8 @@ mod tests {
         let api = parse_valid(
             r#"
 openapi: 3.0.3
+servers:
+  - url: https://api.example.test/v1
 paths:
   /users/{userId}:
     parameters:
@@ -1423,6 +1482,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/User'
 components:
+  securitySchemes:
+    accountKeyAuth:
+      type: apiKey
+      in: header
+      name: AccountKey
+    queryKeyAuth:
+      type: apiKey
+      in: query
+      name: api_key
+    bearerAuth:
+      type: http
+      scheme: bearer
   schemas:
     UpdateUserRequest:
       type: object
@@ -1452,6 +1523,20 @@ components:
 
         assert_eq!(api.components.len(), 3);
         assert!(api.constrained_types.is_empty());
+        assert_eq!(api.server_url, "https://api.example.test/v1");
+        assert_eq!(api.api_key_security_schemes.len(), 2);
+        assert_eq!(
+            api.api_key_security_schemes[0].location,
+            ApiKeyLocation::Header
+        );
+        assert_eq!(api.api_key_security_schemes[0].wire_name, "AccountKey");
+        assert_eq!(api.api_key_security_schemes[0].rust_name, "account_key");
+        assert_eq!(
+            api.api_key_security_schemes[1].location,
+            ApiKeyLocation::Query
+        );
+        assert_eq!(api.api_key_security_schemes[1].wire_name, "api_key");
+        assert_eq!(api.api_key_security_schemes[1].rust_name, "api_key");
 
         let update_user_request = component(&api, "UpdateUserRequest");
         match &update_user_request.kind {

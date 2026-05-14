@@ -1,8 +1,9 @@
 use std::env;
 use std::fs;
 use std::path::Path;
+use std::process;
 
-use satay_codegen::GeneratedFile;
+use satay_codegen::{Error, GeneratedFile, ValidationError};
 
 const SIMPLE: &str = include_str!("../../../tests/fixtures/simple.yaml");
 const PETSTORE_MINIMAL: &str = include_str!("../../../tests/fixtures/petstore-minimal.yaml");
@@ -13,7 +14,12 @@ fn find_file<'a>(files: &'a [GeneratedFile], relative_path: &str) -> &'a Generat
     files
         .iter()
         .find(|f| f.relative_path == relative_path)
-        .unwrap_or_else(|| panic!("expected file {relative_path}, found: {:?}", files.iter().map(|f| &f.relative_path).collect::<Vec<_>>()))
+        .unwrap_or_else(|| {
+            panic!(
+                "expected file {relative_path}, found: {:?}",
+                files.iter().map(|f| &f.relative_path).collect::<Vec<_>>()
+            )
+        })
 }
 
 #[test]
@@ -21,9 +27,20 @@ fn simple_fixture_generates_expected_file_structure() {
     let files = satay_codegen::generate(SIMPLE).expect("generate simple fixture");
 
     let mod_rs = find_file(&files, "mod.rs");
+    assert!(mod_rs.contents.contains("pub const SERVER_URL"));
     assert!(mod_rs.contents.contains("pub mod types;"));
+    assert!(
+        mod_rs
+            .contents
+            .contains("all(feature = \"json\", feature = \"reqwest\")")
+    );
+    assert!(mod_rs.contents.contains("mod client;"));
     assert!(mod_rs.contents.contains("pub mod get_user;"));
     assert!(mod_rs.contents.contains("pub mod update_user;"));
+
+    let client_rs = find_file(&files, "client.rs");
+    assert!(client_rs.contents.contains("pub struct ApiClient"));
+    assert!(client_rs.contents.contains("pub enum ClientError"));
 
     let types_rs = find_file(&files, "types.rs");
     assert!(types_rs.contents.contains("pub struct ErrorBody"));
@@ -33,6 +50,13 @@ fn simple_fixture_generates_expected_file_structure() {
 
     let parts = find_file(&files, "get_user/parts.rs");
     assert!(parts.contents.contains("pub struct GetUserInput"));
+    assert!(parts.contents.contains("impl GetUserInput"));
+    assert!(
+        parts
+            .contents
+            .contains("pub fn new(user_id: impl Into<String>) -> Self")
+    );
+    assert!(parts.contents.contains("pub fn include_details"));
     assert!(parts.contents.contains("pub enum GetUserResponse"));
     assert!(parts.contents.contains("pub fn get_user_parts"));
     assert!(!parts.contents.contains("#[cfg(feature = \"json\")]"));
@@ -50,6 +74,70 @@ fn simple_fixture_generates_expected_file_structure() {
     let json = find_file(&files, "update_user/json.rs");
     assert!(json.contents.contains("pub fn encode_update_user"));
     assert!(json.contents.contains("pub fn decode_update_user_response"));
+}
+
+#[test]
+fn server_security_and_client_helpers_are_generated() {
+    let files = satay_codegen::generate(
+        r#"
+openapi: 3.0.3
+servers:
+  - url: https://api.example.test/v1
+paths:
+  /users/{userId}:
+    get:
+      operationId: getUser
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+components:
+  securitySchemes:
+    accountKeyAuth:
+      type: apiKey
+      in: header
+      name: AccountKey
+  schemas:
+    User:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+"#,
+    )
+    .expect("generate secured fixture");
+
+    let mod_rs = find_file(&files, "mod.rs");
+    assert!(
+        mod_rs
+            .contents
+            .contains("pub const SERVER_URL: &str = \"https://api.example.test/v1\";")
+    );
+
+    let client_rs = find_file(&files, "client.rs");
+    assert!(client_rs.contents.contains("pub fn account_key"));
+    assert!(client_rs.contents.contains("pub async fn get_user"));
+    assert!(
+        client_rs
+            .contents
+            .contains("HeaderName::from_bytes(\"AccountKey\".as_bytes())")
+    );
+    assert!(
+        client_rs
+            .contents
+            .contains("self.apply_base_url(&mut request)?")
+    );
 }
 
 #[test]
@@ -113,10 +201,7 @@ mod tests {
 
     #[test]
     fn constructs_request_parts_without_io() {
-        let parts = get_user_parts(GetUserInput {
-            user_id: "user/42".to_owned(),
-            include_details: Some(true),
-        })
+        let parts = get_user_parts(GetUserInput::new("user/42").include_details(true))
         .expect("request parts");
 
         assert_eq!(parts.method, http::Method::GET);
@@ -127,14 +212,14 @@ mod tests {
 
     #[test]
     fn encodes_json_request_body() {
-        let request = encode_update_user(UpdateUserInput {
-            user_id: "42".to_owned(),
-            notify: Some(false),
-            body: Some(UpdateUserRequest {
+        let request = encode_update_user(
+            UpdateUserInput::new("42")
+            .notify(false)
+            .body(UpdateUserRequest {
                 age: None,
                 name: "Ada".to_owned(),
             }),
-        })
+        )
         .expect("encoded request");
 
         assert_eq!(request.method(), http::Method::PUT);
@@ -147,11 +232,7 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(request.body()).unwrap();
         assert_eq!(body, serde_json::json!({ "name": "Ada" }));
 
-        let empty_request = encode_update_user(UpdateUserInput {
-            user_id: "42".to_owned(),
-            notify: None,
-            body: None,
-        })
+        let empty_request = encode_update_user(UpdateUserInput::new("42"))
         .expect("encoded request without body");
         assert_eq!(empty_request.uri(), "/users/42");
         assert!(empty_request
@@ -205,7 +286,7 @@ mod tests {
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
-    let output = std::process::Command::new(&cargo)
+    let output = process::Command::new(&cargo)
         .arg("test")
         .arg("--quiet")
         .current_dir(crate_dir)
@@ -228,8 +309,16 @@ fn generated_constrained_fixture_enforces_openapi_bounds() {
 
     let types_rs = find_file(&files, "types.rs");
     assert!(types_rs.contents.contains("#[nutype::nutype("));
-    assert!(types_rs.contents.contains("validate(greater_or_equal = 0, less_or_equal = 130)"));
-    assert!(types_rs.contents.contains("validate(len_char_min = 1, len_char_max = 80)"));
+    assert!(
+        types_rs
+            .contents
+            .contains("validate(greater_or_equal = 0, less_or_equal = 130)")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("validate(len_char_min = 1, len_char_max = 80)")
+    );
     assert!(types_rs.contents.contains("regex = \"^[a-zA-Z0-9-]+$\""));
 
     let temp = tempfile::tempdir().expect("create temp crate");
@@ -299,7 +388,7 @@ mod tests {
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
-    let output = std::process::Command::new(&cargo)
+    let output = process::Command::new(&cargo)
         .arg("test")
         .arg("--quiet")
         .current_dir(crate_dir)
@@ -315,7 +404,7 @@ mod tests {
         );
     }
 
-    let output = std::process::Command::new(cargo)
+    let output = process::Command::new(cargo)
         .arg("check")
         .arg("--quiet")
         .arg("--no-default-features")
@@ -360,9 +449,7 @@ paths:
     .expect_err("nullable parameters are unsupported");
 
     match err {
-        satay_codegen::Error::Validation(
-            satay_codegen::ValidationError::NullableParameterUnsupported { wire_name, .. },
-        ) => {
+        Error::Validation(ValidationError::NullableParameterUnsupported { wire_name, .. }) => {
             assert_eq!(wire_name, "userId");
         }
         other => panic!("unexpected error: {other}"),
@@ -393,9 +480,7 @@ paths:
     .expect_err("default response bodies are unsupported");
 
     match err {
-        satay_codegen::Error::Validation(
-            satay_codegen::ValidationError::DefaultResponseBodyUnsupported { context, .. },
-        ) => {
+        Error::Validation(ValidationError::DefaultResponseBodyUnsupported { context, .. }) => {
             assert_eq!(context, "operation `ping` responses");
         }
         other => panic!("unexpected error: {other}"),
@@ -512,7 +597,7 @@ mod tests {
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
-    let output = std::process::Command::new(&cargo)
+    let output = process::Command::new(&cargo)
         .arg("test")
         .arg("--quiet")
         .current_dir(crate_dir)
@@ -529,7 +614,12 @@ mod tests {
     }
 }
 
-fn write_manifest(crate_dir: &Path, runtime_path: &str, constrained: bool, _for_compile_test: bool) {
+fn write_manifest(
+    crate_dir: &Path,
+    runtime_path: &str,
+    constrained: bool,
+    _for_compile_test: bool,
+) {
     let nutype_deps = if constrained {
         r#"
 nutype = { version = "0.7", features = ["serde", "regex"] }

@@ -8,12 +8,17 @@ mod render;
 
 pub use error::{Error, ParseError, ValidationError};
 pub use render::GeneratedFile;
+use tracing::info;
 
 #[tracing::instrument(err)]
 pub fn generate(spec: &str) -> Result<Vec<GeneratedFile>, Error> {
-    tracing::info!("parsing OpenAPI document");
+    info!("parsing OpenAPI document");
     let document = parse::parse_document(spec)?;
     let api = parse::parse_api(&document)?;
-    tracing::info!(components = api.components.len(), operations = api.operations.len(), "parsed API");
+    info!(
+        components = api.components.len(),
+        operations = api.operations.len(),
+        "parsed API"
+    );
     Ok(render::render_api(&api))
 }
