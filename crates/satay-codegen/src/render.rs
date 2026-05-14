@@ -1,5 +1,6 @@
 use proc_macro2::{Literal, Span, TokenStream};
 use quote::quote;
+use std::collections::BTreeSet;
 use syn::{Ident, Item, LitStr, parse_quote};
 
 use crate::model::{
@@ -144,7 +145,7 @@ fn render_endpoint_mod(_operation: &Operation) -> syn::File {
 fn render_endpoint_parts_file(api: &Api, operation: &Operation) -> syn::File {
     let mut items = Vec::new();
     let use_types = build_types_use(api, operation);
-    items.push(syn::Item::Use(use_types));
+    items.push(Item::Use(use_types));
     items.push(Item::Struct(render_input(operation)));
     items.push(Item::Enum(render_response(operation)));
     items.push(Item::Fn(render_parts_function(operation)));
@@ -159,11 +160,11 @@ fn render_endpoint_parts_file(api: &Api, operation: &Operation) -> syn::File {
 fn render_endpoint_json_file(api: &Api, operation: &Operation) -> syn::File {
     let mut items = Vec::new();
     let use_types = build_types_use(api, operation);
-    items.push(syn::Item::Use(use_types));
+    items.push(Item::Use(use_types));
     let input_name = ident(&operation.input_name);
     let response_name = ident(&operation.response_name);
     let parts_fn = ident(&format!("{}_parts", operation.fn_name));
-    items.push(syn::Item::Use(parse_quote!(use super::parts::{#input_name, #response_name, #parts_fn};)));
+    items.push(Item::Use(parse_quote!(use super::parts::{#input_name, #response_name, #parts_fn};)));
     items.push(Item::Fn(render_encode_function(operation)));
     items.push(Item::Fn(render_decode_function(operation)));
 
@@ -200,17 +201,17 @@ fn build_types_use(api: &Api, operation: &Operation) -> syn::ItemUse {
     all_names.dedup();
 
     // Filter: only import names that are in the types module (components and constrained types)
-    let type_names: std::collections::BTreeSet<String> = api
+    let type_names = api
         .components
         .iter()
         .map(|c| c.rust_name.clone())
         .chain(api.constrained_types.iter().map(|c| c.rust_name.clone()))
-        .collect();
+        .collect::<BTreeSet<String>>();
 
-    let names: Vec<Ident> = all_names
+    let names = all_names
         .into_iter()
         .filter(|n| type_names.contains(&n.to_string()))
-        .collect();
+        .collect::<Vec<Ident>>();
 
     if names.is_empty() {
         return parse_quote!(use super::super::types;);
