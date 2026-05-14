@@ -499,10 +499,13 @@ fn render_enum(name: &str, variants: &[EnumVariant]) -> Vec<syn::Item> {
         .collect::<Vec<_>>();
 
     let enum_item = parse_quote!(
-        #[derive(Debug, Clone, PartialEq, Eq)]
+        #[derive(Debug, Clone, PartialEq, Eq, Default)]
         #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
         pub enum #name {
-            #(#variant_defs),*
+            #(#variant_defs),*,
+            #[default]
+            #[cfg_attr(feature = "serde", serde(other))]
+            Unknown,
         }
     );
     let inherent_impl = parse_quote!(
@@ -510,6 +513,7 @@ fn render_enum(name: &str, variants: &[EnumVariant]) -> Vec<syn::Item> {
             pub const fn as_str(&self) -> &'static str {
                 match self {
                     #(#as_str_arms)*
+                    Self::Unknown => "",
                 }
             }
         }

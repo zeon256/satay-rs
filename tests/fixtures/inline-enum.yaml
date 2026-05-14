@@ -1,0 +1,50 @@
+openapi: 3.0.3
+info:
+  title: Inline Enum API
+  version: 1.0.0
+paths:
+  /items/{itemId}:
+    parameters:
+      - name: itemId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getItem
+      responses:
+        '200':
+          description: Found item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Item'
+components:
+  schemas:
+    Item:
+      type: object
+      required:
+        - id
+        - name
+        - category
+        - condition
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        category:
+          type: string
+          enum:
+            - electronics
+            - clothing
+            - food
+        condition:
+          type: string
+          enum:
+            - new
+            - used
+            - refurbished
+            - ""
+        notes:
+          type: string

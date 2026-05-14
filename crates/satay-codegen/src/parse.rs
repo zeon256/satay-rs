@@ -24,8 +24,9 @@ pub(crate) fn parse_api(document: &Value) -> Result<Api, ValidationError> {
 
     let mut registry = TypeRegistry::default();
     reserve_component_type_names(document, &mut registry)?;
-    let components = parse_components(document, &mut registry)?;
+    let mut components = parse_components(document, &mut registry)?;
     let operations = parse_operations(document, &mut registry)?;
+    components.extend(registry.inline_enums);
 
     Ok(Api {
         components,
@@ -37,6 +38,7 @@ pub(crate) fn parse_api(document: &Value) -> Result<Api, ValidationError> {
 #[derive(Debug, Default)]
 struct TypeRegistry {
     generated: Vec<ConstrainedType>,
+    inline_enums: Vec<Component>,
     used_names: BTreeSet<String>,
 }
 
@@ -61,6 +63,19 @@ impl TypeRegistry {
             rust_name,
             inner: Box::new(inner),
         }
+    }
+
+    fn inline_enum_ref(
+        &mut self,
+        type_name_hint: &str,
+        variants: Vec<EnumVariant>,
+    ) -> TypeRef {
+        let rust_name = unique_ident(type_ident(type_name_hint), &mut self.used_names);
+        self.inline_enums.push(Component {
+            rust_name: rust_name.clone(),
+            kind: ComponentKind::Enum(variants),
+        });
+        TypeRef::Named(rust_name)
     }
 }
 
@@ -317,7 +332,13 @@ fn parse_type_ref_base(
     type_name_hint: Option<&str>,
 ) -> Result<TypeRef, ValidationError> {
     if schema.contains_key("enum") {
-        return Ok(TypeRef::String);
+        let mut variants = parse_string_enum(schema, context)?;
+        variants.retain(|v| !v.wire_name.is_empty());
+        if variants.is_empty() {
+            return Ok(TypeRef::String);
+        }
+        let name_hint = type_name_hint.unwrap_or(context);
+        return Ok(registry.inline_enum_ref(name_hint, variants));
     }
 
     match schema.get("type").and_then(Value::as_str) {
@@ -1429,7 +1450,7 @@ components:
 "#,
         );
 
-        assert_eq!(api.components.len(), 2);
+        assert_eq!(api.components.len(), 3);
         assert!(api.constrained_types.is_empty());
 
         let update_user_request = component(&api, "UpdateUserRequest");
@@ -1444,6 +1465,18 @@ components:
             other => panic!("expected UpdateUserRequest struct, got {other:?}"),
         }
 
+        let user_status = component(&api, "UserStatus");
+        match &user_status.kind {
+            ComponentKind::Enum(variants) => {
+                assert_eq!(variants.len(), 2);
+                assert_eq!(variants[0].wire_name, "active");
+                assert_eq!(variants[0].rust_name, "Active");
+                assert_eq!(variants[1].wire_name, "suspended");
+                assert_eq!(variants[1].rust_name, "Suspended");
+            }
+            other => panic!("expected UserStatus enum, got {other:?}"),
+        }
+
         let user = component(&api, "User");
         match &user.kind {
             ComponentKind::Struct(fields) => {
@@ -1454,7 +1487,7 @@ components:
                 assert!(id.required);
 
                 let status = field(fields, "status");
-                assert_eq!(status.ty, TypeRef::String);
+                assert_eq!(status.ty, TypeRef::Named("UserStatus".to_owned()));
                 assert!(status.required);
 
                 let age = field(fields, "age");

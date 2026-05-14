@@ -7,6 +7,7 @@ use satay_codegen::GeneratedFile;
 const SIMPLE: &str = include_str!("../../../tests/fixtures/simple.yaml");
 const PETSTORE_MINIMAL: &str = include_str!("../../../tests/fixtures/petstore-minimal.yaml");
 const CONSTRAINED: &str = include_str!("../../../tests/fixtures/constrained.yaml");
+const INLINE_ENUM: &str = include_str!("../../../tests/fixtures/inline-enum.yaml");
 
 fn find_file<'a>(files: &'a [GeneratedFile], relative_path: &str) -> &'a GeneratedFile {
     files
@@ -398,6 +399,133 @@ paths:
             assert_eq!(context, "operation `ping` responses");
         }
         other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn inline_enum_generates_proper_enum_types() {
+    let files = satay_codegen::generate(INLINE_ENUM).expect("generate inline-enum fixture");
+
+    let types_rs = find_file(&files, "types.rs");
+    assert!(types_rs.contents.contains("pub enum ItemCategory"));
+    assert!(types_rs.contents.contains("pub enum ItemCondition"));
+    assert!(types_rs.contents.contains("pub struct Item"));
+    assert!(types_rs.contents.contains("#[default]"));
+    assert!(types_rs.contents.contains("serde(other)"));
+    assert!(!types_rs.contents.contains(r#"rename = """#));
+
+    let item_struct_start = types_rs
+        .contents
+        .find("pub struct Item")
+        .expect("Item struct exists");
+    let item_struct = &types_rs.contents[item_struct_start..];
+    assert!(item_struct.contains("category: ItemCategory"));
+    assert!(item_struct.contains("condition: ItemCondition"));
+
+    let category_enum_start = types_rs
+        .contents
+        .find("pub enum ItemCategory")
+        .expect("ItemCategory enum exists");
+    let category_enum = &types_rs.contents[category_enum_start..category_enum_start + 400];
+    assert!(category_enum.contains("Electronics"));
+    assert!(category_enum.contains("Clothing"));
+    assert!(category_enum.contains("Food"));
+    assert!(category_enum.contains("Unknown"));
+
+    let condition_enum_start = types_rs
+        .contents
+        .find("pub enum ItemCondition")
+        .expect("ItemCondition enum exists");
+    let condition_enum = &types_rs.contents[condition_enum_start..condition_enum_start + 400];
+    assert!(condition_enum.contains("New"));
+    assert!(condition_enum.contains("Used"));
+    assert!(condition_enum.contains("Refurbished"));
+    assert!(condition_enum.contains("Unknown"));
+}
+
+#[test]
+fn generated_inline_enum_compiles_and_handles_unknown() {
+    let files = satay_codegen::generate(INLINE_ENUM).expect("generate inline-enum fixture");
+
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+
+    let runtime_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("codegen crate has parent")
+        .join("satay-runtime");
+    let runtime_path = toml_string(&runtime_path.to_string_lossy());
+
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::*;
+
+    #[test]
+    fn known_enum_variants_deserialize() {
+        let json = br#"{"id":"1","name":"Widget","category":"electronics","condition":"new","notes":"test"}"#.to_vec();
+        let response = http::Response::builder()
+            .status(200)
+            .body(json)
+            .unwrap();
+        let decoded = decode_get_item_response(response).expect("decoded response");
+        match decoded {
+            GetItemResponse::Ok(item) => {
+                assert_eq!(item.id, "1");
+                assert_eq!(item.name, "Widget");
+                assert_eq!(item.category, ItemCategory::Electronics);
+                assert_eq!(item.condition, ItemCondition::New);
+                assert_eq!(item.notes, Some("test".to_owned()));
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_enum_variant_maps_to_unknown() {
+        let json = br#"{"id":"2","name":"Gadget","category":"unknown_category","condition":"","notes":null}"#.to_vec();
+        let response = http::Response::builder()
+            .status(200)
+            .body(json)
+            .unwrap();
+        let decoded = decode_get_item_response(response).expect("decoded response");
+        match decoded {
+            GetItemResponse::Ok(item) => {
+                assert_eq!(item.category, ItemCategory::Unknown);
+                assert_eq!(item.condition, ItemCondition::Unknown);
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn default_variant_is_unknown() {
+        assert_eq!(ItemCategory::default(), ItemCategory::Unknown);
+        assert_eq!(ItemCondition::default(), ItemCondition::Unknown);
+    }
+}
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
+    let output = std::process::Command::new(&cargo)
+        .arg("test")
+        .arg("--quiet")
+        .current_dir(crate_dir)
+        .output()
+        .expect("run cargo test for inline-enum generated crate");
+
+    if !output.status.success() {
+        panic!(
+            "inline-enum generated crate tests failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 }
 
