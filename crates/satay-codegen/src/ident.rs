@@ -151,7 +151,3 @@ fn is_rust_keyword(value: &str) -> bool {
             | "try"
     )
 }
-
-pub(crate) fn rust_string(value: &str) -> String {
-    format!("{value:?}")
-}

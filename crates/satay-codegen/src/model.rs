@@ -151,29 +151,6 @@ pub(crate) struct ResponseCase {
 }
 
 impl TypeRef {
-    pub(crate) fn rust_type(&self) -> String {
-        match self {
-            Self::String => "String".to_owned(),
-            Self::I32 => "i32".to_owned(),
-            Self::I64 => "i64".to_owned(),
-            Self::F32 => "f32".to_owned(),
-            Self::F64 => "f64".to_owned(),
-            Self::Bool => "bool".to_owned(),
-            Self::Array(item) => format!("Vec<{}>", item.rust_type()),
-            Self::Named(name) => name.clone(),
-            Self::Constrained { rust_name, .. } => rust_name.clone(),
-            Self::Nullable(inner) => format!("Option<{}>", inner.rust_type()),
-        }
-    }
-
-    pub(crate) fn rust_field_type(&self, required: bool) -> String {
-        if required || self.is_nullable() {
-            self.rust_type()
-        } else {
-            format!("Option<{}>", self.rust_type())
-        }
-    }
-
     pub(crate) fn is_nullable(&self) -> bool {
         matches!(self, Self::Nullable(_))
     }

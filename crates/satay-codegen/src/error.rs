@@ -198,13 +198,6 @@ pub enum Error {
     #[error("path parameter `{name}` is declared but not used in path `{path}`")]
     UnusedPathParameter { path: String, name: String },
 
-    #[error("generated invalid Rust source: {source}\n--- generated source ---\n{raw}")]
-    GeneratedInvalidRust {
-        #[source]
-        source: syn::Error,
-        raw: String,
-    },
-
     #[error("failed to resolve reference `{reference}` in {context}: {source}")]
     ResolveReference {
         reference: String,
