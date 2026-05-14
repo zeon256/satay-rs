@@ -332,7 +332,12 @@ paths:
     )
     .expect_err("nullable parameters are unsupported");
 
-    assert!(err.to_string().contains("nullable parameters"));
+    match err {
+        satay_codegen::Error::NullableParameterUnsupported { wire_name, .. } => {
+            assert_eq!(wire_name, "userId");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
 }
 
 #[test]
@@ -358,7 +363,12 @@ paths:
     )
     .expect_err("default response bodies are unsupported");
 
-    assert!(err.to_string().contains("default response body"));
+    match err {
+        satay_codegen::Error::DefaultResponseBodyUnsupported { context, .. } => {
+            assert_eq!(context, "operation `ping` responses");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
 }
 
 fn toml_string(value: &str) -> String {

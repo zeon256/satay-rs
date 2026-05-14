@@ -12,18 +12,256 @@ pub fn generate(spec: &str) -> Result<String, Error> {
     render_api(&api)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{message}")]
-pub struct Error {
-    message: String,
-}
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum Error {
+    #[error("unsupported OpenAPI version `{version}`; Satay MVP supports OpenAPI 3.0")]
+    UnsupportedOpenApiVersion { version: String },
 
-impl Error {
-    fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
+    #[error("failed to parse OpenAPI YAML/JSON: {0}")]
+    ParseDocument(#[source] serde_yaml::Error),
+
+    #[error("failed to normalize OpenAPI document: {0}")]
+    NormalizeDocument(#[source] serde_json::Error),
+
+    #[error("unsupported type `{kind}` in schema `{schema}`")]
+    UnsupportedComponentType { schema: String, kind: String },
+
+    #[error("schema `{schema}` must declare `type`, `$ref`, `enum`, or `properties`")]
+    MissingComponentSchemaType { schema: String },
+
+    #[error("{context} uses enum type `{kind}`; only string enums are supported")]
+    UnsupportedEnumType { context: String, kind: String },
+
+    #[error("{context} has a non-array enum")]
+    NonArrayEnum { context: String },
+
+    #[error("{context} has an empty enum")]
+    EmptyEnum { context: String },
+
+    #[error("{context} contains a non-string enum value; only string enums are supported")]
+    NonStringEnumValue { context: String },
+
+    #[error("object schema `{schema}` must declare `properties`")]
+    MissingObjectProperties { schema: String },
+
+    #[error("{context} has a non-array `required` field")]
+    NonArrayRequired { context: String },
+
+    #[error("{context} has a non-string required field name")]
+    NonStringRequiredField { context: String },
+
+    #[error("{context} uses unsupported integer format `{format}`")]
+    UnsupportedIntegerFormat { context: String, format: String },
+
+    #[error("{context} uses unsupported number format `{format}`")]
+    UnsupportedNumberFormat { context: String, format: String },
+
+    #[error("{context} array schema must declare `items`")]
+    MissingArrayItems { context: String },
+
+    #[error("{context} is an inline object schema; move it to components/schemas and use `$ref`")]
+    InlineObjectSchema { context: String },
+
+    #[error("{context} is an object without properties; map/object schemas are not supported yet")]
+    UnsupportedMapObjectSchema { context: String },
+
+    #[error("{context} uses unsupported schema type `{kind}`")]
+    UnsupportedSchemaType { context: String, kind: String },
+
+    #[error("{context} must declare `type`, `$ref`, or `enum`")]
+    MissingSchemaType { context: String },
+
+    #[error(
+        "{context} uses `pattern`; OpenAPI patterns use ECMA regex syntax and are not safely supported yet"
+    )]
+    UnsupportedPattern { context: String },
+
+    #[error("{context} has minLength {min_length} greater than maxLength {max_length}")]
+    InvalidStringLengthBounds {
+        context: String,
+        min_length: u64,
+        max_length: u64,
+    },
+
+    #[error(
+        "{context} uses `uniqueItems`; generated Vec-backed types cannot enforce uniqueness yet"
+    )]
+    UniqueItemsUnsupported { context: String },
+
+    #[error("{context} has minItems {min_items} greater than maxItems {max_items}")]
+    InvalidArrayLengthBounds {
+        context: String,
+        min_items: u64,
+        max_items: u64,
+    },
+
+    #[error("{context} uses `{keyword}`, which is not safely supported yet")]
+    UnsupportedKeyword {
+        context: String,
+        keyword: &'static str,
+    },
+
+    #[error("{context}.{keyword} must be a non-negative integer")]
+    InvalidNonNegativeIntegerKeyword {
+        context: String,
+        keyword: &'static str,
+    },
+
+    #[error("{context}.{keyword} must be a boolean")]
+    InvalidBooleanKeyword {
+        context: String,
+        keyword: &'static str,
+    },
+
+    #[error("{context}.{exclusive_keyword} requires `{keyword}`")]
+    ExclusiveLimitRequiresBound {
+        context: String,
+        exclusive_keyword: &'static str,
+        keyword: &'static str,
+    },
+
+    #[error("{context}.{keyword} must be a finite number")]
+    InvalidFiniteNumberKeyword {
+        context: String,
+        keyword: &'static str,
+    },
+
+    #[error("{context} must be an integer")]
+    ExpectedInteger { context: String },
+
+    #[error("{context} integer bounds do not allow any value")]
+    EmptyIntegerBounds { context: String },
+
+    #[error("exclusive integer minimum overflows")]
+    ExclusiveIntegerMinimumOverflow,
+
+    #[error("exclusive integer maximum overflows")]
+    ExclusiveIntegerMaximumOverflow,
+
+    #[error("{context} number bounds do not allow any value")]
+    EmptyNumberBounds { context: String },
+
+    #[error("OpenAPI document must declare `paths`")]
+    MissingPaths,
+
+    #[error("operation `{operation_id}` must declare responses")]
+    MissingOperationResponses { operation_id: String },
+
+    #[error("{context} must be an array")]
+    ExpectedArray { context: String },
+
+    #[error(
+        "{context} parameter `{wire_name}` is in `{location}`; only path and query parameters are supported"
+    )]
+    UnsupportedParameterLocation {
+        context: String,
+        wire_name: String,
+        location: String,
+    },
+
+    #[error("{context} parameter `{wire_name}` uses `content`; schema parameters are required")]
+    ContentParameterUnsupported { context: String, wire_name: String },
+
+    #[error("{context} parameter `{wire_name}` must declare schema")]
+    MissingParameterSchema { context: String, wire_name: String },
+
+    #[error("parameter `{wire_name}` is nullable; nullable parameters are not supported")]
+    NullableParameterUnsupported { wire_name: String },
+
+    #[error(
+        "path parameter `{wire_name}` is an array; array path parameter styles are not supported"
+    )]
+    ArrayPathParameterUnsupported { wire_name: String },
+
+    #[error("path parameter `{wire_name}` must set required: true")]
+    PathParameterNotRequired { wire_name: String },
+
+    #[error("{context} must declare content")]
+    MissingContent { context: String },
+
+    #[error("{context} must declare application/json content")]
+    MissingJsonContent { context: String },
+
+    #[error("{context} application/json content must declare schema")]
+    MissingJsonSchema { context: String },
+
+    #[error(
+        "{context} contains a default response body; default response decoding is not supported yet"
+    )]
+    DefaultResponseBodyUnsupported { context: String },
+
+    #[error("{context} contains invalid status code `{status}`")]
+    InvalidStatusCode { context: String, status: String },
+
+    #[error("{context} contains out-of-range status code `{status_code}`")]
+    OutOfRangeStatusCode { context: String, status_code: u16 },
+
+    #[error("{context} {status} response must declare application/json content")]
+    MissingResponseJsonContent { context: String, status: String },
+
+    #[error("path `{path}` contains an unclosed parameter")]
+    UnclosedPathParameter { path: String },
+
+    #[error("path `{path}` contains an empty parameter")]
+    EmptyPathParameter { path: String },
+
+    #[error("path `{path}` uses parameter `{name}` but it is not declared")]
+    UndeclaredPathParameter { path: String, name: String },
+
+    #[error("path parameter `{name}` is declared but not used in path `{path}`")]
+    UnusedPathParameter { path: String, name: String },
+
+    #[error("generated invalid Rust source: {source}\n--- generated source ---\n{raw}")]
+    GeneratedInvalidRust {
+        #[source]
+        source: syn::Error,
+        raw: String,
+    },
+
+    #[error("failed to resolve reference `{reference}` in {context}: {source}")]
+    ResolveReference {
+        reference: String,
+        context: String,
+        #[source]
+        source: Box<Error>,
+    },
+
+    #[error("only local references are supported")]
+    NonLocalReference,
+
+    #[error("local reference must be a JSON pointer")]
+    InvalidLocalReference,
+
+    #[error("missing `{token}`")]
+    MissingJsonPointerToken { token: String },
+
+    #[error("reference `{reference}` must point to #/components/{section}/...")]
+    InvalidComponentReference {
+        reference: String,
+        section: &'static str,
+    },
+
+    #[error("{context} must be an object")]
+    ExpectedObject { context: String },
+
+    #[error("{context}.{field} must be an object")]
+    ExpectedObjectField {
+        context: String,
+        field: &'static str,
+    },
+
+    #[error("{context} must declare string field `{field}`")]
+    MissingStringField {
+        context: String,
+        field: &'static str,
+    },
+
+    #[error("{context} uses `{keyword}`, which is not in the MVP scope")]
+    UnsupportedComposition {
+        context: String,
+        keyword: &'static str,
+    },
 }
 
 #[derive(Debug)]
@@ -189,9 +427,9 @@ impl Api {
         let root = object(document, "OpenAPI document")?;
         let openapi = required_str(root, "openapi", "OpenAPI document")?;
         if !openapi.starts_with("3.0") {
-            return Err(Error::new(format!(
-                "unsupported OpenAPI version `{openapi}`; Satay MVP supports OpenAPI 3.0"
-            )));
+            return Err(Error::UnsupportedOpenApiVersion {
+                version: openapi.to_owned(),
+            });
         }
 
         let mut registry = TypeRegistry::default();
@@ -319,10 +557,8 @@ impl HttpMethod {
 }
 
 fn parse_document(spec: &str) -> Result<Value, Error> {
-    let yaml = serde_yaml::from_str::<serde_yaml::Value>(spec)
-        .map_err(|err| Error::new(format!("failed to parse OpenAPI YAML/JSON: {err}")))?;
-    serde_json::to_value(yaml)
-        .map_err(|err| Error::new(format!("failed to normalize OpenAPI document: {err}")))
+    let yaml = serde_yaml::from_str::<serde_yaml::Value>(spec).map_err(Error::ParseDocument)?;
+    serde_json::to_value(yaml).map_err(Error::NormalizeDocument)
 }
 
 fn reserve_component_type_names(
@@ -391,12 +627,13 @@ fn parse_component_kind(
         Some("array") | Some("string") | Some("integer") | Some("number") | Some("boolean") => {
             parse_component_alias_or_nutype(schema_name, schema, registry)
         }
-        Some(kind) => Err(Error::new(format!(
-            "unsupported type `{kind}` in schema `{schema_name}`"
-        ))),
-        None => Err(Error::new(format!(
-            "schema `{schema_name}` must declare `type`, `$ref`, `enum`, or `properties`"
-        ))),
+        Some(kind) => Err(Error::UnsupportedComponentType {
+            schema: schema_name.to_owned(),
+            kind: kind.to_owned(),
+        }),
+        None => Err(Error::MissingComponentSchemaType {
+            schema: schema_name.to_owned(),
+        }),
     }
 }
 
@@ -436,26 +673,31 @@ fn parse_string_enum(
     if let Some(kind) = schema.get("type").and_then(Value::as_str)
         && kind != "string"
     {
-        return Err(Error::new(format!(
-            "{context} uses enum type `{kind}`; only string enums are supported"
-        )));
+        return Err(Error::UnsupportedEnumType {
+            context: context.to_owned(),
+            kind: kind.to_owned(),
+        });
     }
 
     let values = schema
         .get("enum")
         .and_then(Value::as_array)
-        .ok_or_else(|| Error::new(format!("{context} has a non-array enum")))?;
+        .ok_or_else(|| Error::NonArrayEnum {
+            context: context.to_owned(),
+        })?;
     if values.is_empty() {
-        return Err(Error::new(format!("{context} has an empty enum")));
+        return Err(Error::EmptyEnum {
+            context: context.to_owned(),
+        });
     }
 
     let mut used = BTreeSet::new();
     let mut variants = Vec::with_capacity(values.len());
     for value in values {
         let Some(value) = value.as_str() else {
-            return Err(Error::new(format!(
-                "{context} contains a non-string enum value; only string enums are supported"
-            )));
+            return Err(Error::NonStringEnumValue {
+                context: context.to_owned(),
+            });
         };
         let rust_name = unique_ident(variant_ident(value), &mut used);
         variants.push(EnumVariant {
@@ -479,10 +721,8 @@ fn parse_struct_fields(
     let properties = schema
         .get("properties")
         .and_then(Value::as_object)
-        .ok_or_else(|| {
-            Error::new(format!(
-                "object schema `{schema_name}` must declare `properties`"
-            ))
+        .ok_or_else(|| Error::MissingObjectProperties {
+            schema: schema_name.to_owned(),
         })?;
 
     let mut used = BTreeSet::new();
@@ -513,15 +753,15 @@ fn parse_required_set(
     let Some(required) = schema.get("required") else {
         return Ok(BTreeSet::new());
     };
-    let required = required
-        .as_array()
-        .ok_or_else(|| Error::new(format!("{context} has a non-array `required` field")))?;
+    let required = required.as_array().ok_or_else(|| Error::NonArrayRequired {
+        context: context.to_owned(),
+    })?;
     let mut set = BTreeSet::new();
     for value in required {
         let Some(name) = value.as_str() else {
-            return Err(Error::new(format!(
-                "{context} has a non-string required field name"
-            )));
+            return Err(Error::NonStringRequiredField {
+                context: context.to_owned(),
+            });
         };
         set.insert(name.to_owned());
     }
@@ -575,22 +815,26 @@ fn parse_type_ref_base(
         Some("integer") => match schema.get("format").and_then(Value::as_str) {
             Some("int32") => Ok(TypeRef::I32),
             Some("int64") | None => Ok(TypeRef::I64),
-            Some(format) => Err(Error::new(format!(
-                "{context} uses unsupported integer format `{format}`"
-            ))),
+            Some(format) => Err(Error::UnsupportedIntegerFormat {
+                context: context.to_owned(),
+                format: format.to_owned(),
+            }),
         },
         Some("number") => match schema.get("format").and_then(Value::as_str) {
             Some("float") => Ok(TypeRef::F32),
             Some("double") | None => Ok(TypeRef::F64),
-            Some(format) => Err(Error::new(format!(
-                "{context} uses unsupported number format `{format}`"
-            ))),
+            Some(format) => Err(Error::UnsupportedNumberFormat {
+                context: context.to_owned(),
+                format: format.to_owned(),
+            }),
         },
         Some("boolean") => Ok(TypeRef::Bool),
         Some("array") => {
-            let items = schema.get("items").ok_or_else(|| {
-                Error::new(format!("{context} array schema must declare `items`"))
-            })?;
+            let items = schema
+                .get("items")
+                .ok_or_else(|| Error::MissingArrayItems {
+                    context: context.to_owned(),
+                })?;
             let item_name_hint = type_name_hint.map(|name| format!("{name} item"));
             Ok(TypeRef::Array(Box::new(parse_type_ref(
                 items,
@@ -599,18 +843,21 @@ fn parse_type_ref_base(
                 item_name_hint.as_deref(),
             )?)))
         }
-        Some("object") | None if schema.contains_key("properties") => Err(Error::new(format!(
-            "{context} is an inline object schema; move it to components/schemas and use `$ref`"
-        ))),
-        Some("object") => Err(Error::new(format!(
-            "{context} is an object without properties; map/object schemas are not supported yet"
-        ))),
-        Some(kind) => Err(Error::new(format!(
-            "{context} uses unsupported schema type `{kind}`"
-        ))),
-        None => Err(Error::new(format!(
-            "{context} must declare `type`, `$ref`, or `enum`"
-        ))),
+        Some("object") | None if schema.contains_key("properties") => {
+            Err(Error::InlineObjectSchema {
+                context: context.to_owned(),
+            })
+        }
+        Some("object") => Err(Error::UnsupportedMapObjectSchema {
+            context: context.to_owned(),
+        }),
+        Some(kind) => Err(Error::UnsupportedSchemaType {
+            context: context.to_owned(),
+            kind: kind.to_owned(),
+        }),
+        None => Err(Error::MissingSchemaType {
+            context: context.to_owned(),
+        }),
     }
 }
 
@@ -635,9 +882,9 @@ fn parse_string_validation(
     context: &str,
 ) -> Result<Option<Validation>, Error> {
     if schema.contains_key("pattern") {
-        return Err(Error::new(format!(
-            "{context} uses `pattern`; OpenAPI patterns use ECMA regex syntax and are not safely supported yet"
-        )));
+        return Err(Error::UnsupportedPattern {
+            context: context.to_owned(),
+        });
     }
 
     let min_length = optional_u64_keyword(schema, "minLength", context)?;
@@ -645,9 +892,11 @@ fn parse_string_validation(
     if let (Some(min_length), Some(max_length)) = (min_length, max_length)
         && min_length > max_length
     {
-        return Err(Error::new(format!(
-            "{context} has minLength {min_length} greater than maxLength {max_length}"
-        )));
+        return Err(Error::InvalidStringLengthBounds {
+            context: context.to_owned(),
+            min_length,
+            max_length,
+        });
     }
 
     if min_length.is_some() || max_length.is_some() {
@@ -703,9 +952,9 @@ fn parse_array_validation(
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
-        return Err(Error::new(format!(
-            "{context} uses `uniqueItems`; generated Vec-backed types cannot enforce uniqueness yet"
-        )));
+        return Err(Error::UniqueItemsUnsupported {
+            context: context.to_owned(),
+        });
     }
 
     let min_items = optional_u64_keyword(schema, "minItems", context)?;
@@ -713,9 +962,11 @@ fn parse_array_validation(
     if let (Some(min_items), Some(max_items)) = (min_items, max_items)
         && min_items > max_items
     {
-        return Err(Error::new(format!(
-            "{context} has minItems {min_items} greater than maxItems {max_items}"
-        )));
+        return Err(Error::InvalidArrayLengthBounds {
+            context: context.to_owned(),
+            min_items,
+            max_items,
+        });
     }
 
     if min_items.is_some() || max_items.is_some() {
@@ -728,18 +979,23 @@ fn parse_array_validation(
     }
 }
 
-fn reject_keyword(schema: &Map<String, Value>, keyword: &str, context: &str) -> Result<(), Error> {
+fn reject_keyword(
+    schema: &Map<String, Value>,
+    keyword: &'static str,
+    context: &str,
+) -> Result<(), Error> {
     if schema.contains_key(keyword) {
-        return Err(Error::new(format!(
-            "{context} uses `{keyword}`, which is not safely supported yet"
-        )));
+        return Err(Error::UnsupportedKeyword {
+            context: context.to_owned(),
+            keyword,
+        });
     }
     Ok(())
 }
 
 fn optional_u64_keyword(
     schema: &Map<String, Value>,
-    keyword: &str,
+    keyword: &'static str,
     context: &str,
 ) -> Result<Option<u64>, Error> {
     let Some(value) = schema.get(keyword) else {
@@ -747,15 +1003,16 @@ fn optional_u64_keyword(
     };
     match value.as_u64() {
         Some(value) => Ok(Some(value)),
-        None => Err(Error::new(format!(
-            "{context}.{keyword} must be a non-negative integer"
-        ))),
+        None => Err(Error::InvalidNonNegativeIntegerKeyword {
+            context: context.to_owned(),
+            keyword,
+        }),
     }
 }
 
 fn optional_bool_keyword(
     schema: &Map<String, Value>,
-    keyword: &str,
+    keyword: &'static str,
     context: &str,
 ) -> Result<Option<bool>, Error> {
     let Some(value) = schema.get(keyword) else {
@@ -764,21 +1021,26 @@ fn optional_bool_keyword(
     value
         .as_bool()
         .map(Some)
-        .ok_or_else(|| Error::new(format!("{context}.{keyword} must be a boolean")))
+        .ok_or_else(|| Error::InvalidBooleanKeyword {
+            context: context.to_owned(),
+            keyword,
+        })
 }
 
 fn optional_integer_limit(
     schema: &Map<String, Value>,
-    keyword: &str,
-    exclusive_keyword: &str,
+    keyword: &'static str,
+    exclusive_keyword: &'static str,
     context: &str,
 ) -> Result<Option<IntegerLimit>, Error> {
     let exclusive = optional_bool_keyword(schema, exclusive_keyword, context)?;
     let Some(value) = schema.get(keyword) else {
         if exclusive.is_some() {
-            return Err(Error::new(format!(
-                "{context}.{exclusive_keyword} requires `{keyword}`"
-            )));
+            return Err(Error::ExclusiveLimitRequiresBound {
+                context: context.to_owned(),
+                exclusive_keyword,
+                keyword,
+            });
         }
         return Ok(None);
     };
@@ -791,23 +1053,28 @@ fn optional_integer_limit(
 
 fn optional_float_limit(
     schema: &Map<String, Value>,
-    keyword: &str,
-    exclusive_keyword: &str,
+    keyword: &'static str,
+    exclusive_keyword: &'static str,
     context: &str,
 ) -> Result<Option<FloatLimit>, Error> {
     let exclusive = optional_bool_keyword(schema, exclusive_keyword, context)?;
     let Some(value) = schema.get(keyword) else {
         if exclusive.is_some() {
-            return Err(Error::new(format!(
-                "{context}.{exclusive_keyword} requires `{keyword}`"
-            )));
+            return Err(Error::ExclusiveLimitRequiresBound {
+                context: context.to_owned(),
+                exclusive_keyword,
+                keyword,
+            });
         }
         return Ok(None);
     };
     let value = value
         .as_f64()
         .filter(|value| value.is_finite())
-        .ok_or_else(|| Error::new(format!("{context}.{keyword} must be a finite number")))?;
+        .ok_or_else(|| Error::InvalidFiniteNumberKeyword {
+            context: context.to_owned(),
+            keyword,
+        })?;
     Ok(Some(FloatLimit {
         value,
         exclusive: exclusive.unwrap_or(false),
@@ -816,7 +1083,9 @@ fn optional_float_limit(
 
 fn json_integer(value: &Value, context: &str) -> Result<i128, Error> {
     let Some(number) = value.as_number() else {
-        return Err(Error::new(format!("{context} must be an integer")));
+        return Err(Error::ExpectedInteger {
+            context: context.to_owned(),
+        });
     };
     if let Some(value) = number.as_i64() {
         return Ok(i128::from(value));
@@ -825,10 +1094,14 @@ fn json_integer(value: &Value, context: &str) -> Result<i128, Error> {
         return Ok(i128::from(value));
     }
     let Some(value) = number.as_f64() else {
-        return Err(Error::new(format!("{context} must be an integer")));
+        return Err(Error::ExpectedInteger {
+            context: context.to_owned(),
+        });
     };
     if !value.is_finite() || value.fract() != 0.0 {
-        return Err(Error::new(format!("{context} must be an integer")));
+        return Err(Error::ExpectedInteger {
+            context: context.to_owned(),
+        });
     }
     Ok(value as i128)
 }
@@ -855,9 +1128,9 @@ fn normalize_integer_limits(
         .unwrap_or(type_max);
 
     if effective_min > effective_max {
-        return Err(Error::new(format!(
-            "{context} integer bounds do not allow any value"
-        )));
+        return Err(Error::EmptyIntegerBounds {
+            context: context.to_owned(),
+        });
     }
 
     let minimum = minimum.filter(|_| effective_min > type_min);
@@ -870,7 +1143,7 @@ fn effective_integer_min(limit: IntegerLimit) -> Result<i128, Error> {
         limit
             .value
             .checked_add(1)
-            .ok_or_else(|| Error::new("exclusive integer minimum overflows"))
+            .ok_or(Error::ExclusiveIntegerMinimumOverflow)
     } else {
         Ok(limit.value)
     }
@@ -881,7 +1154,7 @@ fn effective_integer_max(limit: IntegerLimit) -> Result<i128, Error> {
         limit
             .value
             .checked_sub(1)
-            .ok_or_else(|| Error::new("exclusive integer maximum overflows"))
+            .ok_or(Error::ExclusiveIntegerMaximumOverflow)
     } else {
         Ok(limit.value)
     }
@@ -906,9 +1179,9 @@ fn normalize_float_limits(
             && minimum.is_some_and(|limit| limit.exclusive)
             && maximum.is_some_and(|limit| limit.exclusive))
     {
-        return Err(Error::new(format!(
-            "{context} number bounds do not allow any value"
-        )));
+        return Err(Error::EmptyNumberBounds {
+            context: context.to_owned(),
+        });
     }
 
     let minimum = minimum.filter(|limit| limit.value > type_min);
@@ -924,7 +1197,7 @@ fn parse_operations(
     let paths = root
         .get("paths")
         .and_then(Value::as_object)
-        .ok_or_else(|| Error::new("OpenAPI document must declare `paths`"))?;
+        .ok_or(Error::MissingPaths)?;
 
     let mut operations = Vec::new();
     for (path, path_item) in paths {
@@ -1000,9 +1273,11 @@ fn parse_operation(
 
     let responses = parse_responses(
         document,
-        operation.get("responses").ok_or_else(|| {
-            Error::new(format!("operation `{operation_id}` must declare responses"))
-        })?,
+        operation
+            .get("responses")
+            .ok_or_else(|| Error::MissingOperationResponses {
+                operation_id: operation_id.clone(),
+            })?,
         &format!("operation `{operation_id}` responses"),
         registry,
         &type_prefix,
@@ -1031,9 +1306,9 @@ fn parse_parameter_list(
     let Some(parameters) = parameters else {
         return Ok(vec![]);
     };
-    let parameters = parameters
-        .as_array()
-        .ok_or_else(|| Error::new(format!("{context} must be an array")))?;
+    let parameters = parameters.as_array().ok_or_else(|| Error::ExpectedArray {
+        context: context.to_owned(),
+    })?;
 
     let mut parsed = Vec::with_capacity(parameters.len());
     for parameter in parameters {
@@ -1062,23 +1337,27 @@ fn parse_parameter(
         "path" => ParameterLocation::Path,
         "query" => ParameterLocation::Query,
         other => {
-            return Err(Error::new(format!(
-                "{context} parameter `{wire_name}` is in `{other}`; only path and query parameters are supported"
-            )));
+            return Err(Error::UnsupportedParameterLocation {
+                context: context.to_owned(),
+                wire_name: wire_name.clone(),
+                location: other.to_owned(),
+            });
         }
     };
 
     if parameter.contains_key("content") {
-        return Err(Error::new(format!(
-            "{context} parameter `{wire_name}` uses `content`; schema parameters are required"
-        )));
+        return Err(Error::ContentParameterUnsupported {
+            context: context.to_owned(),
+            wire_name: wire_name.clone(),
+        });
     }
 
-    let schema = parameter.get("schema").ok_or_else(|| {
-        Error::new(format!(
-            "{context} parameter `{wire_name}` must declare schema"
-        ))
-    })?;
+    let schema = parameter
+        .get("schema")
+        .ok_or_else(|| Error::MissingParameterSchema {
+            context: context.to_owned(),
+            wire_name: wire_name.clone(),
+        })?;
     let ty = parse_type_ref(
         schema,
         &format!("parameter `{wire_name}`"),
@@ -1086,22 +1365,22 @@ fn parse_parameter(
         Some(&format!("{type_prefix} {wire_name} parameter")),
     )?;
     if ty.is_nullable() {
-        return Err(Error::new(format!(
-            "parameter `{wire_name}` is nullable; nullable parameters are not supported"
-        )));
+        return Err(Error::NullableParameterUnsupported {
+            wire_name: wire_name.clone(),
+        });
     }
     if location == ParameterLocation::Path && is_array_type(ty.non_nullable()) {
-        return Err(Error::new(format!(
-            "path parameter `{wire_name}` is an array; array path parameter styles are not supported"
-        )));
+        return Err(Error::ArrayPathParameterUnsupported {
+            wire_name: wire_name.clone(),
+        });
     }
 
     let required = match location {
         ParameterLocation::Path => {
             if parameter.get("required").and_then(Value::as_bool) != Some(true) {
-                return Err(Error::new(format!(
-                    "path parameter `{wire_name}` must set required: true"
-                )));
+                return Err(Error::PathParameterNotRequired {
+                    wire_name: wire_name.clone(),
+                });
             }
             true
         }
@@ -1153,15 +1432,19 @@ fn parse_request_body(
     let content = request_body
         .get("content")
         .and_then(Value::as_object)
-        .ok_or_else(|| Error::new(format!("{context} must declare content")))?;
-    let (content_type, media_type) = json_media_type(content)
-        .ok_or_else(|| Error::new(format!("{context} must declare application/json content")))?;
+        .ok_or_else(|| Error::MissingContent {
+            context: context.to_owned(),
+        })?;
+    let (content_type, media_type) =
+        json_media_type(content).ok_or_else(|| Error::MissingJsonContent {
+            context: context.to_owned(),
+        })?;
     let media_type = object(media_type, context)?;
-    let schema = media_type.get("schema").ok_or_else(|| {
-        Error::new(format!(
-            "{context} application/json content must declare schema"
-        ))
-    })?;
+    let schema = media_type
+        .get("schema")
+        .ok_or_else(|| Error::MissingJsonSchema {
+            context: context.to_owned(),
+        })?;
 
     let mut used = parameters
         .iter()
@@ -1203,19 +1486,23 @@ fn parse_responses(
                 .and_then(Value::as_object)
                 .is_some_and(|content| !content.is_empty())
             {
-                return Err(Error::new(format!(
-                    "{context} contains a default response body; default response decoding is not supported yet"
-                )));
+                return Err(Error::DefaultResponseBodyUnsupported {
+                    context: context.to_owned(),
+                });
             }
             continue;
         }
-        let status_code = status.parse::<u16>().map_err(|_| {
-            Error::new(format!("{context} contains invalid status code `{status}`"))
-        })?;
+        let status_code = status
+            .parse::<u16>()
+            .map_err(|_| Error::InvalidStatusCode {
+                context: context.to_owned(),
+                status: status.to_owned(),
+            })?;
         if !(100..=599).contains(&status_code) {
-            return Err(Error::new(format!(
-                "{context} contains out-of-range status code `{status_code}`"
-            )));
+            return Err(Error::OutOfRangeStatusCode {
+                context: context.to_owned(),
+                status_code,
+            });
         }
 
         let response = resolve_reference(document, response, &format!("{context} {status}"))?;
@@ -1223,11 +1510,11 @@ fn parse_responses(
         let body = match response.get("content").and_then(Value::as_object) {
             Some(content) if content.is_empty() => None,
             Some(content) => {
-                let (_, media_type) = json_media_type(content).ok_or_else(|| {
-                    Error::new(format!(
-                        "{context} {status} response must declare application/json content"
-                    ))
-                })?;
+                let (_, media_type) =
+                    json_media_type(content).ok_or_else(|| Error::MissingResponseJsonContent {
+                        context: context.to_owned(),
+                        status: status.to_owned(),
+                    })?;
                 let media_type = object(media_type, &format!("{context} {status}"))?;
                 match media_type.get("schema") {
                     Some(schema) => Some(parse_type_ref(
@@ -1270,15 +1557,15 @@ fn parse_path_segments(path: &str) -> Result<Vec<PathSegment>, Error> {
         }
         let after_open = &rest[open + 1..];
         let Some(close) = after_open.find('}') else {
-            return Err(Error::new(format!(
-                "path `{path}` contains an unclosed parameter"
-            )));
+            return Err(Error::UnclosedPathParameter {
+                path: path.to_owned(),
+            });
         };
         let name = &after_open[..close];
         if name.is_empty() {
-            return Err(Error::new(format!(
-                "path `{path}` contains an empty parameter"
-            )));
+            return Err(Error::EmptyPathParameter {
+                path: path.to_owned(),
+            });
         }
         segments.push(PathSegment::Parameter(name.to_owned()));
         rest = &after_open[close + 1..];
@@ -1301,18 +1588,20 @@ fn validate_path_parameters(
         if let PathSegment::Parameter(name) = segment {
             placeholders.insert(name.as_str());
             if !declared.contains(name.as_str()) {
-                return Err(Error::new(format!(
-                    "path `{path}` uses parameter `{name}` but it is not declared"
-                )));
+                return Err(Error::UndeclaredPathParameter {
+                    path: path.to_owned(),
+                    name: name.to_owned(),
+                });
             }
         }
     }
 
     for name in declared {
         if !placeholders.contains(name) {
-            return Err(Error::new(format!(
-                "path parameter `{name}` is declared but not used in path `{path}`"
-            )));
+            return Err(Error::UnusedPathParameter {
+                path: path.to_owned(),
+                name: name.to_owned(),
+            });
         }
     }
 
@@ -1342,10 +1631,9 @@ fn render_api(api: &Api) -> Result<String, Error> {
         raw.push('\n');
     }
 
-    let syntax = syn::parse_file(&raw).map_err(|err| {
-        Error::new(format!(
-            "generated invalid Rust source: {err}\n--- generated source ---\n{raw}"
-        ))
+    let syntax = syn::parse_file(&raw).map_err(|source| Error::GeneratedInvalidRust {
+        source,
+        raw: raw.clone(),
     })?;
 
     let mut formatted = String::from("// @generated by satay. Do not edit by hand.\n\n");
@@ -1944,22 +2232,22 @@ fn resolve_reference<'a>(
         return Ok(value);
     };
 
-    resolve_json_pointer(document, reference).map_err(|err| {
-        Error::new(format!(
-            "failed to resolve reference `{reference}` in {context}: {err}"
-        ))
+    resolve_json_pointer(document, reference).map_err(|source| Error::ResolveReference {
+        reference: reference.to_owned(),
+        context: context.to_owned(),
+        source: Box::new(source),
     })
 }
 
 fn resolve_json_pointer<'a>(document: &'a Value, reference: &str) -> Result<&'a Value, Error> {
     let Some(pointer) = reference.strip_prefix('#') else {
-        return Err(Error::new("only local references are supported"));
+        return Err(Error::NonLocalReference);
     };
     if pointer.is_empty() {
         return Ok(document);
     }
     if !pointer.starts_with('/') {
-        return Err(Error::new("local reference must be a JSON pointer"));
+        return Err(Error::InvalidLocalReference);
     }
 
     let mut current = document;
@@ -1968,17 +2256,20 @@ fn resolve_json_pointer<'a>(document: &'a Value, reference: &str) -> Result<&'a 
         current = current
             .as_object()
             .and_then(|object| object.get(&token))
-            .ok_or_else(|| Error::new(format!("missing `{token}`")))?;
+            .ok_or_else(|| Error::MissingJsonPointerToken {
+                token: token.clone(),
+            })?;
     }
     Ok(current)
 }
 
-fn local_ref_name(reference: &str, section: &str) -> Result<String, Error> {
+fn local_ref_name(reference: &str, section: &'static str) -> Result<String, Error> {
     let prefix = format!("#/components/{section}/");
     let Some(name) = reference.strip_prefix(&prefix) else {
-        return Err(Error::new(format!(
-            "reference `{reference}` must point to #/components/{section}/..."
-        )));
+        return Err(Error::InvalidComponentReference {
+            reference: reference.to_owned(),
+            section,
+        });
     };
     Ok(json_pointer_unescape(name))
 }
@@ -1988,42 +2279,49 @@ fn json_pointer_unescape(token: &str) -> String {
 }
 
 fn object<'a>(value: &'a Value, context: &str) -> Result<&'a Map<String, Value>, Error> {
-    value
-        .as_object()
-        .ok_or_else(|| Error::new(format!("{context} must be an object")))
+    value.as_object().ok_or_else(|| Error::ExpectedObject {
+        context: context.to_owned(),
+    })
 }
 
 fn optional_object<'a>(
     object: &'a Map<String, Value>,
-    field: &str,
+    field: &'static str,
     context: &str,
 ) -> Result<Option<&'a Map<String, Value>>, Error> {
     match object.get(field) {
         Some(value) => value
             .as_object()
             .map(Some)
-            .ok_or_else(|| Error::new(format!("{context}.{field} must be an object"))),
+            .ok_or_else(|| Error::ExpectedObjectField {
+                context: context.to_owned(),
+                field,
+            }),
         None => Ok(None),
     }
 }
 
 fn required_str<'a>(
     object: &'a Map<String, Value>,
-    field: &str,
+    field: &'static str,
     context: &str,
 ) -> Result<&'a str, Error> {
     object
         .get(field)
         .and_then(Value::as_str)
-        .ok_or_else(|| Error::new(format!("{context} must declare string field `{field}`")))
+        .ok_or_else(|| Error::MissingStringField {
+            context: context.to_owned(),
+            field,
+        })
 }
 
 fn reject_composition(schema: &Map<String, Value>, context: &str) -> Result<(), Error> {
     for keyword in ["oneOf", "anyOf", "allOf"] {
         if schema.contains_key(keyword) {
-            return Err(Error::new(format!(
-                "{context} uses `{keyword}`, which is not in the MVP scope"
-            )));
+            return Err(Error::UnsupportedComposition {
+                context: context.to_owned(),
+                keyword,
+            });
         }
     }
     Ok(())

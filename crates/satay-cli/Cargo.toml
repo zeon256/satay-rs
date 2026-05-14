@@ -10,3 +10,4 @@ path = "src/main.rs"
 [dependencies]
 argh.workspace = true
 satay-codegen = { path = "../satay-codegen" }
+thiserror.workspace = true
