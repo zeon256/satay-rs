@@ -1,0 +1,15 @@
+[package]
+name = "satay-runtime"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = ["serde", "json"]
+serde = ["dep:serde"]
+json = ["serde", "dep:serde_json"]
+
+[dependencies]
+http.workspace = true
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+thiserror.workspace = true

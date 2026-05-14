@@ -1,0 +1,12 @@
+[package]
+name = "satay-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "satay"
+path = "src/main.rs"
+
+[dependencies]
+argh.workspace = true
+satay-codegen = { path = "../satay-codegen" }
