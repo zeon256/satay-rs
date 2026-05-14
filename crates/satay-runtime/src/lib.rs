@@ -29,6 +29,9 @@ pub enum Error {
     #[error("invalid HTTP header value: {0}")]
     InvalidHeaderValue(#[from] header::InvalidHeaderValue),
 
+    #[error("invalid HTTP header name: {0}")]
+    InvalidHeaderName(#[from] header::InvalidHeaderName),
+
     #[error("missing required field `{0}`")]
     MissingRequired(&'static str),
 
@@ -165,7 +168,10 @@ pub fn insert_header(
     name: &'static str,
     value: &str,
 ) -> Result<(), Error> {
-    headers.insert(HeaderName::from_static(name), HeaderValue::from_str(value)?);
+    headers.insert(
+        HeaderName::from_bytes(name.as_bytes())?,
+        HeaderValue::from_str(value)?,
+    );
     Ok(())
 }
 

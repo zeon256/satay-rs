@@ -29,18 +29,18 @@ fn simple_fixture_generates_expected_file_structure() {
     let mod_rs = find_file(&files, "mod.rs");
     assert!(mod_rs.contents.contains("pub const SERVER_URL"));
     assert!(mod_rs.contents.contains("pub mod types;"));
-    assert!(
-        mod_rs
-            .contents
-            .contains("all(feature = \"json\", feature = \"reqwest\")")
-    );
-    assert!(mod_rs.contents.contains("mod client;"));
+    assert!(mod_rs.contents.contains("#[cfg(feature = \"json\")]"));
+    assert!(mod_rs.contents.contains("mod api;"));
     assert!(mod_rs.contents.contains("pub mod get_user;"));
     assert!(mod_rs.contents.contains("pub mod update_user;"));
 
-    let client_rs = find_file(&files, "client.rs");
-    assert!(client_rs.contents.contains("pub struct ApiClient"));
-    assert!(client_rs.contents.contains("pub enum ClientError"));
+    assert!(!files.iter().any(|file| file.relative_path == "client.rs"));
+    let api_rs = find_file(&files, "api.rs");
+    assert!(api_rs.contents.contains("pub struct Api"));
+    assert!(api_rs.contents.contains("pub struct GetUserAction"));
+    assert!(api_rs.contents.contains("pub fn get_user"));
+    assert!(api_rs.contents.contains("pub fn request"));
+    assert!(api_rs.contents.contains("pub fn decode"));
 
     let types_rs = find_file(&files, "types.rs");
     assert!(types_rs.contents.contains("pub struct ErrorBody"));
@@ -77,7 +77,7 @@ fn simple_fixture_generates_expected_file_structure() {
 }
 
 #[test]
-fn server_security_and_client_helpers_are_generated() {
+fn server_security_and_api_action_helpers_are_generated() {
     let files = satay_codegen::generate(
         r#"
 openapi: 3.0.3
@@ -106,6 +106,10 @@ components:
       type: apiKey
       in: header
       name: AccountKey
+    apiKeyQuery:
+      type: apiKey
+      in: query
+      name: api_key
   schemas:
     User:
       type: object
@@ -125,19 +129,72 @@ components:
             .contains("pub const SERVER_URL: &str = \"https://api.example.test/v1\";")
     );
 
-    let client_rs = find_file(&files, "client.rs");
-    assert!(client_rs.contents.contains("pub fn account_key"));
-    assert!(client_rs.contents.contains("pub async fn get_user"));
-    assert!(
-        client_rs
-            .contents
-            .contains("HeaderName::from_bytes(\"AccountKey\".as_bytes())")
-    );
-    assert!(
-        client_rs
-            .contents
-            .contains("self.apply_base_url(&mut request)?")
-    );
+    let api_rs = find_file(&files, "api.rs");
+    assert!(api_rs.contents.contains("pub fn account_key"));
+    assert!(api_rs.contents.contains("pub fn api_key"));
+    assert!(api_rs.contents.contains("pub fn get_user"));
+    assert!(api_rs.contents.contains("pub struct GetUserAction"));
+    assert!(api_rs.contents.contains("satay_runtime::insert_header"));
+    assert!(api_rs.contents.contains("\"AccountKey\""));
+    assert!(api_rs.contents.contains("satay_runtime::append_query_pair"));
+    assert!(api_rs.contents.contains("\"api_key\""));
+    assert!(api_rs.contents.contains("parts.uri = format!"));
+    assert!(!api_rs.contents.contains("reqwest"));
+
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+
+    let runtime_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("codegen crate has parent")
+        .join("satay-runtime");
+    let runtime_path = toml_string(&runtime_path.to_string_lossy());
+
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::*;
+
+    #[test]
+    fn action_applies_base_url_and_api_keys() {
+        let request = Api::new()
+            .account_key("secret")
+            .api_key("query secret")
+            .get_user("42")
+            .request()
+            .expect("action request");
+
+        assert_eq!(
+            request.uri().to_string(),
+            "https://api.example.test/v1/users/42?api_key=query%20secret"
+        );
+        let account_key = http::header::HeaderName::from_bytes(b"AccountKey").unwrap();
+        assert_eq!(request.headers().get(account_key).unwrap(), "secret");
+    }
+}
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
+    let output = process::Command::new(&cargo)
+        .arg("test")
+        .arg("--quiet")
+        .current_dir(crate_dir)
+        .output()
+        .expect("run cargo test for secured generated crate");
+
+    if !output.status.success() {
+        panic!(
+            "secured generated crate tests failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 #[test]
@@ -211,6 +268,19 @@ mod tests {
     }
 
     #[test]
+    fn action_builder_constructs_json_request_without_io() {
+        let request = Api::new()
+            .get_user("user/42")
+            .include_details(true)
+            .request()
+            .expect("action request");
+
+        assert_eq!(request.method(), http::Method::GET);
+        assert_eq!(request.uri(), "/users/user%2F42?includeDetails=true");
+        assert!(request.body().is_empty());
+    }
+
+    #[test]
     fn encodes_json_request_body() {
         let request = encode_update_user(
             UpdateUserInput::new("42")
@@ -251,7 +321,7 @@ mod tests {
                     .to_vec(),
             )
             .unwrap();
-        let decoded = decode_get_user_response(response).expect("decoded response");
+        let decoded = GetUserAction::decode(response).expect("decoded response");
 
         match decoded {
             GetUserResponse::Ok(user) => {

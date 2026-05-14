@@ -32,8 +32,8 @@ Satay currently targets OpenAPI 3.0.x and a deliberately small, typed subset.
 - Generated `SERVER_URL` from the first OpenAPI `servers` entry.
 - Generated `encode_<operation>` helpers, behind the generated crate's `json` feature, that produce `http::Request<Vec<u8>>`.
 - Generated `decode_<operation>_response` helpers, behind the generated crate's `json` feature, that decode known JSON responses and preserve unknown statuses as `UnexpectedStatus(http::StatusCode, Vec<u8>)`.
-- Generated `ApiClient`, behind the generated crate's `json` and `reqwest` features, for projects that want a ready-to-use `reqwest` transport.
-- Header and query `apiKey` security schemes for the generated `ApiClient`.
+- Generated `Api` action builders, behind the generated crate's `json` feature, for base URL, API-key auth, request construction, and response decoding without choosing a transport.
+- Header and query `apiKey` security schemes for generated action builders.
 - Percent-encoded path and query values.
 - Repeated query parameters for array query values.
 - Optional fields and optional request bodies.
@@ -59,30 +59,31 @@ regex = "1"
 
 > **Note:** OpenAPI `pattern` uses ECMA-262 (JavaScript) regex syntax, while `nutype` uses the Rust `regex` crate. Most common patterns (character classes, quantifiers, anchors) are compatible. However, ECMA features like lookahead, lookbehind, and backreferences are not supported by the Rust `regex` engine and will cause a compile error in the generated code.
 
-## Optional reqwest client
+## Action Builders
 
-Satay remains Sans-IO by default. To compile the generated `ApiClient`, define a `reqwest` feature in the crate that includes generated code:
+Generated action builders keep request construction and response decoding Sans-IO while reducing boilerplate:
+
+```rust
+let api = generated::Api::new()
+    .account_key(std::env::var("LTA_ACCOUNT_KEY")?);
+
+let request = api
+    .get_bus_arrival("83139")
+    .request()?;
+
+// Send `request` with reqwest, ureq, hyper, tests, WASM, or your own transport.
+
+let response = satay_runtime::from_raw_parts(status, headers, body)?;
+let decoded = generated::GetBusArrivalAction::decode(response)?;
+```
+
+To compile JSON request and response helpers, define the generated crate's `json` feature:
 
 ```toml
 [features]
 default = ["serde", "json"]
 serde = ["dep:serde", "satay-runtime/serde"]
 json = ["serde", "dep:serde_json", "satay-runtime/json"]
-reqwest = ["json", "dep:reqwest"]
-
-[dependencies]
-reqwest = { version = "0.12", optional = true, default-features = false, features = ["rustls-tls"] }
-```
-
-The client uses generated input builders and still returns the generated response enum:
-
-```rust
-let api = generated::ApiClient::new(reqwest::Client::new())
-    .account_key(std::env::var("LTA_ACCOUNT_KEY")?);
-
-let response = api
-    .get_bus_arrival(GetBusArrivalInput::new("83139"))
-    .await?;
 ```
 
 ## Not supported yet
@@ -114,6 +115,10 @@ These are known gaps rather than silent compatibility promises:
 - Improve reference handling with validated schema references and remote reference loading.
 - Add OpenAPI 3.1 support once the schema subset is explicit and tested.
 - Add first-class examples for common transports while keeping generated clients Sans-IO.
+
+## Examples
+
+- `examples/reqwest`: generates from `examples/openapi.yaml` at build time, sends the request with `reqwest`, and decodes with the generated action API.
 
 ## Workspace
 

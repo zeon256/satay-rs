@@ -114,7 +114,12 @@ fn parse_api_key_security_schemes(
         return Ok(vec![]);
     };
 
-    let mut used = BTreeSet::from(["base_url".to_owned(), "http".to_owned()]);
+    let mut used = BTreeSet::from([
+        "apply".to_owned(),
+        "base_url".to_owned(),
+        "http".to_owned(),
+        "new".to_owned(),
+    ]);
     let mut schemes = Vec::new();
     for (scheme_name, scheme) in security_schemes {
         let context = format!("security scheme `{scheme_name}`");

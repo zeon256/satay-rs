@@ -3,6 +3,7 @@ use quote::quote;
 use std::collections::BTreeSet;
 use syn::{Ident, Item, LitStr, parse_quote};
 
+use crate::ident::type_ident;
 use crate::model::{
     Api, ApiKeyLocation, ApiKeySecurityScheme, Component, ComponentKind, ConstrainedType,
     EnumVariant, Field, FloatLimit, IntegerLimit, Operation, Parameter, ParameterLocation,
@@ -42,10 +43,10 @@ pub(crate) fn render_api(api: &Api) -> Vec<GeneratedFile> {
         });
     }
 
-    let client_file = render_client_file(api);
+    let api_file = render_api_file(api);
     files.push(GeneratedFile {
-        relative_path: "client.rs".to_owned(),
-        contents: format_file(client_file),
+        relative_path: "api.rs".to_owned(),
+        contents: format_file(api_file),
     });
 
     for operation in &api.operations {
@@ -76,6 +77,7 @@ pub(crate) fn render_api(api: &Api) -> Vec<GeneratedFile> {
 fn format_file(file: syn::File) -> String {
     let code = prettyplease::unparse(&file);
     let code = add_blank_lines_between_items(&code);
+    let code = add_blank_lines_between_impl_methods(&code);
     let code = add_blank_lines_between_members(&code);
     let mut formatted = String::with_capacity(PREAMBLE.len() + code.len());
     formatted.push_str(PREAMBLE);
@@ -97,6 +99,32 @@ fn add_blank_lines_between_items(code: &str) -> String {
                     || next.starts_with("use "))
                 || line.starts_with("use ") && !next.starts_with("use ");
             if needs_blank {
+                result.push('\n');
+            }
+        }
+    }
+    result
+}
+
+fn add_blank_lines_between_impl_methods(code: &str) -> String {
+    let mut result = String::with_capacity(code.len() + code.len() / 4);
+    let mut lines = code.lines().peekable();
+    while let Some(line) = lines.next() {
+        result.push_str(line);
+        result.push('\n');
+        let trimmed = line.trim_start();
+        let indent_len = line.len() - trimmed.len();
+        if indent_len == 4
+            && trimmed == "}"
+            && let Some(next) = lines.peek()
+        {
+            let next_trimmed = next.trim_start();
+            let next_indent_len = next.len() - next_trimmed.len();
+            let next_is_method = next_trimmed.starts_with("pub ")
+                || next_trimmed.starts_with("fn ")
+                || next_trimmed.starts_with("async fn ")
+                || next_trimmed.starts_with("#[");
+            if next_indent_len == 4 && next_is_method {
                 result.push('\n');
             }
         }
@@ -140,12 +168,12 @@ fn render_top_mod(api: &Api) -> syn::File {
     }
 
     items.push(parse_quote!(
-        #[cfg(all(feature = "json", feature = "reqwest"))]
-        mod client;
+        #[cfg(feature = "json")]
+        mod api;
     ));
     items.push(parse_quote!(
-        #[cfg(all(feature = "json", feature = "reqwest"))]
-        pub use client::*;
+        #[cfg(feature = "json")]
+        pub use api::*;
     ));
 
     for operation in &api.operations {
@@ -205,8 +233,9 @@ fn render_endpoint_mod(_operation: &Operation) -> syn::File {
 
 fn render_endpoint_parts_file(api: &Api, operation: &Operation) -> syn::File {
     let mut items = Vec::new();
-    let use_types = build_types_use(api, operation);
-    items.push(Item::Use(use_types));
+    if let Some(use_types) = build_parts_types_use(api, operation) {
+        items.push(Item::Use(use_types));
+    }
     items.push(Item::Struct(render_input(operation)));
     items.push(Item::Impl(render_input_impl(operation)));
     items.push(Item::Enum(render_response(operation)));
@@ -221,8 +250,9 @@ fn render_endpoint_parts_file(api: &Api, operation: &Operation) -> syn::File {
 
 fn render_endpoint_json_file(api: &Api, operation: &Operation) -> syn::File {
     let mut items = Vec::new();
-    let use_types = build_types_use(api, operation);
-    items.push(Item::Use(use_types));
+    if let Some(use_types) = build_json_types_use(api, operation) {
+        items.push(Item::Use(use_types));
+    }
     let input_name = ident(&operation.input_name);
     let response_name = ident(&operation.response_name);
     let parts_fn = ident(&format!("{}_parts", operation.fn_name));
@@ -239,20 +269,19 @@ fn render_endpoint_json_file(api: &Api, operation: &Operation) -> syn::File {
     }
 }
 
-fn render_client_file(api: &Api) -> syn::File {
+fn render_api_file(api: &Api) -> syn::File {
     let mut items = Vec::new();
-    items.push(parse_quote!(
-        use std::fmt;
-    ));
-    items.push(parse_quote!(
-        use http::header::{HeaderName, HeaderValue};
-    ));
-    if let Some(operation_use) = build_client_operation_use(api) {
+    if let Some(operation_use) = build_api_operation_use(api) {
         items.push(Item::Use(operation_use));
     }
-    items.extend(render_client_error_items());
-    items.push(Item::Struct(render_client_struct(api)));
-    items.push(Item::Impl(render_client_impl(api)));
+    items.push(Item::Struct(render_api_struct(api)));
+    items.push(Item::Impl(render_api_default_impl()));
+    items.push(Item::Impl(render_api_impl(api)));
+
+    for operation in &api.operations {
+        items.push(Item::Struct(render_action_struct(operation)));
+        items.push(Item::Impl(render_action_impl(operation)));
+    }
 
     syn::File {
         shebang: None,
@@ -261,7 +290,7 @@ fn render_client_file(api: &Api) -> syn::File {
     }
 }
 
-fn build_client_operation_use(api: &Api) -> Option<syn::ItemUse> {
+fn build_api_operation_use(api: &Api) -> Option<syn::ItemUse> {
     if api.operations.is_empty() {
         return None;
     }
@@ -270,109 +299,44 @@ fn build_client_operation_use(api: &Api) -> Option<syn::ItemUse> {
     for operation in &api.operations {
         names.push(ident(&operation.input_name));
         names.push(ident(&operation.response_name));
-        names.push(ident(&format!("encode_{}", operation.fn_name)));
+        names.push(ident(&format!("{}_parts", operation.fn_name)));
         names.push(ident(&format!("decode_{}_response", operation.fn_name)));
+        for field in input_fields(operation) {
+            collect_type_refs(&field.ty, &mut names);
+        }
     }
+    names.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+    names.dedup();
 
     Some(parse_quote!(use super::{#(#names),*};))
 }
 
-fn render_client_error_items() -> Vec<syn::Item> {
-    vec![
-        parse_quote!(
-            #[derive(Debug)]
-            pub enum ClientError {
-                Runtime(satay_runtime::Error),
-                Reqwest(reqwest::Error),
-                InvalidHeaderName(http::header::InvalidHeaderName),
-                InvalidHeaderValue(http::header::InvalidHeaderValue),
-                InvalidUri(http::uri::InvalidUri),
-            }
-        ),
-        parse_quote!(
-            impl fmt::Display for ClientError {
-                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                    match self {
-                        Self::Runtime(source) => write!(f, "satay runtime error: {source}"),
-                        Self::Reqwest(source) => write!(f, "reqwest error: {source}"),
-                        Self::InvalidHeaderName(source) => {
-                            write!(f, "invalid API key header name: {source}")
-                        }
-                        Self::InvalidHeaderValue(source) => {
-                            write!(f, "invalid API key header value: {source}")
-                        }
-                        Self::InvalidUri(source) => write!(f, "invalid request URI: {source}"),
-                    }
-                }
-            }
-        ),
-        parse_quote!(
-            impl std::error::Error for ClientError {
-                fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-                    match self {
-                        Self::Runtime(source) => Some(source),
-                        Self::Reqwest(source) => Some(source),
-                        Self::InvalidHeaderName(source) => Some(source),
-                        Self::InvalidHeaderValue(source) => Some(source),
-                        Self::InvalidUri(source) => Some(source),
-                    }
-                }
-            }
-        ),
-        parse_quote!(
-            impl From<satay_runtime::Error> for ClientError {
-                fn from(source: satay_runtime::Error) -> Self {
-                    Self::Runtime(source)
-                }
-            }
-        ),
-        parse_quote!(
-            impl From<reqwest::Error> for ClientError {
-                fn from(source: reqwest::Error) -> Self {
-                    Self::Reqwest(source)
-                }
-            }
-        ),
-        parse_quote!(
-            impl From<http::header::InvalidHeaderName> for ClientError {
-                fn from(source: http::header::InvalidHeaderName) -> Self {
-                    Self::InvalidHeaderName(source)
-                }
-            }
-        ),
-        parse_quote!(
-            impl From<http::header::InvalidHeaderValue> for ClientError {
-                fn from(source: http::header::InvalidHeaderValue) -> Self {
-                    Self::InvalidHeaderValue(source)
-                }
-            }
-        ),
-        parse_quote!(
-            impl From<http::uri::InvalidUri> for ClientError {
-                fn from(source: http::uri::InvalidUri) -> Self {
-                    Self::InvalidUri(source)
-                }
-            }
-        ),
-    ]
-}
-
-fn render_client_struct(api: &Api) -> syn::ItemStruct {
+fn render_api_struct(api: &Api) -> syn::ItemStruct {
     let auth_fields = api.api_key_security_schemes.iter().map(|scheme| {
         let name = ident(&scheme.rust_name);
         quote!(#name: Option<String>)
     });
 
     parse_quote!(
-        pub struct ApiClient {
-            http: reqwest::Client,
+        #[derive(Debug, Clone)]
+        pub struct Api {
             base_url: String,
             #(#auth_fields,)*
         }
     )
 }
 
-fn render_client_impl(api: &Api) -> syn::ItemImpl {
+fn render_api_default_impl() -> syn::ItemImpl {
+    parse_quote!(
+        impl Default for Api {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+    )
+}
+
+fn render_api_impl(api: &Api) -> syn::ItemImpl {
     let auth_initializers = api.api_key_security_schemes.iter().map(|scheme| {
         let name = ident(&scheme.rust_name);
         quote!(#name: None)
@@ -385,15 +349,14 @@ fn render_client_impl(api: &Api) -> syn::ItemImpl {
     let operation_methods = api
         .operations
         .iter()
-        .map(render_client_operation_method)
+        .map(render_api_operation_method)
         .collect::<Vec<_>>();
     let apply_api_keys = render_apply_api_keys_body(api);
 
     parse_quote!(
-        impl ApiClient {
-            pub fn new(http: reqwest::Client) -> Self {
+        impl Api {
+            pub fn new() -> Self {
                 Self {
-                    http,
                     base_url: super::SERVER_URL.to_owned(),
                     #(#auth_initializers,)*
                 }
@@ -408,20 +371,15 @@ fn render_client_impl(api: &Api) -> syn::ItemImpl {
 
             #(#operation_methods)*
 
-            fn apply_api_keys(&self, request: &mut http::Request<Vec<u8>>) -> Result<(), ClientError> {
+            fn apply<B>(&self, parts: &mut satay_runtime::RequestParts<B>) -> Result<(), satay_runtime::Error> {
                 #apply_api_keys
-                Ok(())
-            }
-
-            fn apply_base_url(&self, request: &mut http::Request<Vec<u8>>) -> Result<(), ClientError> {
                 if self.base_url.is_empty() {
                     return Ok(());
                 }
-                let path_and_query = request.uri().to_string();
+                let path_and_query = parts.uri.as_str();
                 let base_url = self.base_url.trim_end_matches('/');
                 let separator = if path_and_query.starts_with('/') { "" } else { "/" };
-                let full_url = format!("{base_url}{separator}{path_and_query}");
-                *request.uri_mut() = full_url.parse()?;
+                parts.uri = format!("{base_url}{separator}{path_and_query}");
                 Ok(())
             }
         }
@@ -444,34 +402,34 @@ fn render_api_key_setter(scheme: &ApiKeySecurityScheme) -> TokenStream {
     )
 }
 
-fn render_client_operation_method(operation: &Operation) -> TokenStream {
+fn render_api_operation_method(operation: &Operation) -> TokenStream {
     let method = ident(&operation.fn_name);
+    let action = action_ident(operation);
     let input = ident(&operation.input_name);
-    let response = ident(&operation.response_name);
-    let encode_fn = ident(&format!("encode_{}", operation.fn_name));
-    let decode_fn = ident(&format!("decode_{}_response", operation.fn_name));
+    let required_fields = input_fields(operation)
+        .into_iter()
+        .filter(|field| field.required)
+        .collect::<Vec<_>>();
+    let new_args = required_fields.iter().map(|field| {
+        let name = ident(&field.rust_name);
+        let ty = input_builder_arg_type(&field.ty);
+        quote!(#name: #ty)
+    });
+    let new_arg_names = required_fields.iter().map(|field| ident(&field.rust_name));
 
     quote!(
-        pub async fn #method(&self, input: #input) -> Result<#response, ClientError> {
-            let mut request = #encode_fn(input)?;
-            self.apply_api_keys(&mut request)?;
-            self.apply_base_url(&mut request)?;
-            let request: reqwest::Request = request.try_into()?;
-            let response = self.http.execute(request).await?;
-
-            let status = response.status();
-            let headers = response.headers().clone();
-            let body = response.bytes().await?.to_vec();
-            let response = satay_runtime::from_raw_parts(status, headers, body)?;
-
-            Ok(#decode_fn(response)?)
+        pub fn #method(&self #(, #new_args)*) -> #action<'_> {
+            #action {
+                api: self,
+                input: #input::new(#(#new_arg_names),*),
+            }
         }
     )
 }
 
 fn render_apply_api_keys_body(api: &Api) -> TokenStream {
     if api.api_key_security_schemes.is_empty() {
-        return quote!(let _ = request;);
+        return quote!();
     }
 
     let headers = api
@@ -483,9 +441,7 @@ fn render_apply_api_keys_body(api: &Api) -> TokenStream {
             let wire_name = lit_str(&scheme.wire_name);
             quote!(
                 if let Some(value) = &self.#field {
-                    let name = HeaderName::from_bytes(#wire_name.as_bytes())?;
-                    let value = HeaderValue::from_str(value)?;
-                    request.headers_mut().insert(name, value);
+                    satay_runtime::insert_header(&mut parts.headers, #wire_name, value)?;
                 }
             )
         })
@@ -499,8 +455,7 @@ fn render_apply_api_keys_body(api: &Api) -> TokenStream {
             let wire_name = lit_str(&scheme.wire_name);
             quote!(
                 if let Some(value) = &self.#field {
-                    satay_runtime::append_query_pair(&mut uri, &mut first_query, #wire_name, value);
-                    changed = true;
+                    satay_runtime::append_query_pair(&mut parts.uri, &mut first_query, #wire_name, value);
                 }
             )
         })
@@ -509,13 +464,8 @@ fn render_apply_api_keys_body(api: &Api) -> TokenStream {
         quote!()
     } else {
         quote!(
-            let mut uri = request.uri().to_string();
-            let mut first_query = !uri.contains('?');
-            let mut changed = false;
+            let mut first_query = !parts.uri.contains('?');
             #(#query)*
-            if changed {
-                *request.uri_mut() = uri.parse()?;
-            }
         )
     };
 
@@ -525,7 +475,77 @@ fn render_apply_api_keys_body(api: &Api) -> TokenStream {
     )
 }
 
-fn build_types_use(api: &Api, operation: &Operation) -> syn::ItemUse {
+fn render_action_struct(operation: &Operation) -> syn::ItemStruct {
+    let action = action_ident(operation);
+    let input = ident(&operation.input_name);
+
+    parse_quote!(
+        #[derive(Debug, Clone)]
+        pub struct #action<'a> {
+            api: &'a Api,
+            input: #input,
+        }
+    )
+}
+
+fn render_action_impl(operation: &Operation) -> syn::ItemImpl {
+    let action = action_ident(operation);
+    let response = ident(&operation.response_name);
+    let parts_fn = ident(&format!("{}_parts", operation.fn_name));
+    let decode_fn = ident(&format!("decode_{}_response", operation.fn_name));
+    let request_expr = request_from_parts_expr(operation);
+    let setters = input_fields(operation)
+        .into_iter()
+        .filter(|field| !field.required)
+        .map(render_action_setter)
+        .collect::<Vec<_>>();
+
+    parse_quote!(
+        impl #action<'_> {
+            #(#setters)*
+
+            pub fn request(self) -> Result<http::Request<Vec<u8>>, satay_runtime::Error> {
+                let api = self.api;
+                let mut parts = #parts_fn(self.input)?;
+                api.apply(&mut parts)?;
+                #request_expr
+            }
+
+            pub fn decode(
+                response: http::Response<Vec<u8>>,
+            ) -> Result<#response, satay_runtime::Error> {
+                #decode_fn(response)
+            }
+        }
+    )
+}
+
+fn render_action_setter(field: Field) -> TokenStream {
+    let setter = input_setter_name(&field);
+    let name = ident(&field.rust_name);
+    let ty = input_builder_arg_type(&field.ty);
+
+    quote!(
+        pub fn #setter(mut self, #name: #ty) -> Self {
+            self.input = self.input.#setter(#name);
+            self
+        }
+    )
+}
+
+fn action_ident(operation: &Operation) -> Ident {
+    ident(&format!("{}Action", type_ident(&operation.fn_name)))
+}
+
+fn request_from_parts_expr(operation: &Operation) -> syn::Expr {
+    match &operation.request_body {
+        Some(body) if body.required => parse_quote!(satay_runtime::into_json_request(parts)),
+        Some(_) => parse_quote!(satay_runtime::into_optional_json_request(parts)),
+        None => parse_quote!(satay_runtime::into_empty_request(parts)),
+    }
+}
+
+fn build_parts_types_use(api: &Api, operation: &Operation) -> Option<syn::ItemUse> {
     let mut needed_names: Vec<Ident> = Vec::new();
 
     for param in &operation.parameters {
@@ -540,13 +560,22 @@ fn build_types_use(api: &Api, operation: &Operation) -> syn::ItemUse {
         }
     }
 
-    let mut all_names: Vec<Ident> = needed_names;
-    if operation.request_body.is_some() || !operation.parameters.is_empty() {
-        let input_ident = ident(&operation.input_name);
-        if !all_names.iter().any(|n| n == &input_ident) {
-            // Input type is defined locally, no need to import
+    build_types_use(api, needed_names)
+}
+
+fn build_json_types_use(api: &Api, operation: &Operation) -> Option<syn::ItemUse> {
+    let mut needed_names: Vec<Ident> = Vec::new();
+
+    for response in &operation.responses {
+        if let Some(body) = &response.body {
+            collect_type_refs(body, &mut needed_names);
         }
     }
+
+    build_types_use(api, needed_names)
+}
+
+fn build_types_use(api: &Api, mut all_names: Vec<Ident>) -> Option<syn::ItemUse> {
     all_names.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
     all_names.dedup();
 
@@ -563,13 +592,7 @@ fn build_types_use(api: &Api, operation: &Operation) -> syn::ItemUse {
         .filter(|n| type_names.contains(&n.to_string()))
         .collect::<Vec<Ident>>();
 
-    if names.is_empty() {
-        return parse_quote!(
-            use super::super::types;
-        );
-    }
-
-    parse_quote!(use super::super::types::{#(#names),*};)
+    (!names.is_empty()).then(|| parse_quote!(use super::super::types::{#(#names),*};))
 }
 
 fn collect_type_refs(ty: &TypeRef, names: &mut Vec<Ident>) {
@@ -978,11 +1001,7 @@ fn render_input_impl(operation: &Operation) -> syn::ItemImpl {
 }
 
 fn render_input_setter(field: &Field) -> TokenStream {
-    let setter_name = if field.rust_name == "new" {
-        ident("with_new")
-    } else {
-        ident(&field.rust_name)
-    };
+    let setter_name = input_setter_name(field);
     let name = ident(&field.rust_name);
     let ty = input_builder_arg_type(&field.ty);
     if field.ty.is_nullable() {
@@ -1000,6 +1019,14 @@ fn render_input_setter(field: &Field) -> TokenStream {
                 self
             }
         )
+    }
+}
+
+fn input_setter_name(field: &Field) -> Ident {
+    if field.rust_name == "new" {
+        ident("with_new")
+    } else {
+        ident(&field.rust_name)
     }
 }
 
@@ -1283,11 +1310,7 @@ fn render_encode_function(operation: &Operation) -> syn::ItemFn {
     let parts_fn = ident(&format!("{}_parts", operation.fn_name));
     let encode_fn = ident(&format!("encode_{}", operation.fn_name));
     let input_type = ident(&operation.input_name);
-    let encode_expr: syn::Expr = match &operation.request_body {
-        Some(body) if body.required => parse_quote!(satay_runtime::into_json_request(parts)),
-        Some(_) => parse_quote!(satay_runtime::into_optional_json_request(parts)),
-        None => parse_quote!(satay_runtime::into_empty_request(parts)),
-    };
+    let encode_expr = request_from_parts_expr(operation);
 
     parse_quote!(
         pub fn #encode_fn(input: #input_type) -> Result<http::Request<Vec<u8>>, satay_runtime::Error> {
@@ -1461,6 +1484,27 @@ mod tests {
         let input = "pub fn foo() {\n    if true {}\n    let x = 1;\n}\n";
         let result = add_blank_lines_between_items(input);
         assert_eq!(result, input);
+    }
+
+    #[test]
+    fn add_blank_lines_between_impl_methods_inserts_after_method() {
+        let input = "impl Foo {\n    pub fn a(&self) {\n    }\n    pub fn b(&self) {\n    }\n}\n";
+        let result = add_blank_lines_between_impl_methods(input);
+        assert_eq!(
+            result,
+            "impl Foo {\n    pub fn a(&self) {\n    }\n\n    pub fn b(&self) {\n    }\n}\n"
+        );
+    }
+
+    #[test]
+    fn add_blank_lines_between_impl_methods_handles_method_attributes() {
+        let input =
+            "impl Foo {\n    fn a(&self) {\n    }\n    #[cfg(test)]\n    fn b(&self) {\n    }\n}\n";
+        let result = add_blank_lines_between_impl_methods(input);
+        assert_eq!(
+            result,
+            "impl Foo {\n    fn a(&self) {\n    }\n\n    #[cfg(test)]\n    fn b(&self) {\n    }\n}\n"
+        );
     }
 
     #[test]
