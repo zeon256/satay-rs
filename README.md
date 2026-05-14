@@ -18,6 +18,146 @@ satay generate --input openapi.yaml --output src/generated --rustfmt
 
 If `--output` ends in `.rs`, Satay writes that file. Otherwise it writes `mod.rs` inside the output directory.
 
+## Generated code example
+
+Given this OpenAPI spec:
+
+```yaml
+openapi: "3.0.0"
+info:
+  title: Simple API
+  version: "1.0"
+paths:
+  /users/{userId}:
+    get:
+      operationId: getUser
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: includeDetails
+          in: query
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+components:
+  schemas:
+    UserStatus:
+      type: string
+      enum: [active, suspended]
+    User:
+      type: object
+      required: [id, name, status]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          $ref: "#/components/schemas/UserStatus"
+        age:
+          type: integer
+          format: int32
+        tags:
+          type: array
+          items:
+            type: string
+    ErrorBody:
+      type: object
+      required: [message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+```
+
+Satay generates:
+
+**`types.rs`** — structs and enums with typed fields and serde support:
+
+```rust
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct User {
+    pub id: String,
+    pub name: String,
+    pub status: UserStatus,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
+    pub age: Option<i32>,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
+    pub tags: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum UserStatus {
+    #[cfg_attr(feature = "serde", serde(rename = "active"))]
+    Active,
+    #[cfg_attr(feature = "serde", serde(rename = "suspended"))]
+    Suspended,
+    #[default]
+    #[cfg_attr(feature = "serde", serde(other))]
+    Unknown,
+}
+```
+
+**`get_user/parts.rs`** — input constructors, response enum, and Sans-IO request parts:
+
+```rust
+#[derive(Debug, Clone, PartialEq)]
+pub struct GetUserInput {
+    pub user_id: String,
+    pub include_details: Option<bool>,
+}
+
+impl GetUserInput {
+    pub fn new(user_id: impl Into<String>) -> Self { /* ... */ }
+    pub fn include_details(mut self, include_details: bool) -> Self { /* ... */ }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum GetUserResponse {
+    Ok(User),
+    NotFound(ErrorBody),
+    UnexpectedStatus(http::StatusCode, Vec<u8>),
+}
+
+pub fn get_user_parts(
+    input: GetUserInput,
+) -> Result<satay_runtime::RequestParts<()>, satay_runtime::Error> { /* ... */ }
+```
+
+**`api.rs`** — action builders for request construction and response decoding:
+
+```rust
+impl Api {
+    pub fn get_user(&self, user_id: impl Into<String>) -> GetUserAction<'_> { /* ... */ }
+}
+
+impl GetUserAction<'_> {
+    pub fn include_details(mut self, include_details: bool) -> Self { /* ... */ }
+    pub fn request(self) -> Result<http::Request<Vec<u8>>, satay_runtime::Error> { /* ... */ }
+    pub fn decode(
+        response: satay_runtime::ResponseParts<Vec<u8>>,
+    ) -> Result<GetUserResponse, satay_runtime::Error> { /* ... */ }
+}
+```
+
 ## Current support
 
 Satay currently targets OpenAPI 3.0.x and a deliberately small, typed subset.
