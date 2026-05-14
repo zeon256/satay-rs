@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use http::header::{self, CONTENT_TYPE};
+use http::header::{self, HeaderName, HeaderValue, CONTENT_TYPE};
 #[cfg(feature = "json")]
 use serde::de;
 
@@ -158,6 +158,18 @@ pub fn append_query_pair(out: &mut String, first: &mut bool, key: &str, value: &
     append_percent_encoded(out, key.as_bytes());
     out.push('=');
     append_percent_encoded(out, value.as_bytes());
+}
+
+pub fn insert_header(
+    headers: &mut http::HeaderMap,
+    name: &'static str,
+    value: &str,
+) -> Result<(), Error> {
+    headers.insert(
+        HeaderName::from_static(name),
+        HeaderValue::from_str(value)?,
+    );
+    Ok(())
 }
 
 pub fn has_json_content_type(headers: &http::HeaderMap) -> bool {

@@ -848,6 +848,7 @@ fn parse_parameter(
     let location = match required_str(parameter, "in", context)? {
         "path" => ParameterLocation::Path,
         "query" => ParameterLocation::Query,
+        "header" => ParameterLocation::Header,
         other => {
             return Err(ValidationError::UnsupportedParameterLocation {
                 context: context.to_owned(),
@@ -887,6 +888,11 @@ fn parse_parameter(
             wire_name: wire_name.clone(),
         });
     }
+    if location == ParameterLocation::Header && is_array_type(ty.non_nullable()) {
+        return Err(ValidationError::ArrayHeaderParameterUnsupported {
+            wire_name: wire_name.clone(),
+        });
+    }
 
     let required = match location {
         ParameterLocation::Path => {
@@ -897,7 +903,7 @@ fn parse_parameter(
             }
             true
         }
-        ParameterLocation::Query => parameter
+        ParameterLocation::Query | ParameterLocation::Header => parameter
             .get("required")
             .and_then(Value::as_bool)
             .unwrap_or(false),

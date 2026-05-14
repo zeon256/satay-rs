@@ -246,11 +246,11 @@ pub enum ValidationError {
     #[error("{context} must be an array")]
     ExpectedArray { context: String },
 
-    /// A parameter uses an unsupported location (e.g. header or cookie) instead of path or query.
+    /// A parameter uses an unsupported location (e.g. cookie) instead of path, query, or header.
     ///
-    /// Error message: `{context} parameter `{wire_name}` is in `{location}`; only path and query parameters are supported`
+    /// Error message: `{context} parameter `{wire_name}` is in `{location}`; only path, query, and header parameters are supported`
     #[error(
-        "{context} parameter `{wire_name}` is in `{location}`; only path and query parameters are supported"
+        "{context} parameter `{wire_name}` is in `{location}`; only path, query, and header parameters are supported"
     )]
     UnsupportedParameterLocation {
         context: String,
@@ -283,6 +283,14 @@ pub enum ValidationError {
         "path parameter `{wire_name}` is an array; array path parameter styles are not supported"
     )]
     ArrayPathParameterUnsupported { wire_name: String },
+
+    /// A header parameter is an array, which is not supported.
+    ///
+    /// Error message: `header parameter `{wire_name}` is an array; array header parameter styles are not supported`
+    #[error(
+        "header parameter `{wire_name}` is an array; array header parameter styles are not supported"
+    )]
+    ArrayHeaderParameterUnsupported { wire_name: String },
 
     /// A path parameter does not set `required: true`.
     ///

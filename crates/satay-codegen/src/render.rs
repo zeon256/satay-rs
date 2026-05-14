@@ -435,30 +435,58 @@ fn render_parts_function(operation: &Operation) -> syn::ItemFn {
 }
 
 fn render_header_statements(operation: &Operation) -> Vec<syn::Stmt> {
-    match &operation.request_body {
-        Some(body) => {
-            let content_type = lit_str(&body.content_type);
-            let insert: syn::Stmt = parse_quote!(
-                headers.insert(
-                    http::header::CONTENT_TYPE,
-                    http::HeaderValue::from_static(#content_type),
-                );
+    let header_parameters = operation
+        .parameters
+        .iter()
+        .filter(|parameter| parameter.location == ParameterLocation::Header)
+        .collect::<Vec<_>>();
+    let needs_mutable = operation.request_body.is_some() || !header_parameters.is_empty();
+
+    let mut statements = if needs_mutable {
+        vec![parse_quote!(let mut headers = http::HeaderMap::new();)]
+    } else {
+        return vec![parse_quote!(let headers = http::HeaderMap::new();)];
+    };
+
+    if let Some(body) = &operation.request_body {
+        let content_type = lit_str(&body.content_type);
+        let insert: syn::Stmt = parse_quote!(
+            headers.insert(
+                http::header::CONTENT_TYPE,
+                http::HeaderValue::from_static(#content_type),
             );
-            let mut statements = vec![parse_quote!(let mut headers = http::HeaderMap::new();)];
-            if body.required {
-                statements.push(insert);
-            } else {
-                let field = ident(&body.field_name);
-                statements.push(parse_quote!(
-                    if input.#field.is_some() {
-                        #insert
-                    }
-                ));
-            }
-            statements
+        );
+        if body.required {
+            statements.push(insert);
+        } else {
+            let field = ident(&body.field_name);
+            statements.push(parse_quote!(
+                if input.#field.is_some() {
+                    #insert
+                }
+            ));
         }
-        None => vec![parse_quote!(let headers = http::HeaderMap::new();)],
     }
+
+    for parameter in header_parameters {
+        let wire_name = lit_str(&parameter.wire_name);
+        let field = ident(&parameter.rust_name);
+        let expr = value_expr(input_field(&parameter.rust_name), &parameter.ty);
+        if parameter.required {
+            statements.push(parse_quote!(
+                satay_runtime::insert_header(&mut headers, #wire_name, #expr)?;
+            ));
+        } else {
+            let expr = value_expr(parse_quote!(value), &parameter.ty);
+            statements.push(parse_quote!(
+                if let Some(value) = &input.#field {
+                    satay_runtime::insert_header(&mut headers, #wire_name, #expr)?;
+                }
+            ));
+        }
+    }
+
+    statements
 }
 
 fn render_request_parts_return(operation: &Operation) -> syn::Expr {

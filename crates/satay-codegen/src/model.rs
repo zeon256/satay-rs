@@ -134,6 +134,7 @@ pub(crate) struct Parameter {
 pub(crate) enum ParameterLocation {
     Path,
     Query,
+    Header,
 }
 
 #[derive(Debug)]
