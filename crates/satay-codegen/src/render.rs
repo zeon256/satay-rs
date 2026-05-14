@@ -79,14 +79,16 @@ fn add_blank_lines_between_items(code: &str) -> String {
     while let Some(line) = lines.next() {
         result.push_str(line);
         result.push('\n');
-        if (line == "}" || line.ends_with(" {}"))
-            && let Some(next) = lines.peek()
-            && (next.starts_with('#')
-                || next.starts_with("pub ")
-                || next.starts_with("impl ")
-                || next.starts_with("use "))
-        {
-            result.push('\n');
+        if let Some(next) = lines.peek() {
+            let needs_blank = (line == "}" || line.ends_with(" {}"))
+                && (next.starts_with('#')
+                    || next.starts_with("pub ")
+                    || next.starts_with("impl ")
+                    || next.starts_with("use "))
+                || line.starts_with("use ") && !next.starts_with("use ");
+            if needs_blank {
+                result.push('\n');
+            }
         }
     }
     result

@@ -1,10 +1,10 @@
 #![forbid(unsafe_code)]
 
-use http::header::{self, HeaderName, HeaderValue, CONTENT_TYPE};
+use http::header::{self, CONTENT_TYPE, HeaderName, HeaderValue};
 #[cfg(feature = "json")]
 use serde::de;
 
-use tracing::instrument;
+use tracing::{debug, instrument};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestParts<B> {
@@ -49,7 +49,7 @@ pub fn into_request<B>(
         body,
     }: RequestParts<B>,
 ) -> Result<http::Request<B>, Error> {
-    tracing::debug!("building HTTP request");
+    debug!("building HTTP request");
     let mut request = http::Request::builder()
         .method(method)
         .uri(uri)
@@ -67,7 +67,7 @@ pub fn into_empty_request(
         body: _,
     }: RequestParts<()>,
 ) -> Result<http::Request<Vec<u8>>, Error> {
-    tracing::debug!("building empty HTTP request");
+    debug!("building empty HTTP request");
     let mut request = http::Request::builder()
         .method(method)
         .uri(uri)
@@ -89,7 +89,7 @@ pub fn into_json_request<T>(
 where
     T: serde::Serialize,
 {
-    tracing::debug!("building JSON HTTP request");
+    debug!("building JSON HTTP request");
     let body = serde_json::to_vec(&body)?;
     let mut request = http::Request::builder()
         .method(method)
@@ -140,7 +140,7 @@ pub fn from_json_slice<T>(body: &[u8]) -> Result<T, Error>
 where
     T: de::DeserializeOwned,
 {
-    tracing::debug!("deserializing JSON response");
+    debug!("deserializing JSON response");
     Ok(serde_json::from_slice(body)?)
 }
 
@@ -165,10 +165,7 @@ pub fn insert_header(
     name: &'static str,
     value: &str,
 ) -> Result<(), Error> {
-    headers.insert(
-        HeaderName::from_static(name),
-        HeaderValue::from_str(value)?,
-    );
+    headers.insert(HeaderName::from_static(name), HeaderValue::from_str(value)?);
     Ok(())
 }
 
