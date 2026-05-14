@@ -4,6 +4,8 @@ members = [
     "crates/satay-cli",
     "crates/satay-codegen",
     "crates/satay-runtime",
+    "examples/reqwest",
+    "examples/ureq",
 ]
 
 [workspace.package]

@@ -1,5 +1,5 @@
 [package]
-name = "satay-example-reqwest"
+name = "satay-example-ureq"
 version = "0.0.0"
 edition = "2024"
 publish = false
@@ -12,11 +12,10 @@ json = ["serde", "dep:serde_json", "satay-runtime/json"]
 [dependencies]
 http = "1"
 nutype = { version = "0.7", features = ["serde"] }
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 satay-runtime = { path = "../../crates/satay-runtime", default-features = false }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
-tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+ureq = "3"
 
 [build-dependencies]
 satay-codegen = { path = "../../crates/satay-codegen" }

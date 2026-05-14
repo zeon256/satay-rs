@@ -6,8 +6,7 @@ use std::mem;
 
 use generated::{Api, GetBusArrivalAction, GetBusArrivalResponse};
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error>> {
     let account_key = env::var("LTA_ACCOUNT_KEY")?;
     let mut args = env::args().skip(1);
     let bus_stop_code = args.next().unwrap_or_else(|| "83139".to_owned());
@@ -19,13 +18,30 @@ async fn main() -> Result<(), Box<dyn Error>> {
         action = action.service_no(service_no);
     }
 
-    let request: reqwest::Request = action.request()?.try_into()?;
-    let mut response = reqwest::Client::new().execute(request).await?;
+    let request: http::Request<Vec<u8>> = action.request()?;
+
+    let url = request.uri().to_string();
+
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .build()
+        .into();
+
+    let mut ureq_request = agent.get(&url);
+    for (name, value) in request.headers() {
+        ureq_request = ureq_request.header(name.as_str(), value.to_str()?);
+    }
+
+    let mut ureq_response = ureq_request.call()?;
+
+    let status = ureq_response.status();
+    let headers = mem::take(ureq_response.headers_mut());
+    let body = ureq_response.body_mut().read_to_vec()?;
 
     let response = satay_runtime::ResponseParts {
-        status: response.status(),
-        headers: mem::take(response.headers_mut()),
-        body: response.bytes().await?.to_vec(),
+        status,
+        headers,
+        body,
     };
 
     match GetBusArrivalAction::decode(response)? {
@@ -36,7 +52,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 arrival.bus_stop_code
             );
             for service in arrival.services.iter().take(8) {
-                println!("{} ({:?}) - Reaching at {:?}", service.service_no, service.operator, service.next_bus);
+                println!(
+                    "{} ({:?}) - Reaching at {:?}",
+                    service.service_no,
+                    service.operator,
+                    service.next_bus
+                );
             }
         }
         GetBusArrivalResponse::UnexpectedStatus(status, body) => {
