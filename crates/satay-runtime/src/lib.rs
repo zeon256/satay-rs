@@ -174,8 +174,8 @@ pub mod serde_string {
     use std::fmt;
     use std::str::FromStr;
 
+    use serde::de::Error as DeError;
     use serde::Deserialize;
-    use serde::de;
     use time::format_description::well_known::Rfc3339;
 
     use crate::OffsetDateTime;
@@ -222,6 +222,9 @@ pub mod serde_string {
     macro_rules! string_float_module {
         ($module:ident, $ty:ty) => {
             pub mod $module {
+                use serde::de::Error as DeError;
+                use serde::Deserialize;
+
                 pub fn serialize<S>(value: &$ty, serializer: S) -> Result<S::Ok, S::Error>
                 where
                     S: serde::Serializer,
@@ -233,11 +236,14 @@ pub mod serde_string {
                 where
                     D: serde::Deserializer<'de>,
                 {
-                    let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-                    fast_float::parse::<$ty, _>(&value).map_err(serde::de::Error::custom)
+                    let value = <String as Deserialize>::deserialize(deserializer)?;
+                    fast_float::parse::<$ty, _>(&value).map_err(DeError::custom)
                 }
 
                 pub mod option {
+                    use serde::de::Error as DeError;
+                    use serde::Deserialize;
+
                     pub fn serialize<S>(
                         value: &Option<$ty>,
                         serializer: S,
@@ -252,12 +258,10 @@ pub mod serde_string {
                     where
                         D: serde::Deserializer<'de>,
                     {
-                        let value =
-                            <Option<String> as serde::Deserialize>::deserialize(deserializer)?;
+                        let value = <Option<String> as Deserialize>::deserialize(deserializer)?;
                         value
                             .map(|value| {
-                                fast_float::parse::<$ty, _>(&value)
-                                    .map_err(serde::de::Error::custom)
+                                fast_float::parse::<$ty, _>(&value).map_err(DeError::custom)
                             })
                             .transpose()
                     }
@@ -278,7 +282,9 @@ pub mod serde_string {
     string_float_module!(as_f64, f64);
 
     pub mod as_offset_datetime {
-        use serde::ser;
+        use serde::de::Error as DeError;
+        use serde::ser::Error as SerError;
+        use serde::Deserialize;
 
         use super::*;
 
@@ -286,7 +292,7 @@ pub mod serde_string {
         where
             S: serde::Serializer,
         {
-            let value = value.format(&Rfc3339).map_err(ser::Error::custom)?;
+            let value = value.format(&Rfc3339).map_err(SerError::custom)?;
             serializer.serialize_str(&value)
         }
 
@@ -294,11 +300,14 @@ pub mod serde_string {
         where
             D: serde::Deserializer<'de>,
         {
-            let value = <String as serde::Deserialize>::deserialize(deserializer)?;
-            OffsetDateTime::parse(&value, &Rfc3339).map_err(serde::de::Error::custom)
+            let value = <String as Deserialize>::deserialize(deserializer)?;
+            OffsetDateTime::parse(&value, &Rfc3339).map_err(DeError::custom)
         }
 
         pub mod option {
+            use serde::de::Error as DeError;
+            use serde::Deserialize;
+
             use super::*;
 
             pub fn serialize<S>(
@@ -318,10 +327,10 @@ pub mod serde_string {
             where
                 D: serde::Deserializer<'de>,
             {
-                let value = <Option<String> as serde::Deserialize>::deserialize(deserializer)?;
+                let value = <Option<String> as Deserialize>::deserialize(deserializer)?;
                 value
                     .map(|value| {
-                        OffsetDateTime::parse(&value, &Rfc3339).map_err(serde::de::Error::custom)
+                        OffsetDateTime::parse(&value, &Rfc3339).map_err(DeError::custom)
                     })
                     .transpose()
             }
@@ -354,7 +363,7 @@ pub mod serde_string {
         D: serde::Deserializer<'de>,
     {
         let value = String::deserialize(deserializer)?;
-        value.parse::<T>().map_err(de::Error::custom)
+        value.parse::<T>().map_err(DeError::custom)
     }
 
     fn deserialize_option_from_str<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
@@ -365,7 +374,7 @@ pub mod serde_string {
     {
         let value = Option::<String>::deserialize(deserializer)?;
         value
-            .map(|value| value.parse::<T>().map_err(de::Error::custom))
+            .map(|value| value.parse::<T>().map_err(DeError::custom))
             .transpose()
     }
 }
