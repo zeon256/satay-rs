@@ -18,10 +18,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let request: reqwest::Request = action.request()?.try_into()?;
     let mut response = reqwest::Client::new().execute(request).await?;
 
-    let status = response.status();
-    let headers = std::mem::take(response.headers_mut());
-    let body = response.bytes().await?.to_vec();
-    let response = satay_runtime::from_raw_parts(status, headers, body)?;
+    let response = satay_runtime::ResponseParts {
+        status: response.status(),
+        headers: std::mem::take(response.headers_mut()),
+        body: response.bytes().await?.to_vec(),
+    };
 
     match GetBusArrivalAction::decode(response)? {
         GetBusArrivalResponse::Ok(arrival) => {

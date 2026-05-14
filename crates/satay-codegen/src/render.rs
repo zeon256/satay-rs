@@ -512,7 +512,7 @@ fn render_action_impl(operation: &Operation) -> syn::ItemImpl {
             }
 
             pub fn decode(
-                response: http::Response<Vec<u8>>,
+                response: satay_runtime::ResponseParts<Vec<u8>>,
             ) -> Result<#response, satay_runtime::Error> {
                 #decode_fn(response)
             }
@@ -1331,13 +1331,13 @@ fn render_decode_function(operation: &Operation) -> syn::ItemFn {
 
     parse_quote!(
         pub fn #decode_fn(
-            response: http::Response<Vec<u8>>,
+            response: satay_runtime::ResponseParts<Vec<u8>>,
         ) -> Result<#response_name, satay_runtime::Error> {
-            let status = response.status();
+            let status = response.status;
             match status.as_u16() {
                 #(#arms)*
                 _ => {
-                    let body = response.into_body();
+                    let body = response.body;
                     Ok(#response_name::UnexpectedStatus(status, body))
                 }
             }
@@ -1353,7 +1353,7 @@ fn render_decode_arm(response: &ResponseCase, response_name: &Ident) -> syn::Arm
             let body = rust_type(body);
             parse_quote!(
                 #status => {
-                    let body = response.into_body();
+                    let body = response.body;
                     let value = satay_runtime::from_json_slice::<#body>(&body)?;
                     Ok(#response_name::#variant(value))
                 }

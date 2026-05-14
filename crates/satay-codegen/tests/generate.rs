@@ -314,13 +314,11 @@ mod tests {
 
     #[test]
     fn decodes_json_response_enums() {
-        let response = http::Response::builder()
-            .status(200)
-            .body(
-                br#"{"id":"42","name":"Ada","status":"active","age":36,"tags":["admin"]}"#
-                    .to_vec(),
-            )
-            .unwrap();
+        let response = satay_runtime::ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: br#"{"id":"42","name":"Ada","status":"active","age":36,"tags":["admin"]}"#.to_vec(),
+        };
         let decoded = GetUserAction::decode(response).expect("decoded response");
 
         match decoded {
@@ -337,10 +335,11 @@ mod tests {
 
     #[test]
     fn preserves_unexpected_response_body() {
-        let response = http::Response::builder()
-            .status(500)
-            .body(b"server exploded".to_vec())
-            .unwrap();
+        let response = satay_runtime::ResponseParts {
+            status: http::StatusCode::INTERNAL_SERVER_ERROR,
+            headers: http::HeaderMap::new(),
+            body: b"server exploded".to_vec(),
+        };
         let decoded = decode_get_user_response(response).expect("decoded response");
 
         match decoded {
@@ -445,10 +444,11 @@ mod tests {
 
     #[test]
     fn response_deserialization_enforces_bounds() {
-        let response = http::Response::builder()
-            .status(200)
-            .body(br#"{"id":"42","name":"Ada","age":131,"score":0.5}"#.to_vec())
-            .unwrap();
+        let response = satay_runtime::ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: br#"{"id":"42","name":"Ada","age":131,"score":0.5}"#.to_vec(),
+        };
 
         let err = decode_get_user_response(response).expect_err("invalid age rejected");
         assert!(err.to_string().contains("JSON error"));
@@ -623,10 +623,11 @@ mod tests {
     #[test]
     fn known_enum_variants_deserialize() {
         let json = br#"{"id":"1","name":"Widget","category":"electronics","condition":"new","notes":"test"}"#.to_vec();
-        let response = http::Response::builder()
-            .status(200)
-            .body(json)
-            .unwrap();
+        let response = satay_runtime::ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: json,
+        };
         let decoded = decode_get_item_response(response).expect("decoded response");
         match decoded {
             GetItemResponse::Ok(item) => {
@@ -643,10 +644,11 @@ mod tests {
     #[test]
     fn unknown_enum_variant_maps_to_unknown() {
         let json = br#"{"id":"2","name":"Gadget","category":"unknown_category","condition":"","notes":null}"#.to_vec();
-        let response = http::Response::builder()
-            .status(200)
-            .body(json)
-            .unwrap();
+        let response = satay_runtime::ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: json,
+        };
         let decoded = decode_get_item_response(response).expect("decoded response");
         match decoded {
             GetItemResponse::Ok(item) => {

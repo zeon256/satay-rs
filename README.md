@@ -73,7 +73,7 @@ let request = api
 
 // Send `request` with reqwest, ureq, hyper, tests, WASM, or your own transport.
 
-let response = satay_runtime::from_raw_parts(status, headers, body)?;
+let response = satay_runtime::ResponseParts { status, headers, body };
 let decoded = generated::GetBusArrivalAction::decode(response)?;
 ```
 

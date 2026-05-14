@@ -221,18 +221,6 @@ const fn is_unreserved(byte: u8) -> bool {
     )
 }
 
-#[instrument(skip_all)]
-pub fn from_raw_parts(
-    status: http::StatusCode,
-    headers: http::HeaderMap,
-    body: Vec<u8>,
-) -> Result<http::Response<Vec<u8>>, Error> {
-    debug!(status = %status, "building HTTP response");
-    let mut response = http::Response::builder().status(status).body(body)?;
-    *response.headers_mut() = headers;
-    Ok(response)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,20 +252,23 @@ mod tests {
     }
 
     #[test]
-    fn builds_response_from_raw_parts() {
+    fn response_parts_holds_status_headers_body() {
         let mut headers = http::HeaderMap::new();
         headers.insert(
             CONTENT_TYPE,
             http::HeaderValue::from_static("application/json"),
         );
         let body = br#"{"ok":true}"#.to_vec();
-
-        let response = from_raw_parts(http::StatusCode::OK, headers, body).unwrap();
-        assert_eq!(response.status(), http::StatusCode::OK);
+        let parts = ResponseParts {
+            status: http::StatusCode::OK,
+            headers,
+            body,
+        };
+        assert_eq!(parts.status, http::StatusCode::OK);
         assert_eq!(
-            response.headers().get(CONTENT_TYPE).unwrap(),
+            parts.headers.get(CONTENT_TYPE).unwrap(),
             "application/json"
         );
-        assert_eq!(response.body(), br#"{"ok":true}"#);
+        assert_eq!(parts.body, br#"{"ok":true}"#);
     }
 }
