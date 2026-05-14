@@ -66,6 +66,7 @@ pub(crate) fn render_api(api: &Api) -> Vec<GeneratedFile> {
 fn format_file(file: syn::File) -> String {
     let code = prettyplease::unparse(&file);
     let code = add_blank_lines_between_items(&code);
+    let code = add_blank_lines_between_members(&code);
     let mut formatted = String::with_capacity(PREAMBLE.len() + code.len());
     formatted.push_str(PREAMBLE);
     formatted.push_str(&code);
@@ -84,6 +85,26 @@ fn add_blank_lines_between_items(code: &str) -> String {
                 || next.starts_with("pub ")
                 || next.starts_with("impl ")
                 || next.starts_with("use "))
+        {
+            result.push('\n');
+        }
+    }
+    result
+}
+
+fn add_blank_lines_between_members(code: &str) -> String {
+    let mut result = String::with_capacity(code.len() + code.len() / 4);
+    let mut lines = code.lines().peekable();
+    while let Some(line) = lines.next() {
+        result.push_str(line);
+        result.push('\n');
+        let trimmed = line.trim_start();
+        let indent_len = line.len() - trimmed.len();
+        if indent_len == 4
+            && line.trim_end().ends_with(',')
+            && !trimmed.starts_with("//")
+            && let Some(next) = lines.peek()
+            && !next.trim_start().starts_with('}')
         {
             result.push('\n');
         }
@@ -115,6 +136,7 @@ fn render_top_mod(api: &Api) -> syn::File {
 
 fn render_types_file(api: &Api) -> syn::File {
     let mut items = Vec::new();
+    items.push(parse_quote!(use std::fmt;));
     for component in &api.components {
         render_component(component, &mut items);
     }
@@ -526,8 +548,8 @@ fn render_enum(name: &str, variants: &[EnumVariant]) -> Vec<syn::Item> {
         }
     );
     let display_impl = parse_quote!(
-        impl std::fmt::Display for #name {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        impl fmt::Display for #name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 f.write_str(self.as_str())
             }
         }
@@ -1042,8 +1064,12 @@ mod tests {
         };
 
         let file = render_types_file(&api);
-        assert_eq!(file.items.len(), 1);
-        let Item::Struct(item) = &file.items[0] else {
+        assert_eq!(file.items.len(), 2);
+        let Item::Use(use_item) = &file.items[0] else {
+            panic!("expected use item");
+        };
+        let _ = use_item;
+        let Item::Struct(item) = &file.items[1] else {
             panic!("expected struct item");
         };
         assert_eq!(item.ident, "Pet");
