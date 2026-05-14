@@ -747,6 +747,7 @@ fn lit_str(value: &str) -> LitStr {
 mod tests {
     use super::*;
     use crate::model::{HttpMethod, RequestBody};
+    use syn::{Expr, Fields, GenericArgument, PathArguments, Stmt, Type};
 
     #[test]
     fn render_file_exposes_struct_ast_without_source_comparison() {
@@ -768,17 +769,17 @@ mod tests {
                     },
                 ]),
             }],
-            constrained_types: Vec::new(),
-            operations: Vec::new(),
+            constrained_types: vec![],
+            operations: vec![],
         };
 
         let file = render_file(&api);
         assert_eq!(file.items.len(), 1);
-        let syn::Item::Struct(item) = &file.items[0] else {
+        let Item::Struct(item) = &file.items[0] else {
             panic!("expected struct item");
         };
         assert_eq!(item.ident, "Pet");
-        let syn::Fields::Named(fields) = &item.fields else {
+        let Fields::Named(fields) = &item.fields else {
             panic!("expected named fields");
         };
         assert_eq!(fields.named.len(), 2);
@@ -799,8 +800,8 @@ mod tests {
     #[test]
     fn render_file_exposes_operation_items_without_source_comparison() {
         let api = Api {
-            components: Vec::new(),
-            constrained_types: Vec::new(),
+            components: vec![],
+            constrained_types: vec![],
             operations: vec![Operation {
                 fn_name: "create_pet".to_owned(),
                 input_name: "CreatePetInput".to_owned(),
@@ -808,7 +809,7 @@ mod tests {
                 method: HttpMethod::Post,
                 path: "/pets".to_owned(),
                 path_segments: vec![PathSegment::Literal("/pets".to_owned())],
-                parameters: Vec::new(),
+                parameters: vec![],
                 request_body: Some(RequestBody {
                     field_name: "body".to_owned(),
                     content_type: "application/json".to_owned(),
@@ -827,23 +828,23 @@ mod tests {
         assert_eq!(file.items.len(), 5);
         assert!(file.items.iter().any(|item| matches!(
             item,
-            syn::Item::Struct(item) if item.ident == "CreatePetInput"
+            Item::Struct(item) if item.ident == "CreatePetInput"
         )));
         assert!(file.items.iter().any(|item| matches!(
             item,
-            syn::Item::Enum(item) if item.ident == "CreatePetResponse"
+            Item::Enum(item) if item.ident == "CreatePetResponse"
         )));
         assert!(file.items.iter().any(|item| matches!(
             item,
-            syn::Item::Fn(item) if item.sig.ident == "create_pet_parts"
+            Item::Fn(item) if item.sig.ident == "create_pet_parts"
         )));
         assert!(file.items.iter().any(|item| matches!(
             item,
-            syn::Item::Fn(item) if item.sig.ident == "encode_create_pet"
+            Item::Fn(item) if item.sig.ident == "encode_create_pet"
         )));
         assert!(file.items.iter().any(|item| matches!(
             item,
-            syn::Item::Fn(item) if item.sig.ident == "decode_create_pet_response"
+            Item::Fn(item) if item.sig.ident == "decode_create_pet_response"
         )));
     }
 
@@ -877,42 +878,42 @@ mod tests {
             .stmts
             .iter()
             .find_map(|stmt| match stmt {
-                syn::Stmt::Expr(syn::Expr::If(if_expr), _) => Some(if_expr),
+                Stmt::Expr(Expr::If(if_expr), _) => Some(if_expr),
                 _ => None,
             })
             .expect("optional query guard");
-        let syn::Stmt::Expr(syn::Expr::ForLoop(for_loop), _) = &if_expr.then_branch.stmts[0] else {
+        let Stmt::Expr(Expr::ForLoop(for_loop), _) = &if_expr.then_branch.stmts[0] else {
             panic!("optional array query should render a for loop");
         };
         assert!(expr_path_is(&for_loop.expr, "values"));
     }
 
     fn type_path_is(ty: &syn::Type, expected: &str) -> bool {
-        let syn::Type::Path(path) = ty else {
+        let Type::Path(path) = ty else {
             return false;
         };
         path.path.is_ident(expected)
     }
 
     fn expr_path_is(expr: &syn::Expr, expected: &str) -> bool {
-        let syn::Expr::Path(path) = expr else {
+        let Expr::Path(path) = expr else {
             return false;
         };
         path.path.is_ident(expected)
     }
 
     fn option_inner(ty: &syn::Type) -> Option<&syn::Type> {
-        let syn::Type::Path(path) = ty else {
+        let Type::Path(path) = ty else {
             return None;
         };
         let segment = path.path.segments.first()?;
         if segment.ident != "Option" {
             return None;
         }
-        let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+        let PathArguments::AngleBracketed(arguments) = &segment.arguments else {
             return None;
         };
-        let syn::GenericArgument::Type(inner) = arguments.args.first()? else {
+        let GenericArgument::Type(inner) = arguments.args.first()? else {
             return None;
         };
         Some(inner)

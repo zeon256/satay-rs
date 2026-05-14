@@ -1,6 +1,10 @@
+use std::env;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+
+use satay_codegen::Error;
+use satay_codegen::ValidationError;
 
 const SIMPLE: &str = include_str!("../../../tests/fixtures/simple.yaml");
 const SIMPLE_EXPECTED: &str = include_str!("../../../tests/fixtures/simple.expected.rs");
@@ -162,7 +166,7 @@ mod tests {
     )
     .expect("write lib");
 
-    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
+    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
     let output = Command::new(cargo)
         .arg("test")
         .arg("--quiet")
@@ -271,7 +275,7 @@ mod tests {
     )
     .expect("write lib");
 
-    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
+    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
     let output = Command::new(&cargo)
         .arg("test")
         .arg("--quiet")
@@ -333,8 +337,8 @@ paths:
     .expect_err("nullable parameters are unsupported");
 
     match err {
-        satay_codegen::Error::Validation(
-            satay_codegen::ValidationError::NullableParameterUnsupported { wire_name, .. },
+        Error::Validation(
+            ValidationError::NullableParameterUnsupported { wire_name, .. },
         ) => {
             assert_eq!(wire_name, "userId");
         }
@@ -366,8 +370,8 @@ paths:
     .expect_err("default response bodies are unsupported");
 
     match err {
-        satay_codegen::Error::Validation(
-            satay_codegen::ValidationError::DefaultResponseBodyUnsupported { context, .. },
+        Error::Validation(
+            ValidationError::DefaultResponseBodyUnsupported { context, .. },
         ) => {
             assert_eq!(context, "operation `ping` responses");
         }
