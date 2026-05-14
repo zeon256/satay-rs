@@ -321,7 +321,10 @@ fn parse_struct_fields(
             registry,
             Some(&format!("{schema_name} {wire_name}")),
         )?;
-        let treat_error_as_none = parse_satay_treat_error_as_none(property_schema, &format!("property `{schema_name}.{wire_name}`"))?;
+        let treat_error_as_none = parse_satay_treat_error_as_none(
+            property_schema,
+            &format!("property `{schema_name}.{wire_name}`"),
+        )?;
         fields.push(Field {
             wire_name: wire_name.clone(),
             rust_name,
@@ -510,10 +513,7 @@ fn parse_satay_parse_as(
         })
 }
 
-fn parse_satay_treat_error_as_none(
-    schema: &Value,
-    context: &str,
-) -> Result<bool, ValidationError> {
+fn parse_satay_treat_error_as_none(schema: &Value, context: &str) -> Result<bool, ValidationError> {
     let Some(obj) = schema.as_object() else {
         return Ok(false);
     };
@@ -523,10 +523,12 @@ fn parse_satay_treat_error_as_none(
     let Some(value) = satay.get("treat-error-as-none") else {
         return Ok(false);
     };
-    value.as_bool().ok_or_else(|| ValidationError::InvalidBooleanKeyword {
-        context: context.to_owned(),
-        keyword: "treat-error-as-none",
-    })
+    value
+        .as_bool()
+        .ok_or_else(|| ValidationError::InvalidBooleanKeyword {
+            context: context.to_owned(),
+            keyword: "treat-error-as-none",
+        })
 }
 
 fn satay_parse_as_wire(parse_as: ParseAs) -> &'static str {

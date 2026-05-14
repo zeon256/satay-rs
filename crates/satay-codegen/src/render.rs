@@ -867,8 +867,12 @@ fn field_attrs(field: &Field, serde: bool) -> Vec<syn::Attribute> {
         serde_attrs.push(quote!(rename = #wire_name));
     }
     if field.treat_error_as_none {
-        serde_attrs.push(quote!(deserialize_with = "satay_runtime::treat_error_as_none::deserialize"));
-        serde_attrs.push(quote!(serialize_with = "satay_runtime::treat_error_as_none::serialize"));
+        serde_attrs.push(quote!(
+            deserialize_with = "satay_runtime::treat_error_as_none::deserialize"
+        ));
+        serde_attrs.push(quote!(
+            serialize_with = "satay_runtime::treat_error_as_none::serialize"
+        ));
     } else if let Some(module) = parsed_string_serde_module(field) {
         serde_attrs.push(quote!(with = #module));
     }

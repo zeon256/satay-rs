@@ -27,13 +27,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     match GetBusArrivalAction::decode(response)? {
         GetBusArrivalResponse::Ok(arrival) => {
             println!(
-                "{} services for bus stop {}",
-                arrival.services.len(),
-                arrival.bus_stop_code
+                "{:?}", arrival
             );
-            for service in arrival.services.iter().take(8) {
-                println!("{} ({:?})", service.service_no, service.operator);
-            }
         }
         GetBusArrivalResponse::UnexpectedStatus(status, body) => {
             eprintln!(

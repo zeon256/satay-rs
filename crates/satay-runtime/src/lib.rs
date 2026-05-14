@@ -174,8 +174,8 @@ pub mod serde_string {
     use std::fmt;
     use std::str::FromStr;
 
-    use serde::de::Error as DeError;
     use serde::Deserialize;
+    use serde::de::Error as DeError;
     use time::format_description::well_known::Rfc3339;
 
     use crate::OffsetDateTime;
@@ -222,8 +222,8 @@ pub mod serde_string {
     macro_rules! string_float_module {
         ($module:ident, $ty:ty) => {
             pub mod $module {
-                use serde::de::Error as DeError;
                 use serde::Deserialize;
+                use serde::de::Error as DeError;
 
                 pub fn serialize<S>(value: &$ty, serializer: S) -> Result<S::Ok, S::Error>
                 where
@@ -241,8 +241,8 @@ pub mod serde_string {
                 }
 
                 pub mod option {
-                    use serde::de::Error as DeError;
                     use serde::Deserialize;
+                    use serde::de::Error as DeError;
 
                     pub fn serialize<S>(
                         value: &Option<$ty>,
@@ -282,9 +282,9 @@ pub mod serde_string {
     string_float_module!(as_f64, f64);
 
     pub mod as_offset_datetime {
+        use serde::Deserialize;
         use serde::de::Error as DeError;
         use serde::ser::Error as SerError;
-        use serde::Deserialize;
 
         use super::*;
 
@@ -305,8 +305,8 @@ pub mod serde_string {
         }
 
         pub mod option {
-            use serde::de::Error as DeError;
             use serde::Deserialize;
+            use serde::de::Error as DeError;
 
             use super::*;
 
@@ -329,9 +329,7 @@ pub mod serde_string {
             {
                 let value = <Option<String> as Deserialize>::deserialize(deserializer)?;
                 value
-                    .map(|value| {
-                        OffsetDateTime::parse(&value, &Rfc3339).map_err(DeError::custom)
-                    })
+                    .map(|value| OffsetDateTime::parse(&value, &Rfc3339).map_err(DeError::custom))
                     .transpose()
             }
         }
