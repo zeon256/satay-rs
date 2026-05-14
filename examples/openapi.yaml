@@ -1,0 +1,281 @@
+openapi: 3.0.3
+
+info:
+  title: LTA DataMall Bus Arrival API
+  version: "3.0"
+  description: >
+    OpenAPI schema for the LTA DataMall Bus Arrival API only.
+    Returns real-time bus arrival information for services at a queried bus stop.
+
+servers:
+  - url: https://datamall2.mytransport.sg/ltaodataservice/v3
+
+paths:
+  /BusArrival:
+    get:
+      operationId: getBusArrival
+      summary: Get bus arrival timings for a bus stop
+      description: >
+        Returns real-time Bus Arrival information for bus services at a queried
+        bus stop, including estimated arrival time, estimated current location,
+        and estimated bus load.
+
+        The dataset is updated approximately every 20 seconds.
+
+        According to LTA's documentation, when buses are not in service, or
+        when the API service is temporarily unavailable, there may be no response
+        returned, not even attribute tags.
+      security:
+        - accountKeyAuth: []
+      parameters:
+        - name: BusStopCode
+          in: query
+          required: true
+          description: Bus stop reference code.
+          schema:
+            type: string
+          example: "83139"
+
+        - name: ServiceNo
+          in: query
+          required: false
+          description: Optional bus service number filter.
+          schema:
+            type: string
+          example: "15"
+
+        - name: accept
+          in: header
+          required: false
+          description: Optional response format header. JSON is the default.
+          schema:
+            type: string
+            enum:
+              - application/json
+              - application/atom+xml
+            default: application/json
+
+      responses:
+        "200":
+          description: >
+            Successful Bus Arrival response. In periods where no bus arrival
+            data is available, LTA documentation indicates the API may return
+            no response body.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BusArrivalResponse"
+              example:
+                odata.metadata: "https://datamall2.mytransport.sg/ltaodataservice/v3/BusArrival"
+                BusStopCode: "83139"
+                Services:
+                  - ServiceNo: "15"
+                    Operator: "GAS"
+                    NextBus:
+                      OriginCode: "77009"
+                      DestinationCode: "77009"
+                      EstimatedArrival: "2024-08-14T16:41:48+08:00"
+                      Latitude: "1.3154918333333334"
+                      Longitude: "103.9059125"
+                      VisitNumber: "1"
+                      Load: "SEA"
+                      Feature: "WAB"
+                      Type: "SD"
+                    NextBus2:
+                      OriginCode: "77009"
+                      DestinationCode: "77009"
+                      EstimatedArrival: "2024-08-14T16:49:22+08:00"
+                      Latitude: "1.3309621666666667"
+                      Longitude: "103.9034135"
+                      VisitNumber: "1"
+                      Load: "SEA"
+                      Feature: "WAB"
+                      Type: "SD"
+                    NextBus3:
+                      OriginCode: "77009"
+                      DestinationCode: "77009"
+                      EstimatedArrival: "2024-08-14T17:06:11+08:00"
+                      Latitude: "1.344761"
+                      Longitude: "103.94022316666667"
+                      VisitNumber: "1"
+                      Load: "SEA"
+                      Feature: "WAB"
+                      Type: "SD"
+
+components:
+  securitySchemes:
+    accountKeyAuth:
+      type: apiKey
+      in: header
+      name: AccountKey
+      description: LTA DataMall API account key.
+
+  schemas:
+    BusArrivalResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - odata.metadata
+        - BusStopCode
+        - Services
+      properties:
+        odata.metadata:
+          type: string
+          format: uri
+          description: OData metadata URL.
+          example: "https://datamall2.mytransport.sg/ltaodataservice/v3/BusArrival"
+
+        BusStopCode:
+          type: string
+          description: Queried bus stop reference code.
+          example: "83139"
+          x-satay:
+            parse-as: u32
+
+        Services:
+          type: array
+          description: Bus services serving the queried bus stop.
+          items:
+            $ref: "#/components/schemas/BusServiceArrival"
+
+    BusServiceArrival:
+      type: object
+      additionalProperties: false
+      required:
+        - ServiceNo
+        - Operator
+        - NextBus
+        - NextBus2
+        - NextBus3
+      properties:
+        ServiceNo:
+          type: string
+          description: Bus service number.
+          example: "15"
+
+        Operator:
+          type: string
+          description: Public transport operator code.
+          enum:
+            - SBST
+            - SMRT
+            - TTS
+            - GAS
+          example: GAS
+
+        NextBus:
+          $ref: "#/components/schemas/BusArrivalTiming"
+
+        NextBus2:
+          $ref: "#/components/schemas/BusArrivalTiming"
+
+        NextBus3:
+          $ref: "#/components/schemas/BusArrivalTiming"
+
+    BusArrivalTiming:
+      type: object
+      additionalProperties: false
+      required:
+        - OriginCode
+        - DestinationCode
+        - EstimatedArrival
+        - Latitude
+        - Longitude
+        - VisitNumber
+        - Load
+        - Feature
+        - Type
+      properties:
+        OriginCode:
+          type: string
+          description: >
+            Reference code of the first bus stop where this bus started its service.
+            May be an empty string when no subsequent bus data is available.
+          example: "77009"
+          minLength: 1
+          maxLength: 5
+          x-satay:
+            parse-as: u32
+
+        DestinationCode:
+          type: string
+          description: >
+            Reference code of the last bus stop where this bus will terminate its service.
+            May be an empty string when no subsequent bus data is available.
+          example: "77131"
+          x-satay:
+            parse-as: u32
+
+        EstimatedArrival:
+          type: string
+          description: >
+            Estimated arrival date-time in Singapore Standard Time, represented
+            as an ISO 8601 timestamp with +08:00 offset.
+            May be an empty string when no subsequent bus data is available.
+          example: "2024-08-14T16:41:48+08:00"
+          x-satay:
+            parse-as: offset-datetime
+
+        Latitude:
+          type: string
+          description: >
+            Current estimated latitude of the bus at the point of published data.
+            May be "0.0" for schedule-based values, or an empty string when unavailable.
+          example: "1.3154918333333334"
+          x-satay:
+            parse-as: f64
+
+        Longitude:
+          type: string
+          description: >
+            Current estimated longitude of the bus at the point of published data.
+            May be "0.0" for schedule-based values, or an empty string when unavailable.
+          example: "103.9059125"
+          x-satay:
+            parse-as: f64
+
+        VisitNumber:
+          type: string
+          description: >
+            Ordinal visit number of this vehicle at the bus stop.
+            "1" = first visit, "2" = second visit.
+            May be an empty string when unavailable.
+          example: "1"
+          x-satay:
+            parse-as: u8
+
+        Load:
+          type: string
+          description: >
+            Current occupancy / crowding level.
+            May be an empty string when unavailable.
+          enum:
+            - SEA
+            - SDA
+            - LSD
+            - ""
+          example: SEA
+
+        Feature:
+          type: string
+          description: >
+            Wheelchair accessibility indicator.
+            "WAB" = wheelchair-accessible bus.
+            Empty string indicates no such value.
+          enum:
+            - WAB
+            - ""
+          example: WAB
+
+        Type:
+          type: string
+          description: >
+            Vehicle type.
+            May be an empty string when unavailable.
+          enum:
+            - SD
+            - DD
+            - BD
+            - ""
+          example: SD
+
