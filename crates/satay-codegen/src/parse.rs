@@ -13,6 +13,7 @@ use crate::model::{
 };
 
 pub(crate) fn parse_api(document: &Value) -> Result<Api, ValidationError> {
+    tracing::debug!("parsing API from document");
     let root = object(document, "OpenAPI document")?;
     let openapi = required_str(root, "openapi", "OpenAPI document")?;
     if !openapi.starts_with("3.0") {

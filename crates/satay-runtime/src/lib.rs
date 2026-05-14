@@ -4,6 +4,8 @@ use http::header::{self, CONTENT_TYPE};
 #[cfg(feature = "json")]
 use serde::de;
 
+use tracing::instrument;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestParts<B> {
     pub method: http::Method,
@@ -38,6 +40,7 @@ pub enum Error {
     Json(#[from] serde_json::Error),
 }
 
+#[instrument(skip_all, fields(method = %method, uri = %uri))]
 pub fn into_request<B>(
     RequestParts {
         method,
@@ -46,6 +49,7 @@ pub fn into_request<B>(
         body,
     }: RequestParts<B>,
 ) -> Result<http::Request<B>, Error> {
+    tracing::debug!("building HTTP request");
     let mut request = http::Request::builder()
         .method(method)
         .uri(uri)
@@ -54,6 +58,7 @@ pub fn into_request<B>(
     Ok(request)
 }
 
+#[instrument(skip_all, fields(method = %method, uri = %uri))]
 pub fn into_empty_request(
     RequestParts {
         method,
@@ -62,6 +67,7 @@ pub fn into_empty_request(
         body: _,
     }: RequestParts<()>,
 ) -> Result<http::Request<Vec<u8>>, Error> {
+    tracing::debug!("building empty HTTP request");
     let mut request = http::Request::builder()
         .method(method)
         .uri(uri)
@@ -71,6 +77,7 @@ pub fn into_empty_request(
 }
 
 #[cfg(feature = "json")]
+#[instrument(skip_all, fields(method = %method, uri = %uri))]
 pub fn into_json_request<T>(
     RequestParts {
         method,
@@ -82,6 +89,7 @@ pub fn into_json_request<T>(
 where
     T: serde::Serialize,
 {
+    tracing::debug!("building JSON HTTP request");
     let body = serde_json::to_vec(&body)?;
     let mut request = http::Request::builder()
         .method(method)
@@ -98,6 +106,7 @@ where
 }
 
 #[cfg(feature = "json")]
+#[instrument(skip_all, fields(method = %method, uri = %uri))]
 pub fn into_optional_json_request<T>(
     RequestParts {
         method,
@@ -126,10 +135,12 @@ where
 }
 
 #[cfg(feature = "json")]
+#[instrument(skip_all)]
 pub fn from_json_slice<T>(body: &[u8]) -> Result<T, Error>
 where
     T: de::DeserializeOwned,
 {
+    tracing::debug!("deserializing JSON response");
     Ok(serde_json::from_slice(body)?)
 }
 

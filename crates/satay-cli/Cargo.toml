@@ -11,3 +11,5 @@ path = "src/main.rs"
 argh.workspace = true
 satay-codegen = { path = "../satay-codegen" }
 thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

@@ -8,8 +8,11 @@ mod render;
 
 pub use error::{Error, ParseError, ValidationError};
 
+#[tracing::instrument(err)]
 pub fn generate(spec: &str) -> Result<String, Error> {
+    tracing::info!("parsing OpenAPI document");
     let document = parse::parse_document(spec)?;
     let api = parse::parse_api(&document)?;
+    tracing::info!(components = api.components.len(), operations = api.operations.len(), "parsed API");
     Ok(render::render_api(&api))
 }

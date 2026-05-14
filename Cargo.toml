@@ -23,6 +23,8 @@ serde_yaml = "0.9"
 syn = { version = "2", features = ["full"] }
 tempfile = "3"
 thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [workspace.metadata.dylint]
 libraries = [

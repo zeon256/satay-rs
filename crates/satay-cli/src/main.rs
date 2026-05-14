@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 use std::process::{self, Command as ProcessCommand, ExitStatus};
 
 use argh::FromArgs;
+use tracing::{info, instrument};
+use tracing_subscriber::EnvFilter;
 
 /// Satay command line interface.
 #[derive(Debug, FromArgs)]
@@ -76,24 +78,32 @@ enum Error {
 }
 
 fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+
     let args = argh::from_env();
     if let Err(err) = run(args) {
-        eprintln!("satay: {err}");
+        tracing::error!("{err}");
         process::exit(1);
     }
 }
 
+#[instrument(err)]
 fn run(args: Args) -> Result<(), Error> {
     match args.command {
         CliCommand::Generate(command) => generate(&command.input, &command.output, command.rustfmt),
     }
 }
 
+#[instrument(fields(input = %input.display(), output = %output.display(), rustfmt = rustfmt), err)]
 fn generate(input: &Path, output: &Path, rustfmt: bool) -> Result<(), Error> {
+    info!("reading input file");
     let spec = fs::read_to_string(input).map_err(|source| Error::ReadInput {
         path: input.to_owned(),
         source,
     })?;
+    info!("generating client code");
     let generated = satay_codegen::generate(&spec)?;
     let output_file = output_file(output);
 
@@ -104,15 +114,18 @@ fn generate(input: &Path, output: &Path, rustfmt: bool) -> Result<(), Error> {
         })?;
     }
 
+    info!(path = %output_file.display(), "writing output file");
     fs::write(&output_file, generated).map_err(|source| Error::WriteOutput {
         path: output_file.clone(),
         source,
     })?;
 
     if rustfmt {
+        info!("running rustfmt");
         run_rustfmt(&output_file)?;
     }
 
+    info!("done");
     Ok(())
 }
 
@@ -124,6 +137,7 @@ fn output_file(output: &Path) -> PathBuf {
     }
 }
 
+#[instrument(fields(path = %path.display()), err)]
 fn run_rustfmt(path: &Path) -> Result<(), Error> {
     let status = ProcessCommand::new("rustfmt")
         .arg(path)
