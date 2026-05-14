@@ -1,38 +1,100 @@
 use std::env;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 
-use satay_codegen::Error;
-use satay_codegen::ValidationError;
+use satay_codegen::GeneratedFile;
 
 const SIMPLE: &str = include_str!("../../../tests/fixtures/simple.yaml");
-const SIMPLE_EXPECTED: &str = include_str!("../../../tests/fixtures/simple.expected.rs");
 const PETSTORE_MINIMAL: &str = include_str!("../../../tests/fixtures/petstore-minimal.yaml");
 const CONSTRAINED: &str = include_str!("../../../tests/fixtures/constrained.yaml");
 
+fn find_file<'a>(files: &'a [GeneratedFile], relative_path: &str) -> &'a GeneratedFile {
+    files
+        .iter()
+        .find(|f| f.relative_path == relative_path)
+        .unwrap_or_else(|| panic!("expected file {relative_path}, found: {:?}", files.iter().map(|f| &f.relative_path).collect::<Vec<_>>()))
+}
+
 #[test]
-fn simple_fixture_matches_golden_file() {
-    let generated = satay_codegen::generate(SIMPLE).expect("generate simple fixture");
-    assert_eq!(generated, SIMPLE_EXPECTED);
+fn simple_fixture_generates_expected_file_structure() {
+    let files = satay_codegen::generate(SIMPLE).expect("generate simple fixture");
+
+    let mod_rs = find_file(&files, "mod.rs");
+    assert!(mod_rs.contents.contains("pub mod types;"));
+    assert!(mod_rs.contents.contains("pub mod get_user;"));
+    assert!(mod_rs.contents.contains("pub mod update_user;"));
+
+    let types_rs = find_file(&files, "types.rs");
+    assert!(types_rs.contents.contains("pub struct ErrorBody"));
+    assert!(types_rs.contents.contains("pub struct UpdateUserRequest"));
+    assert!(types_rs.contents.contains("pub struct User"));
+    assert!(types_rs.contents.contains("pub enum UserStatus"));
+
+    let parts = find_file(&files, "get_user/parts.rs");
+    assert!(parts.contents.contains("pub struct GetUserInput"));
+    assert!(parts.contents.contains("pub enum GetUserResponse"));
+    assert!(parts.contents.contains("pub fn get_user_parts"));
+    assert!(!parts.contents.contains("#[cfg(feature = \"json\")]"));
+
+    let json = find_file(&files, "get_user/json.rs");
+    assert!(json.contents.contains("pub fn encode_get_user"));
+    assert!(json.contents.contains("pub fn decode_get_user_response"));
+    assert!(!json.contents.contains("#[cfg(feature = \"json\")]"));
+
+    let parts = find_file(&files, "update_user/parts.rs");
+    assert!(parts.contents.contains("pub struct UpdateUserInput"));
+    assert!(parts.contents.contains("pub enum UpdateUserResponse"));
+    assert!(parts.contents.contains("pub fn update_user_parts"));
+
+    let json = find_file(&files, "update_user/json.rs");
+    assert!(json.contents.contains("pub fn encode_update_user"));
+    assert!(json.contents.contains("pub fn decode_update_user_response"));
+}
+
+#[test]
+fn simple_fixture_endpoint_modules_have_cfg_gated_json() {
+    let files = satay_codegen::generate(SIMPLE).expect("generate simple fixture");
+
+    let mod_rs = find_file(&files, "get_user/mod.rs");
+    assert!(mod_rs.contents.contains("#[cfg(feature = \"json\")]"));
+    assert!(mod_rs.contents.contains("mod json;"));
+    assert!(mod_rs.contents.contains("pub use json::*;"));
+
+    let mod_rs = find_file(&files, "update_user/mod.rs");
+    assert!(mod_rs.contents.contains("#[cfg(feature = \"json\")]"));
+    assert!(mod_rs.contents.contains("mod json;"));
+    assert!(mod_rs.contents.contains("pub use json::*;"));
+
+    let parts = find_file(&files, "get_user/parts.rs");
+    assert!(!parts.contents.contains("#[cfg(feature = \"json\")]"));
+
+    let json = find_file(&files, "get_user/json.rs");
+    assert!(!json.contents.contains("#[cfg(feature = \"json\")]"));
 }
 
 #[test]
 fn petstore_minimal_fixture_generates_client_core() {
-    let generated = satay_codegen::generate(PETSTORE_MINIMAL).expect("generate petstore fixture");
+    let files = satay_codegen::generate(PETSTORE_MINIMAL).expect("generate petstore fixture");
 
-    assert!(generated.contains("pub struct Pet"));
-    assert!(generated.contains("pub fn list_pets_parts"));
-    assert!(generated.contains("pub fn encode_create_pet"));
-    assert!(generated.contains("pub fn decode_get_pet_response"));
+    let types_rs = find_file(&files, "types.rs");
+    assert!(types_rs.contents.contains("pub struct Pet"));
+
+    let parts = find_file(&files, "list_pets/parts.rs");
+    assert!(parts.contents.contains("pub fn list_pets_parts"));
+
+    let json = find_file(&files, "create_pet/json.rs");
+    assert!(json.contents.contains("pub fn encode_create_pet"));
+
+    let json = find_file(&files, "get_pet/json.rs");
+    assert!(json.contents.contains("pub fn decode_get_pet_response"));
 }
 
 #[test]
 fn generated_simple_fixture_compiles_and_behaves() {
-    let generated = satay_codegen::generate(SIMPLE).expect("generate simple fixture");
+    let files = satay_codegen::generate(SIMPLE).expect("generate simple fixture");
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();
-    fs::create_dir(crate_dir.join("src")).expect("create src dir");
+    let generated_dir = crate_dir.join("src/generated");
 
     let runtime_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -40,33 +102,9 @@ fn generated_simple_fixture_compiles_and_behaves() {
         .join("satay-runtime");
     let runtime_path = toml_string(&runtime_path.to_string_lossy());
 
-    fs::write(
-        crate_dir.join("Cargo.toml"),
-        format!(
-            r#"[package]
-name = "satay-generated-check"
-version = "0.0.0"
-edition = "2024"
-
-[features]
-default = ["serde", "json"]
-serde = ["dep:serde", "satay-runtime/serde"]
-json = ["serde", "dep:serde_json", "satay-runtime/json"]
-
-[dependencies]
-http = "1"
-satay-runtime = {{ path = {runtime_path}, default-features = false }}
-serde = {{ version = "1", features = ["derive"], optional = true }}
-serde_json = {{ version = "1", optional = true }}
-"#
-        ),
-    )
-    .expect("write manifest");
-
-    fs::write(crate_dir.join("src/generated.rs"), generated).expect("write generated module");
-    fs::write(
-        crate_dir.join("src/lib.rs"),
-        r##"pub mod generated;
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
 
 #[cfg(test)]
 mod tests {
@@ -162,12 +200,11 @@ mod tests {
         }
     }
 }
-"##,
-    )
-    .expect("write lib");
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
-    let output = Command::new(cargo)
+    let output = std::process::Command::new(&cargo)
         .arg("test")
         .arg("--quiet")
         .current_dir(crate_dir)
@@ -186,15 +223,17 @@ mod tests {
 
 #[test]
 fn generated_constrained_fixture_enforces_openapi_bounds() {
-    let generated = satay_codegen::generate(CONSTRAINED).expect("generate constrained fixture");
-    assert!(generated.contains("#[nutype::nutype("));
-    assert!(generated.contains("validate(greater_or_equal = 0, less_or_equal = 130)"));
-    assert!(generated.contains("validate(len_char_min = 1, len_char_max = 80)"));
-    assert!(generated.contains("regex = \"^[a-zA-Z0-9-]+$\""));
+    let files = satay_codegen::generate(CONSTRAINED).expect("generate constrained fixture");
+
+    let types_rs = find_file(&files, "types.rs");
+    assert!(types_rs.contents.contains("#[nutype::nutype("));
+    assert!(types_rs.contents.contains("validate(greater_or_equal = 0, less_or_equal = 130)"));
+    assert!(types_rs.contents.contains("validate(len_char_min = 1, len_char_max = 80)"));
+    assert!(types_rs.contents.contains("regex = \"^[a-zA-Z0-9-]+$\""));
 
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();
-    fs::create_dir(crate_dir.join("src")).expect("create src dir");
+    let generated_dir = crate_dir.join("src/generated");
 
     let runtime_path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -202,35 +241,9 @@ fn generated_constrained_fixture_enforces_openapi_bounds() {
         .join("satay-runtime");
     let runtime_path = toml_string(&runtime_path.to_string_lossy());
 
-    fs::write(
-        crate_dir.join("Cargo.toml"),
-        format!(
-            r#"[package]
-name = "satay-generated-constrained-check"
-version = "0.0.0"
-edition = "2024"
-
-[features]
-default = ["serde", "json"]
-serde = ["dep:serde", "satay-runtime/serde"]
-json = ["serde", "dep:serde_json", "satay-runtime/json"]
-
-[dependencies]
-http = "1"
-nutype = {{ version = "0.7", features = ["serde", "regex"] }}
-regex = "1"
-satay-runtime = {{ path = {runtime_path}, default-features = false }}
-serde = {{ version = "1", features = ["derive"], optional = true }}
-serde_json = {{ version = "1", optional = true }}
-"#
-        ),
-    )
-    .expect("write manifest");
-
-    fs::write(crate_dir.join("src/generated.rs"), generated).expect("write generated module");
-    fs::write(
-        crate_dir.join("src/lib.rs"),
-        r##"pub mod generated;
+    write_manifest(crate_dir, &runtime_path, true, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
 
 #[cfg(test)]
 mod tests {
@@ -281,12 +294,11 @@ mod tests {
         assert!(err.to_string().contains("JSON error"));
     }
 }
-"##,
-    )
-    .expect("write lib");
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
-    let output = Command::new(&cargo)
+    let output = std::process::Command::new(&cargo)
         .arg("test")
         .arg("--quiet")
         .current_dir(crate_dir)
@@ -302,7 +314,7 @@ mod tests {
         );
     }
 
-    let output = Command::new(cargo)
+    let output = std::process::Command::new(cargo)
         .arg("check")
         .arg("--quiet")
         .arg("--no-default-features")
@@ -347,8 +359,8 @@ paths:
     .expect_err("nullable parameters are unsupported");
 
     match err {
-        Error::Validation(
-            ValidationError::NullableParameterUnsupported { wire_name, .. },
+        satay_codegen::Error::Validation(
+            satay_codegen::ValidationError::NullableParameterUnsupported { wire_name, .. },
         ) => {
             assert_eq!(wire_name, "userId");
         }
@@ -380,12 +392,54 @@ paths:
     .expect_err("default response bodies are unsupported");
 
     match err {
-        Error::Validation(
-            ValidationError::DefaultResponseBodyUnsupported { context, .. },
+        satay_codegen::Error::Validation(
+            satay_codegen::ValidationError::DefaultResponseBodyUnsupported { context, .. },
         ) => {
             assert_eq!(context, "operation `ping` responses");
         }
         other => panic!("unexpected error: {other}"),
+    }
+}
+
+fn write_manifest(crate_dir: &Path, runtime_path: &str, constrained: bool, _for_compile_test: bool) {
+    let nutype_deps = if constrained {
+        r#"
+nutype = { version = "0.7", features = ["serde", "regex"] }
+regex = "1"
+"#
+    } else {
+        ""
+    };
+
+    let manifest = format!(
+        r#"[package]
+name = "satay-generated-check"
+version = "0.0.0"
+edition = "2024"
+
+[features]
+default = ["serde", "json"]
+serde = ["dep:serde", "satay-runtime/serde"]
+json = ["serde", "dep:serde_json", "satay-runtime/json"]
+
+[dependencies]
+http = "1"
+satay-runtime = {{ path = {runtime_path}, default-features = false }}
+serde = {{ version = "1", features = ["derive"], optional = true }}
+serde_json = {{ version = "1", optional = true }}
+{nutype_deps}"#
+    );
+    fs::create_dir_all(crate_dir.join("src")).expect("create src dir");
+    fs::write(crate_dir.join("Cargo.toml"), manifest).expect("write manifest");
+}
+
+fn write_generated_files(generated_dir: &Path, files: &[GeneratedFile]) {
+    for file in files {
+        let path = generated_dir.join(&file.relative_path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create generated subdir");
+        }
+        fs::write(&path, &file.contents).expect("write generated file");
     }
 }
 

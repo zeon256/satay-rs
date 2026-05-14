@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-use std::ffi::OsStr;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -32,11 +31,11 @@ struct GenerateCommand {
     #[argh(option, short = 'i')]
     input: PathBuf,
 
-    /// output Rust file, or directory receiving mod.rs.
+    /// output directory for generated Rust modules.
     #[argh(option, short = 'o')]
     output: PathBuf,
 
-    /// run rustfmt on the generated Rust file.
+    /// run rustfmt on each generated file.
     #[argh(switch)]
     rustfmt: bool,
 }
@@ -53,8 +52,8 @@ enum Error {
     #[error(transparent)]
     Generate(#[from] satay_codegen::Error),
 
-    #[error("failed to create `{}`: {source}", path.display())]
-    CreateOutputDir {
+    #[error("failed to create directory `{}`: {source}", path.display())]
+    CreateDir {
         path: PathBuf,
         #[source]
         source: io::Error,
@@ -104,37 +103,37 @@ fn generate(input: &Path, output: &Path, rustfmt: bool) -> Result<(), Error> {
         source,
     })?;
     info!("generating client code");
-    let generated = satay_codegen::generate(&spec)?;
-    let output_file = output_file(output);
+    let files = satay_codegen::generate(&spec)?;
 
-    if let Some(parent) = output_file.parent() {
-        fs::create_dir_all(parent).map_err(|source| Error::CreateOutputDir {
-            path: parent.to_owned(),
+    let mut rustfmt_files = Vec::new();
+
+    for file in &files {
+        let path = output.join(&file.relative_path);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|source| Error::CreateDir {
+                path: parent.to_owned(),
+                source,
+            })?;
+        }
+        info!(path = %path.display(), "writing output file");
+        fs::write(&path, &file.contents).map_err(|source| Error::WriteOutput {
+            path: path.clone(),
             source,
         })?;
+        if rustfmt {
+            rustfmt_files.push(path);
+        }
     }
 
-    info!(path = %output_file.display(), "writing output file");
-    fs::write(&output_file, generated).map_err(|source| Error::WriteOutput {
-        path: output_file.clone(),
-        source,
-    })?;
-
-    if rustfmt {
+    if !rustfmt_files.is_empty() {
         info!("running rustfmt");
-        run_rustfmt(&output_file)?;
+        for path in &rustfmt_files {
+            run_rustfmt(path)?;
+        }
     }
 
     info!("done");
     Ok(())
-}
-
-fn output_file(output: &Path) -> PathBuf {
-    if output.extension() == Some(OsStr::new("rs")) {
-        output.to_owned()
-    } else {
-        output.join("mod.rs")
-    }
 }
 
 #[instrument(fields(path = %path.display()), err)]

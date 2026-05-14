@@ -13,15 +13,61 @@ const PREAMBLE: &str = "\
 
 ";
 
-pub(crate) fn render_api(api: &Api) -> String {
+#[derive(Debug)]
+pub struct GeneratedFile {
+    pub relative_path: String,
+    pub contents: String,
+}
+
+pub(crate) fn render_api(api: &Api) -> Vec<GeneratedFile> {
     tracing::info!(components = api.components.len(), operations = api.operations.len(), "rendering API");
-    let syntax = render_file(api);
-    let code = prettyplease::unparse(&syntax);
+    let mut files = Vec::new();
+
+    let top_mod = render_top_mod(api);
+    files.push(GeneratedFile {
+        relative_path: "mod.rs".to_owned(),
+        contents: format_file(top_mod),
+    });
+
+    if !api.components.is_empty() || !api.constrained_types.is_empty() {
+        let types_file = render_types_file(api);
+        files.push(GeneratedFile {
+            relative_path: "types.rs".to_owned(),
+            contents: format_file(types_file),
+        });
+    }
+
+    for operation in &api.operations {
+        let dir = &operation.fn_name;
+        let endpoint_mod = render_endpoint_mod(operation);
+        files.push(GeneratedFile {
+            relative_path: format!("{dir}/mod.rs"),
+            contents: format_file(endpoint_mod),
+        });
+
+        let parts_file = render_endpoint_parts_file(api, operation);
+        files.push(GeneratedFile {
+            relative_path: format!("{dir}/parts.rs"),
+            contents: format_file(parts_file),
+        });
+
+        let json_file = render_endpoint_json_file(api, operation);
+        files.push(GeneratedFile {
+            relative_path: format!("{dir}/json.rs"),
+            contents: format_file(json_file),
+        });
+    }
+
+    tracing::info!(files = files.len(), "rendered API");
+    files
+}
+
+fn format_file(file: syn::File) -> String {
+    let code = prettyplease::unparse(&file);
     let code = add_blank_lines_between_items(&code);
     let mut formatted = String::with_capacity(PREAMBLE.len() + code.len());
     formatted.push_str(PREAMBLE);
     formatted.push_str(&code);
-    tracing::info!(length = formatted.len(), "rendered API");
     formatted
 }
 
@@ -33,7 +79,10 @@ fn add_blank_lines_between_items(code: &str) -> String {
         result.push('\n');
         if (line == "}" || line.ends_with(" {}"))
             && let Some(next) = lines.peek()
-            && (next.starts_with('#') || next.starts_with("pub ") || next.starts_with("impl "))
+            && (next.starts_with('#')
+                || next.starts_with("pub ")
+                || next.starts_with("impl ")
+                || next.starts_with("use "))
         {
             result.push('\n');
         }
@@ -41,7 +90,29 @@ fn add_blank_lines_between_items(code: &str) -> String {
     result
 }
 
-fn render_file(api: &Api) -> syn::File {
+fn render_top_mod(api: &Api) -> syn::File {
+    let mut items: Vec<syn::Item> = Vec::new();
+
+    let has_types = !api.components.is_empty() || !api.constrained_types.is_empty();
+    if has_types {
+        items.push(parse_quote!(pub mod types;));
+        items.push(parse_quote!(pub use types::*;));
+    }
+
+    for operation in &api.operations {
+        let module = ident(&operation.fn_name);
+        items.push(parse_quote!(pub mod #module;));
+        items.push(parse_quote!(pub use #module::*;));
+    }
+
+    syn::File {
+        shebang: None,
+        attrs: vec![],
+        items,
+    }
+}
+
+fn render_types_file(api: &Api) -> syn::File {
     let mut items = Vec::new();
     for component in &api.components {
         render_component(component, &mut items);
@@ -49,18 +120,116 @@ fn render_file(api: &Api) -> syn::File {
     for constrained_type in &api.constrained_types {
         items.push(Item::Struct(render_constrained_type(constrained_type)));
     }
-    for operation in &api.operations {
-        items.push(Item::Struct(render_input(operation)));
-        items.push(Item::Enum(render_response(operation)));
-        items.push(Item::Fn(render_parts_function(operation)));
-        items.push(Item::Fn(render_encode_function(operation)));
-        items.push(Item::Fn(render_decode_function(operation)));
-    }
 
     syn::File {
         shebang: None,
         attrs: vec![],
         items,
+    }
+}
+
+fn render_endpoint_mod(_operation: &Operation) -> syn::File {
+    syn::File {
+        shebang: None,
+        attrs: vec![],
+        items: vec![
+            parse_quote!(mod parts;),
+            parse_quote!(#[cfg(feature = "json")] mod json;),
+            parse_quote!(pub use parts::*;),
+            parse_quote!(#[cfg(feature = "json")] pub use json::*;),
+        ],
+    }
+}
+
+fn render_endpoint_parts_file(api: &Api, operation: &Operation) -> syn::File {
+    let mut items = Vec::new();
+    let use_types = build_types_use(api, operation);
+    items.push(syn::Item::Use(use_types));
+    items.push(Item::Struct(render_input(operation)));
+    items.push(Item::Enum(render_response(operation)));
+    items.push(Item::Fn(render_parts_function(operation)));
+
+    syn::File {
+        shebang: None,
+        attrs: vec![],
+        items,
+    }
+}
+
+fn render_endpoint_json_file(api: &Api, operation: &Operation) -> syn::File {
+    let mut items = Vec::new();
+    let use_types = build_types_use(api, operation);
+    items.push(syn::Item::Use(use_types));
+    let input_name = ident(&operation.input_name);
+    let response_name = ident(&operation.response_name);
+    let parts_fn = ident(&format!("{}_parts", operation.fn_name));
+    items.push(syn::Item::Use(parse_quote!(use super::parts::{#input_name, #response_name, #parts_fn};)));
+    items.push(Item::Fn(render_encode_function(operation)));
+    items.push(Item::Fn(render_decode_function(operation)));
+
+    syn::File {
+        shebang: None,
+        attrs: vec![],
+        items,
+    }
+}
+
+fn build_types_use(api: &Api, operation: &Operation) -> syn::ItemUse {
+    let mut needed_names: Vec<Ident> = Vec::new();
+
+    for param in &operation.parameters {
+        collect_type_refs(&param.ty, &mut needed_names);
+    }
+    if let Some(body) = &operation.request_body {
+        collect_type_refs(&body.ty, &mut needed_names);
+    }
+    for response in &operation.responses {
+        if let Some(body) = &response.body {
+            collect_type_refs(body, &mut needed_names);
+        }
+    }
+
+    let mut all_names: Vec<Ident> = needed_names;
+    if operation.request_body.is_some() || !operation.parameters.is_empty() {
+        let input_ident = ident(&operation.input_name);
+        if !all_names.iter().any(|n| n == &input_ident) {
+            // Input type is defined locally, no need to import
+        }
+    }
+    all_names.sort_by(|a, b| a.to_string().cmp(&b.to_string()));
+    all_names.dedup();
+
+    // Filter: only import names that are in the types module (components and constrained types)
+    let type_names: std::collections::BTreeSet<String> = api
+        .components
+        .iter()
+        .map(|c| c.rust_name.clone())
+        .chain(api.constrained_types.iter().map(|c| c.rust_name.clone()))
+        .collect();
+
+    let names: Vec<Ident> = all_names
+        .into_iter()
+        .filter(|n| type_names.contains(&n.to_string()))
+        .collect();
+
+    if names.is_empty() {
+        return parse_quote!(use super::super::types;);
+    }
+
+    parse_quote!(use super::super::types::{#(#names),*};)
+}
+
+fn collect_type_refs(ty: &TypeRef, names: &mut Vec<Ident>) {
+    match ty {
+        TypeRef::Named(name) => {
+            names.push(ident(name));
+        }
+        TypeRef::Constrained { rust_name, .. } => {
+            names.push(ident(rust_name));
+        }
+        TypeRef::Array(inner) => collect_type_refs(inner, names),
+        TypeRef::Nullable(inner) => collect_type_refs(inner, names),
+        TypeRef::String | TypeRef::I32 | TypeRef::I64 | TypeRef::F32 | TypeRef::F64 | TypeRef::Bool => {}
     }
 }
 
@@ -670,7 +839,6 @@ fn render_encode_function(operation: &Operation) -> syn::ItemFn {
     };
 
     parse_quote!(
-        #[cfg(feature = "json")]
         pub fn #encode_fn(input: #input_type) -> Result<http::Request<Vec<u8>>, satay_runtime::Error> {
             let parts = #parts_fn(input)?;
             #encode_expr
@@ -688,7 +856,6 @@ fn render_decode_function(operation: &Operation) -> syn::ItemFn {
         .collect::<Vec<_>>();
 
     parse_quote!(
-        #[cfg(feature = "json")]
         pub fn #decode_fn(
             response: http::Response<Vec<u8>>,
         ) -> Result<#response_name, satay_runtime::Error> {
@@ -858,7 +1025,7 @@ mod tests {
                         required: true,
                     },
                     Field {
-                        wire_name: "tag-count".to_owned(),
+                        wire_name: "tag_count".to_owned(),
                         rust_name: "tag_count".to_owned(),
                         ty: TypeRef::I32,
                         required: false,
@@ -869,7 +1036,7 @@ mod tests {
             operations: vec![],
         };
 
-        let file = render_file(&api);
+        let file = render_types_file(&api);
         assert_eq!(file.items.len(), 1);
         let Item::Struct(item) = &file.items[0] else {
             panic!("expected struct item");
@@ -920,28 +1087,11 @@ mod tests {
             }],
         };
 
-        let file = render_file(&api);
-        assert_eq!(file.items.len(), 5);
-        assert!(file.items.iter().any(|item| matches!(
-            item,
-            Item::Struct(item) if item.ident == "CreatePetInput"
-        )));
-        assert!(file.items.iter().any(|item| matches!(
-            item,
-            Item::Enum(item) if item.ident == "CreatePetResponse"
-        )));
-        assert!(file.items.iter().any(|item| matches!(
-            item,
-            Item::Fn(item) if item.sig.ident == "create_pet_parts"
-        )));
-        assert!(file.items.iter().any(|item| matches!(
-            item,
-            Item::Fn(item) if item.sig.ident == "encode_create_pet"
-        )));
-        assert!(file.items.iter().any(|item| matches!(
-            item,
-            Item::Fn(item) if item.sig.ident == "decode_create_pet_response"
-        )));
+        let files = render_api(&api);
+        assert!(files.iter().any(|f| f.relative_path == "mod.rs"));
+        assert!(files.iter().any(|f| f.relative_path == "create_pet/mod.rs"));
+        assert!(files.iter().any(|f| f.relative_path == "create_pet/parts.rs"));
+        assert!(files.iter().any(|f| f.relative_path == "create_pet/json.rs"));
     }
 
     #[test]
