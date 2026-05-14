@@ -14,6 +14,7 @@ paths:
             type: string
             minLength: 3
             maxLength: 20
+            pattern: '^[a-zA-Z0-9-]+$'
         - name: limit
           in: query
           required: false
@@ -46,6 +47,12 @@ components:
       format: int32
       minimum: 0
       maximum: 130
+    Email:
+      type: string
+      pattern: '^[^@]+@[^@]+\.[^@]+$'
+    Slug:
+      type: string
+      pattern: '^[a-z0-9-]+$'
     User:
       type: object
       required:
@@ -63,6 +70,8 @@ components:
           maxLength: 80
         age:
           $ref: '#/components/schemas/Age'
+        email:
+          $ref: '#/components/schemas/Email'
         score:
           type: number
           format: float
