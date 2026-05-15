@@ -5,6 +5,7 @@ members = [
     "crates/satay-codegen",
     "crates/satay-runtime",
     "examples/reqwest",
+    "examples/reqwest-blocking",
     "examples/ureq",
 ]
 
