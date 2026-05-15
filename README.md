@@ -12,6 +12,9 @@ Satay is Sans-IO by design. Generated code builds HTTP requests and decodes HTTP
 
 Satay tries to up the ante: instead of dumping plain structs and `String` fields, it generates newtypes that carry validation in their types. String fields with `pattern` constraints become `nutype`-powered types that reject bad values at parse time. Bounded integers get their own wrapper types. If the spec says a value can't exceed 100, you can't construct a 150. The constraint is in the type, not a runtime check you hope somebody remembers.
 
+> [!WARNING]
+> This is work in progress and it is designed to support the generation of lta-rs clients first. Features and support for other OpenAPI specs will be added as needed as the priority is to get a working lta-rs client with good ergonomics and validation. Contributions are welcome!
+
 ```bash
 satay generate --input openapi.yaml --output src/generated --rustfmt
 ```
