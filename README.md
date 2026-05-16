@@ -6,11 +6,7 @@
   <sub><i>Disclaimer: I can't design. This logo was generated using ChatGPT.</i></sub>
 </p>
 
-Satay generates typed Rust OpenAPI clients without choosing your HTTP client.
-
-Satay is Sans-IO by design. Generated code builds HTTP requests and decodes HTTP responses, but never sends bytes over the network. Bring your own transport: `reqwest`, `ureq`, `hyper`, tests, WASM, or custom runtime code.
-
-Satay tries to up the ante: instead of dumping plain structs and `String` fields, it generates newtypes that carry validation in their types. String fields with `pattern` constraints become `nutype`-powered types that reject bad values at parse time. Bounded integers get their own wrapper types. If the spec says a value can't exceed 100, you can't construct a 150. The constraint is in the type, not a runtime check you hope somebody remembers.
+Satay is a Rust OpenAPI client generator that generates sans-IO client code with strong validation through newtypes. It focuses on generating ergonomic Rust code that captures OpenAPI constraints in the type system, while leaving transport choices to the user. The aim of generating sans-IO code is to maximize flexibility: you can use the generated clients in any Rust environment, with any HTTP client, and even in non-network contexts like tests or WASM. 
 
 > [!WARNING]
 > This is work in progress and it is designed to support the generation of lta-rs clients first. Features and support for other OpenAPI specs will be added as needed as the priority is to get a working lta-rs client with good ergonomics and validation. Contributions are welcome!
