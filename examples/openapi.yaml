@@ -1,17 +1,17 @@
 openapi: 3.0.3
 
 info:
-  title: LTA DataMall Bus Arrival API
+  title: LTA DataMall Bus API
   version: "3.0"
   description: >
-    OpenAPI schema for the LTA DataMall Bus Arrival API only.
-    Returns real-time bus arrival information for services at a queried bus stop.
+    OpenAPI schema for LTA DataMall bus APIs.
+    Returns real-time bus arrival information and bus service details.
 
 servers:
-  - url: https://datamall2.mytransport.sg/ltaodataservice/v3
+  - url: https://datamall2.mytransport.sg/ltaodataservice
 
 paths:
-  /BusArrival:
+  /v3/BusArrival:
     get:
       operationId: getBusArrival
       summary: Get bus arrival timings for a bus stop
@@ -105,6 +105,59 @@ paths:
                       Type: "SD"
                       Monitored: "1"
 
+  /BusServices:
+    get:
+      operationId: getBusServices
+      summary: Get bus service details
+      description: >
+        Returns detailed service information for all buses currently in operation,
+        including first stop, last stop, and peak / off-peak dispatch frequency.
+
+        The dataset is updated ad hoc.
+      security:
+        - accountKeyAuth: []
+      parameters:
+        - name: ServiceNo
+          in: query
+          required: false
+          description: Optional bus service number filter.
+          schema:
+            type: string
+          example: "107M"
+
+        - name: accept
+          in: header
+          required: false
+          description: Optional response format header. JSON is the default.
+          schema:
+            type: string
+            enum:
+              - application/json
+              - application/atom+xml
+            default: application/json
+
+      responses:
+        "200":
+          description: Successful Bus Services response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BusServicesResponse"
+              example:
+                odata.metadata: "https://datamall2.mytransport.sg/ltaodataservice/$metadata#BusServices"
+                value:
+                  - ServiceNo: "107M"
+                    Operator: "SBST"
+                    Direction: 1
+                    Category: "TRUNK"
+                    OriginCode: "64009"
+                    DestinationCode: "64009"
+                    AM_Peak_Freq: "14-17"
+                    AM_Offpeak_Freq: "10-16"
+                    PM_Peak_Freq: "12-15"
+                    PM_Offpeak_Freq: "12-15"
+                    LoopDesc: "Raffles Blvd"
+
 components:
   securitySchemes:
     accountKeyAuth:
@@ -114,6 +167,129 @@ components:
       description: LTA DataMall API account key.
 
   schemas:
+    BusServicesResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - odata.metadata
+        - value
+      properties:
+        odata.metadata:
+          type: string
+          format: uri
+          description: OData metadata URL.
+          example: "https://datamall2.mytransport.sg/ltaodataservice/$metadata#BusServices"
+
+        value:
+          type: array
+          description: Bus service details.
+          items:
+            $ref: "#/components/schemas/BusService"
+
+    BusService:
+      type: object
+      additionalProperties: false
+      required:
+        - ServiceNo
+        - Operator
+        - Direction
+        - Category
+        - OriginCode
+        - DestinationCode
+        - AM_Peak_Freq
+        - AM_Offpeak_Freq
+        - PM_Peak_Freq
+        - PM_Offpeak_Freq
+        - LoopDesc
+      properties:
+        ServiceNo:
+          type: string
+          description: The bus service number.
+          example: "107M"
+
+        Operator:
+          $ref: "#/components/schemas/BusOperator"
+
+        Direction:
+          type: integer
+          format: int32
+          description: >
+            The direction in which the bus travels. Valid values are 1 or 2;
+            loop services only have 1 direction.
+          example: 1
+          minimum: 1
+          maximum: 2
+
+        Category:
+          type: string
+          description: >
+            Category of the SBS bus service: EXPRESS, FEEDER, INDUSTRIAL,
+            TOWNLINK, TRUNK, 2 TIER FLAT FEE, FLAT FEE $1.10, FLAT FEE $1.90,
+            FLAT FEE $3.50, or FLAT FEE $3.80.
+          example: "TRUNK"
+          enum:
+            - EXPRESS
+            - FEEDER
+            - INDUSTRIAL
+            - TOWNLINK
+            - TRUNK
+            - "2-TIER FLAT FEE"
+            - "FLATFEE"
+            - "NIGHT SERVICE"
+            - "CITY_LINK"
+            - "FLAT FARE $2.00"
+          x-satay:
+            enum-variants:
+              "2-TIER FLAT FEE": TwoTierFlatFee
+              "FLATFEE": FlatFee
+              "NIGHT SERVICE": NightService
+              "CITY_LINK": CityLink
+              "FLAT FARE $2.00": FlatFareTwoDollar
+
+        OriginCode:
+          type: string
+          description: Bus stop code for first bus stop.
+          example: "64009"
+          x-satay:
+            parse-as: u32
+
+        DestinationCode:
+          type: string
+          description: >
+            Bus stop code for last bus stop. Similar as first stop for loop services.
+          example: "64009"
+          x-satay:
+            parse-as: u32
+
+        AM_Peak_Freq:
+          type: string
+          description: >
+            Frequency of dispatch for AM Peak 0630H - 0830H, as a range in minutes.
+          example: "14-17"
+
+        AM_Offpeak_Freq:
+          type: string
+          description: >
+            Frequency of dispatch for AM Off-Peak 0831H - 1659H, as a range in minutes.
+          example: "10-16"
+
+        PM_Peak_Freq:
+          type: string
+          description: >
+            Frequency of dispatch for PM Peak 1700H - 1900H, as a range in minutes.
+          example: "12-15"
+
+        PM_Offpeak_Freq:
+          type: string
+          description: >
+            Frequency of dispatch for PM Off-Peak after 1900H, as a range in minutes.
+          example: "12-15"
+
+        LoopDesc:
+          type: string
+          description: Location at which the bus service loops, empty if not a loop service.
+          example: "Raffles Blvd"
+
     BusArrivalResponse:
       type: object
       additionalProperties: false
@@ -157,14 +333,7 @@ components:
           example: "15"
 
         Operator:
-          type: string
-          description: Public transport operator code.
-          enum:
-            - SBST
-            - SMRT
-            - TTS
-            - GAS
-          example: GAS
+          $ref: "#/components/schemas/BusOperator"
 
         NextBus:
           $ref: "#/components/schemas/BusArrivalTiming"
@@ -180,6 +349,16 @@ components:
           $ref: "#/components/schemas/BusArrivalTiming"
           x-satay:
             treat-error-as-none: true
+
+    BusOperator:
+      type: string
+      description: Public transport operator code.
+      enum:
+        - SBST
+        - SMRT
+        - TTS
+        - GAS
+      example: "SBST"
 
     BusArrivalTiming:
       type: object
