@@ -6,7 +6,7 @@ Satay targets OpenAPI 3.0.x and a small, typed subset.
 
 - YAML or JSON OpenAPI documents.
 - `components.schemas` as Rust structs, string enums, primitive aliases, and constrained newtypes.
-- Schema types: `string`, `integer` (`int32`, `int64`, or no format), `number` (`float`, `double`, or no format), `boolean`, arrays, nullable values, and local `#/components/schemas/...` references.
+- Schema types: `string`, `integer` (`int32`, `int64`, or no format, with Rust integer inference from bounds), `number` (`float`, `double`, or no format), `boolean`, arrays, nullable values, and local `#/components/schemas/...` references.
 - Operations for standard HTTP methods with explicit `operationId`, or inferred names from method + path.
 - Path, query, and header parameters declared with `schema`.
 - Path-level parameters with operation-level overrides.
@@ -23,6 +23,7 @@ Satay targets OpenAPI 3.0.x and a small, typed subset.
 - Optional fields and optional request bodies.
 - `serde` derives and field renames behind the generated crate's `serde` feature.
 - Satay-specific `x-satay.parse-as` hints for string fields whose wire values should become stronger Rust types.
+- Satay-specific `x-satay.integer-type` hints for overriding inferred Rust integer primitives.
 - Satay-specific `x-satay.enum-variants` hints for naming generated Rust enum variants.
 - Satay-specific `x-satay.treat-error-as-none` hints for struct fields where deserialization errors should produce `None` instead of failing.
 - Validation constraints rendered through `nutype` for:

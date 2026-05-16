@@ -48,6 +48,34 @@ pub struct Bus {
 
 The wire format stays a string: serde deserializes from a JSON string and serializes back to one. Supported `parse-as` values are `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`, and `offset-datetime`. Float parsing uses `fast-float`; `offset-datetime` generates `satay_runtime::OffsetDateTime`. `bool` also supports integer schemas, accepting `1`, `0`, `"1"`, `"0"`, `true`, and `false`; integer-backed bool fields serialize as `1` or `0`.
 
+## `integer-type`
+
+Satay infers the smallest Rust integer primitive for `type: integer` schemas that declare both `minimum` and `maximum`. Bounds that remain narrower than the primitive still generate validation newtypes.
+
+```yaml
+Direction:
+  type: integer
+  format: int32
+  minimum: 1
+  maximum: 2
+```
+
+This generates a constrained newtype backed by `u8`, because `1..=2` fits in `u8` while still needing validation for the exact allowed range.
+
+Use `x-satay.integer-type` to opt out of inference or pick a specific Rust integer primitive:
+
+```yaml
+Direction:
+  type: integer
+  format: int32
+  minimum: 1
+  maximum: 2
+  x-satay:
+    integer-type: i32
+```
+
+Supported values are `auto`, `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, and `i64`. `auto` is the default.
+
 ## `enum-variants`
 
 Use `x-satay.enum-variants` on string enums when the wire values are terse codes but the Rust variants should be descriptive. Map each wire value to the desired Rust variant name. Mapping a value to `Unknown` folds it into Satay's generated fallback variant.

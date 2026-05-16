@@ -70,6 +70,18 @@ pub(crate) struct IntegerLimit {
     pub(crate) exclusive: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IntegerType {
+    U8,
+    U16,
+    U32,
+    U64,
+    I8,
+    I16,
+    I32,
+    I64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct FloatLimit {
     pub(crate) value: f64,
@@ -97,8 +109,7 @@ pub(crate) enum TypeRef {
     String,
     ParsedString(ParseAs),
     ParsedInteger(ParseAs),
-    I32,
-    I64,
+    Integer(IntegerType),
     F32,
     F64,
     Bool,
@@ -222,6 +233,45 @@ impl ParseAs {
             "bool" => Some(Self::Bool),
             "offset-datetime" => Some(Self::OffsetDateTime),
             _ => None,
+        }
+    }
+}
+
+impl IntegerType {
+    pub(crate) fn from_wire(value: &str) -> Option<Self> {
+        match value {
+            "u8" => Some(Self::U8),
+            "u16" => Some(Self::U16),
+            "u32" => Some(Self::U32),
+            "u64" => Some(Self::U64),
+            "i8" => Some(Self::I8),
+            "i16" => Some(Self::I16),
+            "i32" => Some(Self::I32),
+            "i64" => Some(Self::I64),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn min_value(self) -> i128 {
+        match self {
+            Self::U8 | Self::U16 | Self::U32 | Self::U64 => 0,
+            Self::I8 => i128::from(i8::MIN),
+            Self::I16 => i128::from(i16::MIN),
+            Self::I32 => i128::from(i32::MIN),
+            Self::I64 => i128::from(i64::MIN),
+        }
+    }
+
+    pub(crate) fn max_value(self) -> i128 {
+        match self {
+            Self::U8 => i128::from(u8::MAX),
+            Self::U16 => i128::from(u16::MAX),
+            Self::U32 => i128::from(u32::MAX),
+            Self::U64 => i128::from(u64::MAX),
+            Self::I8 => i128::from(i8::MAX),
+            Self::I16 => i128::from(i16::MAX),
+            Self::I32 => i128::from(i32::MAX),
+            Self::I64 => i128::from(i64::MAX),
         }
     }
 }

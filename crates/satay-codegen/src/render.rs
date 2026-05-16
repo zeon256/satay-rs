@@ -6,8 +6,8 @@ use syn::{Ident, Item, LitStr, parse_quote};
 use crate::ident::type_ident;
 use crate::model::{
     Api, ApiKeyLocation, ApiKeySecurityScheme, Component, ComponentKind, ConstrainedType,
-    EnumVariant, Field, FloatLimit, IntegerLimit, Operation, Parameter, ParameterLocation, ParseAs,
-    PathSegment, ResponseCase, TypeRef, Validation, is_array_type,
+    EnumVariant, Field, FloatLimit, IntegerLimit, IntegerType, Operation, Parameter,
+    ParameterLocation, ParseAs, PathSegment, ResponseCase, TypeRef, Validation, is_array_type,
 };
 
 const PREAMBLE: &str = "\
@@ -246,6 +246,9 @@ fn render_endpoint_parts_file(api: &Api, operation: &Operation) -> syn::File {
     }
     items.push(Item::Struct(render_input(operation)));
     items.push(Item::Impl(render_input_impl(operation)));
+    if let Some(default_impl) = render_input_default_impl(operation) {
+        items.push(Item::Impl(default_impl));
+    }
     items.push(Item::Enum(render_response(operation)));
     items.push(Item::Fn(render_parts_function(operation)));
 
@@ -642,8 +645,7 @@ fn collect_type_refs(ty: &TypeRef, names: &mut Vec<Ident>) {
         TypeRef::String
         | TypeRef::ParsedString(_)
         | TypeRef::ParsedInteger(_)
-        | TypeRef::I32
-        | TypeRef::I64
+        | TypeRef::Integer(_)
         | TypeRef::F32
         | TypeRef::F64
         | TypeRef::Bool => {}
@@ -1085,6 +1087,21 @@ fn render_input_impl(operation: &Operation) -> syn::ItemImpl {
     )
 }
 
+fn render_input_default_impl(operation: &Operation) -> Option<syn::ItemImpl> {
+    if input_fields(operation).iter().any(|field| field.required) {
+        return None;
+    }
+
+    let input_name = ident(&operation.input_name);
+    Some(parse_quote!(
+        impl Default for #input_name {
+            fn default() -> Self {
+                Self::new()
+            }
+        }
+    ))
+}
+
 fn render_input_setter(field: &Field) -> TokenStream {
     let setter_name = input_setter_name(field);
     let name = ident(&field.rust_name);
@@ -1471,7 +1488,7 @@ fn value_expr(base: syn::Expr, ty: &TypeRef) -> syn::Expr {
         }
         TypeRef::Named(_) => parse_quote!(#base.as_ref()),
         TypeRef::Constrained { inner, .. } => constrained_value_expr(base, inner.non_nullable()),
-        TypeRef::I32 | TypeRef::I64 | TypeRef::F32 | TypeRef::F64 | TypeRef::Bool => {
+        TypeRef::Integer(_) | TypeRef::F32 | TypeRef::F64 | TypeRef::Bool => {
             parse_quote!(&#base.to_string())
         }
         TypeRef::Array(_) | TypeRef::Nullable(_) => unreachable!("arrays are handled by caller"),
@@ -1484,7 +1501,7 @@ fn constrained_value_expr(base: syn::Expr, inner: &TypeRef) -> syn::Expr {
         TypeRef::ParsedString(parse_as) | TypeRef::ParsedInteger(parse_as) => {
             parsed_value_expr(base, *parse_as)
         }
-        TypeRef::I32 | TypeRef::I64 | TypeRef::F32 | TypeRef::F64 | TypeRef::Bool => {
+        TypeRef::Integer(_) | TypeRef::F32 | TypeRef::F64 | TypeRef::Bool => {
             parse_quote!(&#base.to_string())
         }
         TypeRef::Array(_) | TypeRef::Constrained { .. } | TypeRef::Nullable(_) => {
@@ -1499,8 +1516,7 @@ fn rust_type(ty: &TypeRef) -> syn::Type {
         TypeRef::ParsedString(parse_as) | TypeRef::ParsedInteger(parse_as) => {
             parse_as_rust_type(*parse_as)
         }
-        TypeRef::I32 => parse_quote!(i32),
-        TypeRef::I64 => parse_quote!(i64),
+        TypeRef::Integer(integer_type) => integer_rust_type(*integer_type),
         TypeRef::F32 => parse_quote!(f32),
         TypeRef::F64 => parse_quote!(f64),
         TypeRef::Bool => parse_quote!(bool),
@@ -1519,6 +1535,19 @@ fn rust_type(ty: &TypeRef) -> syn::Type {
             let inner = rust_type(inner);
             parse_quote!(Option<#inner>)
         }
+    }
+}
+
+fn integer_rust_type(integer_type: IntegerType) -> syn::Type {
+    match integer_type {
+        IntegerType::U8 => parse_quote!(u8),
+        IntegerType::U16 => parse_quote!(u16),
+        IntegerType::U32 => parse_quote!(u32),
+        IntegerType::U64 => parse_quote!(u64),
+        IntegerType::I8 => parse_quote!(i8),
+        IntegerType::I16 => parse_quote!(i16),
+        IntegerType::I32 => parse_quote!(i32),
+        IntegerType::I64 => parse_quote!(i64),
     }
 }
 
@@ -1716,7 +1745,7 @@ mod tests {
                         wire_name: "tag_count".to_owned(),
                         rust_name: "tag_count".to_owned(),
                         description: None,
-                        ty: TypeRef::I32,
+                        ty: TypeRef::Integer(IntegerType::I32),
                         required: false,
                         treat_error_as_none: false,
                     },

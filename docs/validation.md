@@ -56,13 +56,13 @@ generate Rust like:
 
 ```rust
 #[nutype::nutype(
-    validate(greater_or_equal = 0, less_or_equal = 130),
+    validate(less_or_equal = 130),
     derive(
         Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, AsRef, Deref, TryFrom, Into, Display
     ),
     cfg_attr(feature = "serde", derive(Serialize, Deserialize))
 )]
-pub struct Age(i32);
+pub struct Age(u8);
 
 #[nutype::nutype(
     validate(regex = "^[^@]+@[^@]+\\.[^@]+$"),
@@ -102,6 +102,8 @@ pub struct User {
     pub score: UserScore,
 }
 ```
+
+Integer schemas with both `minimum` and `maximum` infer the smallest Rust integer primitive that fits the declared range. In the `Age` example, `minimum: 0` is enforced by the `u8` backing type and the remaining `maximum: 130` constraint is enforced by `nutype`.
 
 ## Operation Parameters
 

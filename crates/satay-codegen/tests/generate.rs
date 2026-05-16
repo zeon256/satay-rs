@@ -452,11 +452,8 @@ fn generated_constrained_fixture_enforces_openapi_bounds() {
 
     let types_rs = find_file(&files, "types.rs");
     assert!(types_rs.contents.contains("#[nutype::nutype("));
-    assert!(
-        types_rs
-            .contents
-            .contains("validate(greater_or_equal = 0, less_or_equal = 130)")
-    );
+    assert!(types_rs.contents.contains("validate(less_or_equal = 130)"));
+    assert!(types_rs.contents.contains("pub struct Age(u8);"));
     assert!(
         types_rs
             .contents
@@ -484,8 +481,8 @@ mod tests {
 
     #[test]
     fn rejects_invalid_values_at_construction() {
-        assert!(Age::try_new(-1).is_err());
         assert!(Age::try_new(131).is_err());
+        assert!(GetUserLimitParameter::try_new(0).is_err());
         assert!(UserName::try_new(String::new()).is_err());
         assert!(UserName::try_new("a".repeat(81)).is_err());
         assert!(GetUserTagsParameter::try_new(Vec::new()).is_err());
@@ -564,6 +561,67 @@ mod tests {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
+
+#[test]
+fn integer_bounds_infer_smallest_rust_type_and_can_be_overridden() {
+    let files = satay_codegen::generate(
+        r#"
+openapi: 3.0.3
+paths:
+  /buses:
+    get:
+      operationId: getBuses
+      responses:
+        '200':
+          description: Buses
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Bus'
+components:
+  schemas:
+    Bus:
+      type: object
+      required:
+        - direction
+        - byte
+        - legacyDirection
+        - noBounds
+      properties:
+        direction:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 2
+        byte:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 255
+        legacyDirection:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 2
+          x-satay:
+            integer-type: i32
+        noBounds:
+          type: integer
+          format: int32
+"#,
+    )
+    .expect("generate integer inference fixture");
+
+    let types_rs = find_file(&files, "types.rs");
+    assert!(types_rs.contents.contains("pub struct BusDirection(u8);"));
+    assert!(types_rs.contents.contains("pub byte: u8"));
+    assert!(
+        types_rs
+            .contents
+            .contains("pub struct BusLegacyDirection(i32);")
+    );
+    assert!(types_rs.contents.contains("pub no_bounds: i32"));
 }
 
 #[test]

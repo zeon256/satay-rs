@@ -8,7 +8,7 @@ use crate::ident::{
 };
 use crate::model::{
     Api, ApiKeyLocation, ApiKeySecurityScheme, Component, ComponentKind, ConstrainedType,
-    EnumVariant, Field, FloatLimit, HttpMethod, IntegerLimit, Operation, Parameter,
+    EnumVariant, Field, FloatLimit, HttpMethod, IntegerLimit, IntegerType, Operation, Parameter,
     ParameterLocation, ParseAs, PathSegment, RequestBody, ResponseCase, TypeRef, Validation,
     is_array_type,
 };
@@ -494,8 +494,20 @@ fn parse_type_ref_base(
     registry: &mut TypeRegistry,
     type_name_hint: Option<&str>,
 ) -> Result<TypeRef, ValidationError> {
-    if let Some(parse_as) = parse_satay_parse_as(schema, context)? {
-        let schema_type = schema.get("type").and_then(Value::as_str);
+    let schema_type = schema.get("type").and_then(Value::as_str);
+    let parse_as = parse_satay_parse_as(schema, context)?;
+    let integer_type = parse_satay_integer_type(schema, context)?;
+    if let Some(integer_type) = integer_type
+        && schema_type != Some("integer")
+    {
+        return Err(ValidationError::SatayIntegerTypeRequiresInteger {
+            context: context.to_owned(),
+            integer_type: satay_integer_type_wire(integer_type).to_owned(),
+            kind: schema_type.unwrap_or("missing").to_owned(),
+        });
+    }
+
+    if let Some(parse_as) = parse_as {
         match (schema_type, parse_as) {
             (Some("string"), parse_as) => return Ok(TypeRef::ParsedString(parse_as)),
             (Some("integer"), ParseAs::Bool) => return Ok(TypeRef::ParsedInteger(parse_as)),
@@ -520,16 +532,13 @@ fn parse_type_ref_base(
         return Ok(registry.inline_enum_ref(name_hint, optional_description(schema), variants));
     }
 
-    match schema.get("type").and_then(Value::as_str) {
+    match schema_type {
         Some("string") => Ok(TypeRef::String),
-        Some("integer") => match schema.get("format").and_then(Value::as_str) {
-            Some("int32") => Ok(TypeRef::I32),
-            Some("int64") | None => Ok(TypeRef::I64),
-            Some(format) => Err(ValidationError::UnsupportedIntegerFormat {
-                context: context.to_owned(),
-                format: format.to_owned(),
-            }),
-        },
+        Some("integer") => Ok(TypeRef::Integer(parse_integer_type(
+            schema,
+            context,
+            integer_type,
+        )?)),
         Some("number") => match schema.get("format").and_then(Value::as_str) {
             Some("float") => Ok(TypeRef::F32),
             Some("double") | None => Ok(TypeRef::F64),
@@ -578,7 +587,7 @@ fn parse_validation(
 ) -> Result<Option<Validation>, ValidationError> {
     match base {
         TypeRef::String => parse_string_validation(schema, context),
-        TypeRef::I32 | TypeRef::I64 => parse_integer_validation(schema, base, context),
+        TypeRef::Integer(integer_type) => parse_integer_validation(schema, *integer_type, context),
         TypeRef::F32 | TypeRef::F64 => parse_number_validation(schema, base, context),
         TypeRef::Array(_) => parse_array_validation(schema, context),
         TypeRef::ParsedString(_)
@@ -611,6 +620,32 @@ fn parse_satay_parse_as(
             context: context.to_owned(),
             parse_as: value.to_owned(),
         })
+}
+
+fn parse_satay_integer_type(
+    schema: &Map<String, Value>,
+    context: &str,
+) -> Result<Option<IntegerType>, ValidationError> {
+    let Some(satay) = optional_object(schema, "x-satay", context)? else {
+        return Ok(None);
+    };
+    let Some(value) = satay.get("integer-type") else {
+        return Ok(None);
+    };
+    let Some(value) = value.as_str() else {
+        return Err(ValidationError::InvalidSatayIntegerType {
+            context: context.to_owned(),
+        });
+    };
+    if value == "auto" {
+        return Ok(None);
+    }
+    IntegerType::from_wire(value).map(Some).ok_or_else(|| {
+        ValidationError::UnsupportedSatayIntegerType {
+            context: context.to_owned(),
+            integer_type: value.to_owned(),
+        }
+    })
 }
 
 fn parse_satay_treat_error_as_none(schema: &Value, context: &str) -> Result<bool, ValidationError> {
@@ -648,6 +683,19 @@ fn satay_parse_as_wire(parse_as: ParseAs) -> &'static str {
     }
 }
 
+fn satay_integer_type_wire(integer_type: IntegerType) -> &'static str {
+    match integer_type {
+        IntegerType::U8 => "u8",
+        IntegerType::U16 => "u16",
+        IntegerType::U32 => "u32",
+        IntegerType::U64 => "u64",
+        IntegerType::I8 => "i8",
+        IntegerType::I16 => "i16",
+        IntegerType::I32 => "i32",
+        IntegerType::I64 => "i64",
+    }
+}
+
 fn parse_string_validation(
     schema: &Map<String, Value>,
     context: &str,
@@ -680,15 +728,85 @@ fn parse_string_validation(
     }
 }
 
+fn parse_integer_type(
+    schema: &Map<String, Value>,
+    context: &str,
+    explicit: Option<IntegerType>,
+) -> Result<IntegerType, ValidationError> {
+    let format_type = parse_integer_format_type(schema, context)?;
+    match explicit {
+        Some(integer_type) => Ok(integer_type),
+        None => infer_integer_type(schema, format_type, context),
+    }
+}
+
+fn parse_integer_format_type(
+    schema: &Map<String, Value>,
+    context: &str,
+) -> Result<IntegerType, ValidationError> {
+    match schema.get("format").and_then(Value::as_str) {
+        Some("int32") => Ok(IntegerType::I32),
+        Some("int64") | None => Ok(IntegerType::I64),
+        Some(format) => Err(ValidationError::UnsupportedIntegerFormat {
+            context: context.to_owned(),
+            format: format.to_owned(),
+        }),
+    }
+}
+
+fn infer_integer_type(
+    schema: &Map<String, Value>,
+    format_type: IntegerType,
+    context: &str,
+) -> Result<IntegerType, ValidationError> {
+    let minimum = optional_integer_limit(schema, "minimum", "exclusiveMinimum", context)?;
+    let maximum = optional_integer_limit(schema, "maximum", "exclusiveMaximum", context)?;
+    let (Some(minimum), Some(maximum)) = (minimum, maximum) else {
+        return Ok(format_type);
+    };
+
+    let raw_minimum = effective_integer_min(minimum)?;
+    let raw_maximum = effective_integer_max(maximum)?;
+    let (minimum, maximum) =
+        intersect_integer_range(raw_minimum, raw_maximum, format_type, context)?;
+    if raw_minimum < format_type.min_value() || raw_maximum > format_type.max_value() {
+        return Ok(format_type);
+    }
+
+    Ok(smallest_integer_type(minimum, maximum))
+}
+
+fn smallest_integer_type(minimum: i128, maximum: i128) -> IntegerType {
+    if minimum >= 0 {
+        if maximum <= i128::from(u8::MAX) {
+            IntegerType::U8
+        } else if maximum <= i128::from(u16::MAX) {
+            IntegerType::U16
+        } else if maximum <= i128::from(u32::MAX) {
+            IntegerType::U32
+        } else {
+            IntegerType::U64
+        }
+    } else if minimum >= i128::from(i8::MIN) && maximum <= i128::from(i8::MAX) {
+        IntegerType::I8
+    } else if minimum >= i128::from(i16::MIN) && maximum <= i128::from(i16::MAX) {
+        IntegerType::I16
+    } else if minimum >= i128::from(i32::MIN) && maximum <= i128::from(i32::MAX) {
+        IntegerType::I32
+    } else {
+        IntegerType::I64
+    }
+}
+
 fn parse_integer_validation(
     schema: &Map<String, Value>,
-    base: &TypeRef,
+    integer_type: IntegerType,
     context: &str,
 ) -> Result<Option<Validation>, ValidationError> {
     reject_keyword(schema, "multipleOf", context)?;
     let minimum = optional_integer_limit(schema, "minimum", "exclusiveMinimum", context)?;
     let maximum = optional_integer_limit(schema, "maximum", "exclusiveMaximum", context)?;
-    let (minimum, maximum) = normalize_integer_limits(minimum, maximum, base, context)?;
+    let (minimum, maximum) = normalize_integer_limits(minimum, maximum, integer_type, context)?;
 
     if minimum.is_some() || maximum.is_some() {
         Ok(Some(Validation::Integer { minimum, maximum }))
@@ -880,32 +998,41 @@ fn json_integer(value: &Value, context: &str) -> Result<i128, ValidationError> {
 fn normalize_integer_limits(
     minimum: Option<IntegerLimit>,
     maximum: Option<IntegerLimit>,
-    base: &TypeRef,
+    integer_type: IntegerType,
     context: &str,
 ) -> Result<(Option<IntegerLimit>, Option<IntegerLimit>), ValidationError> {
-    let (type_min, type_max) = match base {
-        TypeRef::I32 => (i128::from(i32::MIN), i128::from(i32::MAX)),
-        TypeRef::I64 => (i128::from(i64::MIN), i128::from(i64::MAX)),
-        _ => unreachable!("integer validation is only parsed for integer types"),
-    };
+    let type_min = integer_type.min_value();
+    let type_max = integer_type.max_value();
 
-    let effective_min = minimum
+    let raw_minimum = minimum
         .map(effective_integer_min)
         .transpose()?
         .unwrap_or(type_min);
-    let effective_max = maximum
+    let raw_maximum = maximum
         .map(effective_integer_max)
         .transpose()?
         .unwrap_or(type_max);
 
-    if effective_min > effective_max {
+    intersect_integer_range(raw_minimum, raw_maximum, integer_type, context)?;
+
+    let minimum = minimum.filter(|_| raw_minimum > type_min);
+    let maximum = maximum.filter(|_| raw_maximum < type_max);
+    Ok((minimum, maximum))
+}
+
+fn intersect_integer_range(
+    minimum: i128,
+    maximum: i128,
+    integer_type: IntegerType,
+    context: &str,
+) -> Result<(i128, i128), ValidationError> {
+    let minimum = minimum.max(integer_type.min_value());
+    let maximum = maximum.min(integer_type.max_value());
+    if minimum > maximum {
         return Err(ValidationError::EmptyIntegerBounds {
             context: context.to_owned(),
         });
     }
-
-    let minimum = minimum.filter(|_| effective_min > type_min);
-    let maximum = maximum.filter(|_| effective_max < type_max);
     Ok((minimum, maximum))
 }
 
@@ -1772,7 +1899,7 @@ components:
                 assert!(status.required);
 
                 let age = field(fields, "age");
-                assert_eq!(age.ty, TypeRef::I64);
+                assert_eq!(age.ty, TypeRef::Integer(IntegerType::I64));
                 assert!(!age.required);
             }
             other => panic!("expected User struct, got {other:?}"),
@@ -1799,7 +1926,7 @@ components:
         let body = parameter(operation, "body");
         assert_eq!(body.location, ParameterLocation::Query);
         assert_eq!(body.rust_name, "body");
-        assert_eq!(body.ty, TypeRef::I32);
+        assert_eq!(body.ty, TypeRef::Integer(IntegerType::I32));
         assert!(!body.required);
 
         let include_details = parameter(operation, "includeDetails");
@@ -1876,16 +2003,10 @@ components:
         match &age.kind {
             ComponentKind::Nutype(constrained) => {
                 assert_eq!(constrained.rust_name, "Age");
-                assert_eq!(constrained.inner, TypeRef::I32);
+                assert_eq!(constrained.inner, TypeRef::Integer(IntegerType::U8));
                 match &constrained.validation {
                     Validation::Integer { minimum, maximum } => {
-                        assert_eq!(
-                            minimum,
-                            &Some(IntegerLimit {
-                                value: 0,
-                                exclusive: false,
-                            })
-                        );
+                        assert_eq!(minimum, &None);
                         assert_eq!(
                             maximum,
                             &Some(IntegerLimit {
@@ -2068,6 +2189,72 @@ components:
                 );
             }
             other => panic!("expected Arrival struct, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn infers_and_overrides_integer_types() {
+        let api = parse_valid(
+            r#"
+openapi: 3.0.3
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Direction:
+      type: integer
+      format: int32
+      minimum: 1
+      maximum: 2
+    Byte:
+      type: integer
+      format: int64
+      minimum: 0
+      maximum: 255
+    LegacyDirection:
+      type: integer
+      format: int32
+      minimum: 1
+      maximum: 2
+      x-satay:
+        integer-type: i32
+    Unbounded:
+      type: integer
+      format: int32
+"#,
+        );
+
+        let direction = component(&api, "Direction");
+        match &direction.kind {
+            ComponentKind::Nutype(constrained) => {
+                assert_eq!(constrained.inner, TypeRef::Integer(IntegerType::U8));
+            }
+            other => panic!("expected Direction nutype, got {other:?}"),
+        }
+
+        let byte = component(&api, "Byte");
+        match &byte.kind {
+            ComponentKind::Alias(ty) => assert_eq!(ty, &TypeRef::Integer(IntegerType::U8)),
+            other => panic!("expected Byte alias, got {other:?}"),
+        }
+
+        let legacy_direction = component(&api, "LegacyDirection");
+        match &legacy_direction.kind {
+            ComponentKind::Nutype(constrained) => {
+                assert_eq!(constrained.inner, TypeRef::Integer(IntegerType::I32));
+            }
+            other => panic!("expected LegacyDirection nutype, got {other:?}"),
+        }
+
+        let unbounded = component(&api, "Unbounded");
+        match &unbounded.kind {
+            ComponentKind::Alias(ty) => assert_eq!(ty, &TypeRef::Integer(IntegerType::I32)),
+            other => panic!("expected Unbounded alias, got {other:?}"),
         }
     }
 

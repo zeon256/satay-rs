@@ -135,6 +135,33 @@ pub enum ValidationError {
         kind: String,
     },
 
+    /// An `x-satay.integer-type` value is not a supported Rust integer type.
+    ///
+    /// Error message: `{context} uses unsupported x-satay.integer-type `{integer_type}``
+    #[error("{context} uses unsupported x-satay.integer-type `{integer_type}`")]
+    UnsupportedSatayIntegerType {
+        context: String,
+        integer_type: String,
+    },
+
+    /// An `x-satay.integer-type` value is not a string.
+    ///
+    /// Error message: `{context}.x-satay.integer-type must be a string`
+    #[error("{context}.x-satay.integer-type must be a string")]
+    InvalidSatayIntegerType { context: String },
+
+    /// `x-satay.integer-type` was applied to a non-integer schema.
+    ///
+    /// Error message: `{context} uses x-satay.integer-type `{integer_type}` on `{kind}`; supported integer-type wire schemas are integer schemas`
+    #[error(
+        "{context} uses x-satay.integer-type `{integer_type}` on `{kind}`; supported integer-type wire schemas are integer schemas"
+    )]
+    SatayIntegerTypeRequiresInteger {
+        context: String,
+        integer_type: String,
+        kind: String,
+    },
+
     /// An array schema is missing the required `items` field.
     ///
     /// Error message: `{context} array schema must declare `items``

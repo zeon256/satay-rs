@@ -90,7 +90,7 @@ let decoded = generated::GetBusArrivalAction::decode(response)?;
 - Optional `Api` action builders for base URL, API-key auth, request construction, and response decoding.
 - `serde` derives and field renames behind a generated crate `serde` feature.
 - `nutype` validation for OpenAPI string, number, integer, and array bounds.
-- Satay extensions under `x-satay` for typed string parsing, enum variant names, and lossy optional fields.
+- Satay extensions under `x-satay` for typed string parsing, integer primitive overrides, enum variant names, and lossy optional fields.
 
 Generated code that represents OpenAPI validation constraints uses `nutype` newtypes. Add these dependencies to crates that compile constrained generated clients:
 
