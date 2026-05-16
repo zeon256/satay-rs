@@ -1,10 +1,17 @@
 # satay
 
+[![Crates.io](https://img.shields.io/crates/v/satay)](https://crates.io/crates/satay)
+[![Crates.io Downloads](https://img.shields.io/crates/d/satay)](https://crates.io/crates/satay)
+[![Docs.rs](https://img.shields.io/docsrs/satay)](https://docs.rs/satay)
+[![License](https://img.shields.io/badge/license-Apache--2.0%2FMIT-blue)](#license)
+[![MSRV](https://img.shields.io/badge/MSRV-1.85.1-orange)](https://blog.rust-lang.org/2025/02/20/Rust-1.85.0/)
+[![Rust Edition](https://img.shields.io/badge/Rust-2024-blue)](https://doc.rust-lang.org/edition-guide/rust-2024/)
+
+satay is a Rust OpenAPI client generator for [sans-io](https://fasterthanli.me/articles/the-case-for-sans-io) clients. It generates typed request builders, response decoders, and validation [newtypes](https://rust-unofficial.github.io/patterns/patterns/behavioural/newtype.html) from OpenAPI constraints while leaving HTTP, WebSocket, tests, WASM, and other transports under your application's control.
+
 <p align="center">
   <img src="logo.png" alt="satay-rs logo" width="180">
 </p>
-
-satay is a Rust OpenAPI client generator for [sans-io](https://fasterthanli.me/articles/the-case-for-sans-io) clients. It generates typed request builders, response decoders, and validation [newtypes](https://rust-unofficial.github.io/patterns/patterns/behavioural/newtype.html) from OpenAPI constraints while leaving HTTP, WebSocket, tests, WASM, and other transports under your application's control.
 
 > [!WARNING]
 > Satay is work in progress and currently prioritizes generating `lta-rs` clients with good ergonomics and validation. Support for other OpenAPI specs will grow as the supported subset becomes explicit and tested.
@@ -123,6 +130,10 @@ OpenAPI `pattern` uses ECMA-262 regex syntax, while `nutype` uses Rust's `regex`
 - [crates/satay-reqwest](crates/satay-reqwest): adapter traits for sending generated actions with `reqwest`.
 - [crates/satay-ureq](crates/satay-ureq): adapter traits for sending generated actions with `ureq`.
 
+## Security
+
+Please see [SECURITY.md](SECURITY.md) for the security policy, reporting guidelines, and hardening techniques used in this project.
+
 ## License
 
 Licensed under either of:
@@ -131,3 +142,8 @@ Licensed under either of:
 - MIT license ([LICENSE-MIT](LICENSE-MIT))
 
 at your option.
+
+
+## Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
