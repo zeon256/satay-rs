@@ -23,6 +23,7 @@ pub(crate) enum ApiKeyLocation {
 #[derive(Debug)]
 pub(crate) struct Component {
     pub(crate) rust_name: String,
+    pub(crate) description: Option<String>,
     pub(crate) kind: ComponentKind,
 }
 
@@ -37,6 +38,7 @@ pub(crate) enum ComponentKind {
 #[derive(Debug, Clone)]
 pub(crate) struct ConstrainedType {
     pub(crate) rust_name: String,
+    pub(crate) description: Option<String>,
     pub(crate) inner: TypeRef,
     pub(crate) validation: Validation,
 }
@@ -78,6 +80,7 @@ pub(crate) struct FloatLimit {
 pub(crate) struct Field {
     pub(crate) wire_name: String,
     pub(crate) rust_name: String,
+    pub(crate) description: Option<String>,
     pub(crate) ty: TypeRef,
     pub(crate) required: bool,
     pub(crate) treat_error_as_none: bool,
@@ -127,6 +130,7 @@ pub(crate) enum ParseAs {
 #[derive(Debug)]
 pub(crate) struct Operation {
     pub(crate) fn_name: String,
+    pub(crate) description: Option<String>,
     pub(crate) input_name: String,
     pub(crate) response_name: String,
     pub(crate) method: HttpMethod,
@@ -160,6 +164,7 @@ pub(crate) struct Parameter {
     pub(crate) location: ParameterLocation,
     pub(crate) wire_name: String,
     pub(crate) rust_name: String,
+    pub(crate) description: Option<String>,
     pub(crate) ty: TypeRef,
     pub(crate) required: bool,
 }
@@ -174,6 +179,7 @@ pub(crate) enum ParameterLocation {
 #[derive(Debug)]
 pub(crate) struct RequestBody {
     pub(crate) field_name: String,
+    pub(crate) description: Option<String>,
     pub(crate) content_type: String,
     pub(crate) ty: TypeRef,
     pub(crate) required: bool,
@@ -183,6 +189,7 @@ pub(crate) struct RequestBody {
 pub(crate) struct ResponseCase {
     pub(crate) status: u16,
     pub(crate) variant_name: String,
+    pub(crate) description: Option<String>,
     pub(crate) body: Option<TypeRef>,
 }
 

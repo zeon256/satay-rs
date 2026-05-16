@@ -21,22 +21,30 @@ EstimatedArrival:
   type: string
   x-satay:
     parse-as: offset-datetime
+Monitored:
+  type: integer
+  x-satay:
+    parse-as: bool
 ```
 
-For example, a `Reading` struct with `parse-as` fields generates:
+For example, a `Bus` struct with `parse-as` fields generates:
 
 ```rust
-pub struct Reading {
+pub struct Bus {
     #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_u32"))]
-    pub id: u32,
+    pub bus_stop_code: u32,
+    
     #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_f64"))]
-    pub value: f64,
-    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_u8"))]
-    pub count: u8,
+    pub latitude: f64,
+    
     #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_offset_datetime"))]
-    pub seen_at: satay_runtime::OffsetDateTime,
+    pub estimated_arrival: satay_runtime::OffsetDateTime,
+    
+    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_bool"))]
+    pub monitored: bool,
 }
 ```
+
 
 The wire format stays a string: serde deserializes from a JSON string and serializes back to one. Supported `parse-as` values are `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`, and `offset-datetime`. Float parsing uses `fast-float`; `offset-datetime` generates `satay_runtime::OffsetDateTime`. `bool` also supports integer schemas, accepting `1`, `0`, `"1"`, `"0"`, `true`, and `false`; integer-backed bool fields serialize as `1` or `0`.
 

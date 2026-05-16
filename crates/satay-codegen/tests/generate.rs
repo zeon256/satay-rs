@@ -77,6 +77,80 @@ fn simple_fixture_generates_expected_file_structure() {
 }
 
 #[test]
+fn descriptions_generate_rustdoc_comments() {
+    let files = satay_codegen::generate(
+        r#"
+openapi: 3.0.3
+paths:
+  /users/{userId}:
+    get:
+      operationId: getUser
+      description: Fetch a user.
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          description: User identifier.
+          schema:
+            type: string
+        - name: includeDetails
+          in: query
+          description: Include detailed fields.
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: User found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+components:
+  schemas:
+    User:
+      type: object
+      description: A user record.
+      required:
+        - id
+      properties:
+        id:
+          type: string
+          description: Stable ID.
+        name:
+          type: string
+          description: Display name.
+"#,
+    )
+    .expect("generate descriptions fixture");
+
+    let api_rs = find_file(&files, "api.rs");
+    assert!(
+        api_rs
+            .contents
+            .contains("    /// Fetch a user.\n    pub fn get_user")
+    );
+
+    let types_rs = find_file(&files, "types.rs");
+    assert!(types_rs.contents.contains("/// A user record.\n#[derive"));
+    assert!(
+        types_rs
+            .contents
+            .contains("    /// Stable ID.\n    pub id: String,\n\n    /// Display name.")
+    );
+
+    let parts_rs = find_file(&files, "get_user/parts.rs");
+    assert!(parts_rs.contents.contains("/// Fetch a user.\n#[derive"));
+    assert!(parts_rs.contents.contains(
+        "    /// User identifier.\n    pub user_id: String,\n\n    /// Include detailed fields."
+    ));
+    assert!(
+        parts_rs
+            .contents
+            .contains("    /// User found.\n    Ok(User)")
+    );
+}
+
+#[test]
 fn server_security_and_api_action_helpers_are_generated() {
     let files = satay_codegen::generate(
         r#"

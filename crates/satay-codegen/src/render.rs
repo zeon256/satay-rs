@@ -92,11 +92,12 @@ fn add_blank_lines_between_items(code: &str) -> String {
         result.push_str(line);
         result.push('\n');
         if let Some(next) = lines.peek() {
-            let needs_blank = (line == "}" || line.ends_with(" {}"))
-                && (next.starts_with('#')
-                    || next.starts_with("pub ")
-                    || next.starts_with("impl ")
-                    || next.starts_with("use "))
+            let next_is_item = next.starts_with('#')
+                || next.starts_with("///")
+                || next.starts_with("pub ")
+                || next.starts_with("impl ")
+                || next.starts_with("use ");
+            let needs_blank = (line == "}" || line.ends_with(" {}")) && next_is_item
                 || line.starts_with("use ") && !next.starts_with("use ");
             if needs_blank {
                 result.push('\n');
@@ -123,7 +124,8 @@ fn add_blank_lines_between_impl_methods(code: &str) -> String {
             let next_is_method = next_trimmed.starts_with("pub ")
                 || next_trimmed.starts_with("fn ")
                 || next_trimmed.starts_with("async fn ")
-                || next_trimmed.starts_with("#[");
+                || next_trimmed.starts_with("#[")
+                || next_trimmed.starts_with("///");
             if next_indent_len == 4 && next_is_method {
                 result.push('\n');
             }
@@ -413,6 +415,7 @@ fn render_api_operation_method(operation: &Operation) -> TokenStream {
     let method = ident(&operation.fn_name);
     let action = action_ident(operation);
     let input = ident(&operation.input_name);
+    let docs = doc_attrs(operation.description.as_deref());
     let required_fields = input_fields(operation)
         .into_iter()
         .filter(|field| field.required)
@@ -425,6 +428,7 @@ fn render_api_operation_method(operation: &Operation) -> TokenStream {
     let new_arg_names = required_fields.iter().map(|field| ident(&field.rust_name));
 
     quote!(
+        #(#docs)*
         pub fn #method(&self #(, #new_args)*) -> #action<'_> {
             #action {
                 api: self,
@@ -485,8 +489,10 @@ fn render_apply_api_keys_body(api: &Api) -> TokenStream {
 fn render_action_struct(operation: &Operation) -> syn::ItemStruct {
     let action = action_ident(operation);
     let input = ident(&operation.input_name);
+    let docs = doc_attrs(operation.description.as_deref());
 
     parse_quote!(
+        #(#docs)*
         #[derive(Debug, Clone)]
         pub struct #action<'a> {
             api: &'a Api,
@@ -649,15 +655,21 @@ fn render_component(component: &Component, items: &mut Vec<syn::Item>) {
         ComponentKind::Struct(fields) => {
             items.push(Item::Struct(render_struct(
                 &component.rust_name,
+                component.description.as_deref(),
                 fields,
                 true,
             )));
         }
-        ComponentKind::Enum(variants) => items.extend(render_enum(&component.rust_name, variants)),
+        ComponentKind::Enum(variants) => items.extend(render_enum(
+            &component.rust_name,
+            component.description.as_deref(),
+            variants,
+        )),
         ComponentKind::Alias(ty) => {
             let name = ident(&component.rust_name);
             let ty = rust_type(ty);
-            items.push(parse_quote!(pub type #name = #ty;));
+            let docs = doc_attrs(component.description.as_deref());
+            items.push(parse_quote!(#(#docs)* pub type #name = #ty;));
         }
         ComponentKind::Nutype(constrained_type) => {
             items.push(Item::Struct(render_constrained_type(constrained_type)));
@@ -670,8 +682,10 @@ fn render_constrained_type(constrained_type: &ConstrainedType) -> syn::ItemStruc
     let inner = rust_type(&constrained_type.inner);
     let validation = render_validation(&constrained_type.validation);
     let derives = nutype_derives(&constrained_type.validation);
+    let docs = doc_attrs(constrained_type.description.as_deref());
 
     parse_quote!(
+        #(#docs)*
         #[nutype::nutype(
             #validation,
             derive(#(#derives),*),
@@ -845,9 +859,14 @@ fn array_predicate(min_items: Option<u64>, max_items: Option<u64>) -> TokenStrea
     }
 }
 
-fn render_struct(name: &str, fields: &[Field], serde: bool) -> syn::ItemStruct {
+fn render_struct(
+    name: &str,
+    description: Option<&str>,
+    fields: &[Field],
+    serde: bool,
+) -> syn::ItemStruct {
     let name = ident(name);
-    let attrs = struct_attrs(serde);
+    let attrs = struct_attrs(description, serde);
     let fields = fields
         .iter()
         .map(|field| render_struct_field(field, serde))
@@ -861,8 +880,9 @@ fn render_struct(name: &str, fields: &[Field], serde: bool) -> syn::ItemStruct {
     )
 }
 
-fn struct_attrs(serde: bool) -> Vec<syn::Attribute> {
-    let mut attrs = vec![parse_quote!(#[derive(Debug, Clone, PartialEq)])];
+fn struct_attrs(description: Option<&str>, serde: bool) -> Vec<syn::Attribute> {
+    let mut attrs = doc_attrs(description);
+    attrs.push(parse_quote!(#[derive(Debug, Clone, PartialEq)]));
     if serde {
         attrs.push(parse_quote!(
             #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -880,8 +900,9 @@ fn render_struct_field(field: &Field, serde: bool) -> syn::Field {
 }
 
 fn field_attrs(field: &Field, serde: bool) -> Vec<syn::Attribute> {
+    let mut attrs = doc_attrs(field.description.as_deref());
     if !serde {
-        return vec![];
+        return attrs;
     }
 
     let mut serde_attrs = Vec::new();
@@ -903,11 +924,10 @@ fn field_attrs(field: &Field, serde: bool) -> Vec<syn::Attribute> {
         serde_attrs.push(quote!(default));
         serde_attrs.push(quote!(skip_serializing_if = "Option::is_none"));
     }
-    if serde_attrs.is_empty() {
-        vec![]
-    } else {
-        vec![parse_quote!(#[cfg_attr(feature = "serde", serde(#(#serde_attrs),*))])]
+    if !serde_attrs.is_empty() {
+        attrs.push(parse_quote!(#[cfg_attr(feature = "serde", serde(#(#serde_attrs),*))]));
     }
+    attrs
 }
 
 fn parsed_serde_module(field: &Field) -> Option<LitStr> {
@@ -924,8 +944,9 @@ fn parsed_serde_module(field: &Field) -> Option<LitStr> {
     Some(lit_str(&module))
 }
 
-fn render_enum(name: &str, variants: &[EnumVariant]) -> Vec<syn::Item> {
+fn render_enum(name: &str, description: Option<&str>, variants: &[EnumVariant]) -> Vec<syn::Item> {
     let name = ident(name);
+    let docs = doc_attrs(description);
     let variant_defs = variants.iter().map(render_enum_variant).collect::<Vec<_>>();
     let as_str_arms = variants
         .iter()
@@ -933,6 +954,7 @@ fn render_enum(name: &str, variants: &[EnumVariant]) -> Vec<syn::Item> {
         .collect::<Vec<_>>();
 
     let enum_item = parse_quote!(
+        #(#docs)*
         #[derive(Debug, Clone, PartialEq, Eq, Default)]
         #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
         pub enum #name {
@@ -989,7 +1011,12 @@ fn render_enum_as_str_arm(variant: &EnumVariant) -> syn::Arm {
 fn render_input(operation: &Operation) -> syn::ItemStruct {
     let input_fields = input_fields(operation);
 
-    render_struct(&operation.input_name, &input_fields, false)
+    render_struct(
+        &operation.input_name,
+        operation.description.as_deref(),
+        &input_fields,
+        false,
+    )
 }
 
 fn input_fields(operation: &Operation) -> Vec<Field> {
@@ -999,6 +1026,7 @@ fn input_fields(operation: &Operation) -> Vec<Field> {
     input_fields.extend(operation.parameters.iter().map(|parameter| Field {
         wire_name: parameter.wire_name.clone(),
         rust_name: parameter.rust_name.clone(),
+        description: parameter.description.clone(),
         ty: parameter.ty.clone(),
         required: parameter.required,
         treat_error_as_none: false,
@@ -1007,6 +1035,7 @@ fn input_fields(operation: &Operation) -> Vec<Field> {
         input_fields.push(Field {
             wire_name: body.field_name.clone(),
             rust_name: body.field_name.clone(),
+            description: body.description.clone(),
             ty: body.ty.clone(),
             required: body.required,
             treat_error_as_none: false,
@@ -1105,6 +1134,7 @@ fn input_builder_value(value: TokenStream, ty: &TypeRef) -> TokenStream {
 
 fn render_response(operation: &Operation) -> syn::ItemEnum {
     let name = ident(&operation.response_name);
+    let docs = doc_attrs(operation.description.as_deref());
     let mut variants = operation
         .responses
         .iter()
@@ -1113,6 +1143,7 @@ fn render_response(operation: &Operation) -> syn::ItemEnum {
     variants.push(parse_quote!(UnexpectedStatus(http::StatusCode, Vec<u8>)));
 
     parse_quote!(
+        #(#docs)*
         #[derive(Debug, Clone, PartialEq)]
         pub enum #name {
             #(#variants),*
@@ -1122,16 +1153,18 @@ fn render_response(operation: &Operation) -> syn::ItemEnum {
 
 fn render_response_variant(response: &ResponseCase) -> syn::Variant {
     let name = ident(&response.variant_name);
+    let docs = doc_attrs(response.description.as_deref());
     match &response.body {
         Some(body) => {
             let body = rust_type(body);
-            parse_quote!(#name(#body))
+            parse_quote!(#(#docs)* #name(#body))
         }
-        None => parse_quote!(#name),
+        None => parse_quote!(#(#docs)* #name),
     }
 }
 
 fn render_parts_function(operation: &Operation) -> syn::ItemFn {
+    let docs = doc_attrs(operation.description.as_deref());
     let body_type = operation.request_body.as_ref().map_or_else(
         || parse_quote!(()),
         |body| rust_field_type(&body.ty, body.required, false),
@@ -1152,6 +1185,7 @@ fn render_parts_function(operation: &Operation) -> syn::ItemFn {
     let request_parts = render_request_parts_return(operation);
 
     parse_quote!(
+        #(#docs)*
         pub fn #parts_fn(
             #input_name: #input_type,
         ) -> Result<satay_runtime::RequestParts<#body_type>, satay_runtime::Error> {
@@ -1363,12 +1397,14 @@ fn array_values_expr(base: syn::Expr, ty: &TypeRef, base_kind: ArrayValueBase) -
 }
 
 fn render_encode_function(operation: &Operation) -> syn::ItemFn {
+    let docs = doc_attrs(operation.description.as_deref());
     let parts_fn = ident(&format!("{}_parts", operation.fn_name));
     let encode_fn = ident(&format!("encode_{}", operation.fn_name));
     let input_type = ident(&operation.input_name);
     let encode_expr = request_from_parts_expr(operation);
 
     parse_quote!(
+        #(#docs)*
         pub fn #encode_fn(input: #input_type) -> Result<http::Request<Vec<u8>>, satay_runtime::Error> {
             let parts = #parts_fn(input)?;
             #encode_expr
@@ -1576,6 +1612,25 @@ fn lit_str(value: &str) -> LitStr {
     LitStr::new(value, Span::call_site())
 }
 
+fn doc_attrs(description: Option<&str>) -> Vec<syn::Attribute> {
+    let Some(description) = description.filter(|description| !description.trim().is_empty()) else {
+        return vec![];
+    };
+
+    description
+        .lines()
+        .map(|line| {
+            let doc_line = if line.is_empty() {
+                String::new()
+            } else {
+                format!(" {line}")
+            };
+            let doc_line = lit_str(&doc_line);
+            parse_quote!(#[doc = #doc_line])
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1647,10 +1702,12 @@ mod tests {
             api_key_security_schemes: vec![],
             components: vec![Component {
                 rust_name: "Pet".to_owned(),
+                description: None,
                 kind: ComponentKind::Struct(vec![
                     Field {
                         wire_name: "id".to_owned(),
                         rust_name: "id".to_owned(),
+                        description: None,
                         ty: TypeRef::String,
                         required: true,
                         treat_error_as_none: false,
@@ -1658,6 +1715,7 @@ mod tests {
                     Field {
                         wire_name: "tag_count".to_owned(),
                         rust_name: "tag_count".to_owned(),
+                        description: None,
                         ty: TypeRef::I32,
                         required: false,
                         treat_error_as_none: false,
@@ -1701,6 +1759,7 @@ mod tests {
             constrained_types: vec![],
             operations: vec![Operation {
                 fn_name: "create_pet".to_owned(),
+                description: None,
                 input_name: "CreatePetInput".to_owned(),
                 response_name: "CreatePetResponse".to_owned(),
                 method: HttpMethod::Post,
@@ -1709,6 +1768,7 @@ mod tests {
                 parameters: vec![],
                 request_body: Some(RequestBody {
                     field_name: "body".to_owned(),
+                    description: None,
                     content_type: "application/json".to_owned(),
                     ty: TypeRef::Named("Pet".to_owned()),
                     required: true,
@@ -1716,6 +1776,7 @@ mod tests {
                 responses: vec![ResponseCase {
                     status: 201,
                     variant_name: "Created".to_owned(),
+                    description: None,
                     body: Some(TypeRef::Named("Pet".to_owned())),
                 }],
             }],
@@ -1740,6 +1801,7 @@ mod tests {
     fn optional_plain_array_query_iterates_borrowed_binding() {
         let operation = Operation {
             fn_name: "list_pets".to_owned(),
+            description: None,
             input_name: "ListPetsInput".to_owned(),
             response_name: "ListPetsResponse".to_owned(),
             method: HttpMethod::Get,
@@ -1749,6 +1811,7 @@ mod tests {
                 location: ParameterLocation::Query,
                 wire_name: "tags".to_owned(),
                 rust_name: "tags".to_owned(),
+                description: None,
                 ty: TypeRef::Array(Box::new(TypeRef::String)),
                 required: false,
             }],
@@ -1756,6 +1819,7 @@ mod tests {
             responses: vec![ResponseCase {
                 status: 204,
                 variant_name: "NoContent".to_owned(),
+                description: None,
                 body: None,
             }],
         };

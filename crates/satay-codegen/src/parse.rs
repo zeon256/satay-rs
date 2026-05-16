@@ -55,12 +55,14 @@ impl TypeRegistry {
     fn constrained_ref(
         &mut self,
         type_name_hint: &str,
+        description: Option<String>,
         inner: TypeRef,
         validation: Validation,
     ) -> TypeRef {
         let rust_name = unique_ident(type_ident(type_name_hint), &mut self.used_names);
         self.generated.push(ConstrainedType {
             rust_name: rust_name.clone(),
+            description,
             inner: inner.clone(),
             validation,
         });
@@ -70,10 +72,16 @@ impl TypeRegistry {
         }
     }
 
-    fn inline_enum_ref(&mut self, type_name_hint: &str, variants: Vec<EnumVariant>) -> TypeRef {
+    fn inline_enum_ref(
+        &mut self,
+        type_name_hint: &str,
+        description: Option<String>,
+        variants: Vec<EnumVariant>,
+    ) -> TypeRef {
         let rust_name = unique_ident(type_ident(type_name_hint), &mut self.used_names);
         self.inline_enums.push(Component {
             rust_name: rust_name.clone(),
+            description,
             kind: ComponentKind::Enum(variants),
         });
         TypeRef::Named(rust_name)
@@ -180,8 +188,13 @@ fn parse_components(
     let mut components = Vec::with_capacity(schemas.len());
     for (schema_name, schema) in schemas {
         let rust_name = type_ident(schema_name);
+        let description = schema.as_object().and_then(optional_description);
         let kind = parse_component_kind(schema_name, schema, registry)?;
-        components.push(Component { rust_name, kind });
+        components.push(Component {
+            rust_name,
+            description,
+            kind,
+        });
     }
 
     Ok(components)
@@ -230,6 +243,7 @@ fn parse_component_alias_or_nutype(
 ) -> Result<ComponentKind, ValidationError> {
     let context = format!("schema `{schema_name}`");
     let rust_name = type_ident(schema_name);
+    let description = optional_description(schema);
     let nullable = schema
         .get("nullable")
         .and_then(Value::as_bool)
@@ -240,11 +254,17 @@ fn parse_component_alias_or_nutype(
     match (validation, nullable) {
         (Some(validation), false) => Ok(ComponentKind::Nutype(ConstrainedType {
             rust_name,
+            description,
             inner: base,
             validation,
         })),
         (Some(validation), true) => {
-            let inner = registry.constrained_ref(&format!("{schema_name} value"), base, validation);
+            let inner = registry.constrained_ref(
+                &format!("{schema_name} value"),
+                description,
+                base,
+                validation,
+            );
             Ok(ComponentKind::Alias(TypeRef::Nullable(Box::new(inner))))
         }
         (None, false) => Ok(ComponentKind::Alias(base)),
@@ -382,6 +402,7 @@ fn parse_struct_fields(
     let mut fields = Vec::with_capacity(properties.len());
     for (wire_name, property_schema) in properties {
         let rust_name = unique_ident(field_ident(wire_name), &mut used);
+        let description = property_schema.as_object().and_then(optional_description);
         let ty = parse_type_ref(
             property_schema,
             &format!("property `{schema_name}.{wire_name}`"),
@@ -395,6 +416,7 @@ fn parse_struct_fields(
         fields.push(Field {
             wire_name: wire_name.clone(),
             rust_name,
+            description,
             ty,
             required: required.contains(wire_name),
             treat_error_as_none,
@@ -440,6 +462,7 @@ fn parse_type_ref(
 
     let schema = object(schema, context)?;
     reject_composition(schema, context)?;
+    let description = optional_description(schema);
 
     let nullable = schema
         .get("nullable")
@@ -448,7 +471,12 @@ fn parse_type_ref(
     let base = parse_type_ref_base(schema, context, registry, type_name_hint)?;
     let validation = parse_validation(schema, &base, context)?;
     let ty = if let Some(validation) = validation {
-        registry.constrained_ref(type_name_hint.unwrap_or(context), base, validation)
+        registry.constrained_ref(
+            type_name_hint.unwrap_or(context),
+            description,
+            base,
+            validation,
+        )
     } else {
         base
     };
@@ -489,7 +517,7 @@ fn parse_type_ref_base(
             return Ok(TypeRef::String);
         }
         let name_hint = type_name_hint.unwrap_or(context);
-        return Ok(registry.inline_enum_ref(name_hint, variants));
+        return Ok(registry.inline_enum_ref(name_hint, optional_description(schema), variants));
     }
 
     match schema.get("type").and_then(Value::as_str) {
@@ -987,6 +1015,7 @@ fn parse_operation(
         .and_then(Value::as_str)
         .map(str::to_owned)
         .unwrap_or_else(|| inferred_operation_id(method, path));
+    let description = optional_description(operation);
     let fn_name = function_ident(&operation_id);
     let type_prefix = type_ident(&operation_id);
 
@@ -1028,6 +1057,7 @@ fn parse_operation(
 
     Ok(Operation {
         fn_name,
+        description,
         input_name: format!("{type_prefix}Input"),
         response_name: format!("{type_prefix}Response"),
         method,
@@ -1146,6 +1176,7 @@ fn parse_parameter(
         location,
         wire_name: wire_name.clone(),
         rust_name: field_ident(&wire_name),
+        description: optional_description(parameter),
         ty,
         required,
     })
@@ -1206,6 +1237,7 @@ fn parse_request_body(
 
     Ok(Some(RequestBody {
         field_name,
+        description: optional_description(request_body),
         content_type: content_type.to_owned(),
         ty: parse_type_ref(
             schema,
@@ -1286,6 +1318,7 @@ fn parse_responses(
         cases.push(ResponseCase {
             status: status_code,
             variant_name: response_variant_ident(status_code),
+            description: optional_description(response),
             body,
         });
     }
@@ -1481,6 +1514,14 @@ fn optional_object<'a>(
         }
         None => Ok(None),
     }
+}
+
+fn optional_description(object: &Map<String, Value>) -> Option<String> {
+    object
+        .get("description")
+        .and_then(Value::as_str)
+        .filter(|description| !description.trim().is_empty())
+        .map(str::to_owned)
 }
 
 fn required_str<'a>(
