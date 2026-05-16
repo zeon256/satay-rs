@@ -1496,6 +1496,7 @@ fn parsed_string_value_expr(base: syn::Expr, parse_as: ParseAs) -> syn::Expr {
         | ParseAs::I64
         | ParseAs::F32
         | ParseAs::F64 => parse_quote!(&#base.to_string()),
+        ParseAs::Bool => parse_quote!(satay_runtime::format_bool(&#base)),
     }
 }
 
@@ -1511,6 +1512,7 @@ fn parse_as_rust_type(parse_as: ParseAs) -> syn::Type {
         ParseAs::I64 => parse_quote!(i64),
         ParseAs::F32 => parse_quote!(f32),
         ParseAs::F64 => parse_quote!(f64),
+        ParseAs::Bool => parse_quote!(bool),
         ParseAs::OffsetDateTime => parse_quote!(satay_runtime::OffsetDateTime),
     }
 }
@@ -1527,6 +1529,7 @@ fn parse_as_serde_module(parse_as: ParseAs) -> &'static str {
         ParseAs::I64 => "satay_runtime::serde_string::as_i64",
         ParseAs::F32 => "satay_runtime::serde_string::as_f32",
         ParseAs::F64 => "satay_runtime::serde_string::as_f64",
+        ParseAs::Bool => "satay_runtime::serde_string::as_bool",
         ParseAs::OffsetDateTime => "satay_runtime::serde_string::as_offset_datetime",
     }
 }

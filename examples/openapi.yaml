@@ -81,6 +81,7 @@ paths:
                       Load: "SEA"
                       Feature: "WAB"
                       Type: "SD"
+                      Monitored: "1"
                     NextBus2:
                       OriginCode: "77009"
                       DestinationCode: "77009"
@@ -91,6 +92,7 @@ paths:
                       Load: "SEA"
                       Feature: "WAB"
                       Type: "SD"
+                      Monitored: "1"
                     NextBus3:
                       OriginCode: "77009"
                       DestinationCode: "77009"
@@ -101,6 +103,7 @@ paths:
                       Load: "SEA"
                       Feature: "WAB"
                       Type: "SD"
+                      Monitored: "1"
 
 components:
   securitySchemes:
@@ -191,6 +194,7 @@ components:
         - Load
         - Feature
         - Type
+        - Monitored
       properties:
         OriginCode:
           type: string
@@ -298,3 +302,16 @@ components:
               DD: DoubleDecker
               BD: Bendy
               "": Unknown
+
+        Monitored:
+          type: string
+          description: >
+            Indicator of whether the bus is currently being monitored by the system.
+            "1" = monitored, "0" = not monitored.
+            May be an empty string when unavailable.
+          enum:
+            - "1"
+            - "0"
+          example: "1"
+          x-satay:
+            parse-as: bool

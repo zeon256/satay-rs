@@ -176,6 +176,10 @@ pub fn format_offset_datetime(value: &OffsetDateTime) -> String {
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }
 
+pub fn format_bool(value: &bool) -> &'static str {
+    if *value { "1" } else { "0" }
+}
+
 #[cfg(feature = "serde")]
 pub mod serde_string {
     use std::fmt;
@@ -288,6 +292,124 @@ pub mod serde_string {
     string_float_module!(as_f32, f32);
     string_float_module!(as_f64, f64);
 
+    pub mod as_bool {
+        use std::fmt;
+
+        use serde::de::{Error as DeError, Visitor};
+
+        pub fn serialize<S>(value: &bool, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            serializer.serialize_str(crate::format_bool(value))
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<bool, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            deserializer.deserialize_any(BoolVisitor)
+        }
+
+        struct BoolVisitor;
+
+        impl Visitor<'_> for BoolVisitor {
+            type Value = bool;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a boolean string or numeric boolean")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+                Ok(value)
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                super::deserialize_bool(value).map_err(DeError::custom)
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                self.visit_str(&value)
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                match value {
+                    0 => Ok(false),
+                    1 => Ok(true),
+                    _ => Err(DeError::custom("invalid boolean number")),
+                }
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                match value {
+                    0 => Ok(false),
+                    1 => Ok(true),
+                    _ => Err(DeError::custom("invalid boolean number")),
+                }
+            }
+        }
+
+        pub mod option {
+            use std::fmt;
+
+            use serde::de::Visitor;
+
+            pub fn serialize<S>(value: &Option<bool>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                match value {
+                    Some(value) => super::serialize(value, serializer),
+                    None => serializer.serialize_none(),
+                }
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                deserializer.deserialize_option(BoolOptionVisitor)
+            }
+
+            struct BoolOptionVisitor;
+
+            impl<'de> Visitor<'de> for BoolOptionVisitor {
+                type Value = Option<bool>;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("an optional boolean string or numeric boolean")
+                }
+
+                fn visit_none<E>(self) -> Result<Self::Value, E> {
+                    Ok(None)
+                }
+
+                fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                    Ok(None)
+                }
+
+                fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+                where
+                    D: serde::Deserializer<'de>,
+                {
+                    super::deserialize(deserializer).map(Some)
+                }
+            }
+        }
+    }
+
     pub mod as_offset_datetime {
         use serde::Deserialize;
         use serde::de::Error as DeError;
@@ -381,6 +503,16 @@ pub mod serde_string {
         value
             .map(|value| value.parse::<T>().map_err(DeError::custom))
             .transpose()
+    }
+
+    fn deserialize_bool(value: &str) -> Result<bool, &'static str> {
+        match value {
+            "1" => Ok(true),
+            "0" => Ok(false),
+            value if value.eq_ignore_ascii_case("true") => Ok(true),
+            value if value.eq_ignore_ascii_case("false") => Ok(false),
+            _ => Err("invalid boolean string"),
+        }
     }
 }
 
@@ -517,5 +649,24 @@ mod tests {
         assert_eq!(parts.status, http::StatusCode::OK);
         assert_eq!(parts.headers.get(CONTENT_TYPE).unwrap(), "application/json");
         assert_eq!(parts.body, br#"{"ok":true}"#);
+    }
+
+    #[cfg(all(feature = "serde", feature = "json"))]
+    #[test]
+    fn serde_string_bool_accepts_string_and_numeric_values() {
+        #[derive(serde::Deserialize, serde::Serialize)]
+        struct Value {
+            #[serde(with = "crate::serde_string::as_bool")]
+            monitored: bool,
+        }
+
+        let numeric = serde_json::from_str::<Value>(r#"{"monitored":0}"#).unwrap();
+        assert!(!numeric.monitored);
+
+        let string = serde_json::from_str::<Value>(r#"{"monitored":"1"}"#).unwrap();
+        assert!(string.monitored);
+
+        let encoded = serde_json::to_value(Value { monitored: false }).unwrap();
+        assert_eq!(encoded, serde_json::json!({ "monitored": "0" }));
     }
 }

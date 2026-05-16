@@ -516,6 +516,7 @@ components:
         - id
         - value
         - count
+        - monitored
         - seenAt
       properties:
         id:
@@ -530,6 +531,10 @@ components:
           type: string
           x-satay:
             parse-as: u8
+        monitored:
+          type: string
+          x-satay:
+            parse-as: bool
         seenAt:
           type: string
           x-satay:
@@ -542,6 +547,7 @@ components:
     assert!(types_rs.contents.contains("pub id: u32"));
     assert!(types_rs.contents.contains("pub value: f64"));
     assert!(types_rs.contents.contains("pub count: u8"));
+    assert!(types_rs.contents.contains("pub monitored: bool"));
     assert!(
         types_rs
             .contents
@@ -556,6 +562,11 @@ components:
         types_rs
             .contents
             .contains("with = \"satay_runtime::serde_string::as_f64\"")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("with = \"satay_runtime::serde_string::as_bool\"")
     );
     assert!(
         types_rs
@@ -586,7 +597,7 @@ mod tests {
         let response = satay_runtime::ResponseParts {
             status: http::StatusCode::OK,
             headers: http::HeaderMap::new(),
-            body: br#"{"id":"42","value":"1.25","count":"7","seenAt":"2024-08-14T16:41:48+08:00"}"#
+            body: br#"{"id":"42","value":"1.25","count":"7","monitored":0,"seenAt":"2024-08-14T16:41:48+08:00"}"#
                 .to_vec(),
         };
         let decoded = decode_get_reading_response(response).expect("decoded response");
@@ -596,6 +607,7 @@ mod tests {
                 assert_eq!(reading.id, 42);
                 assert_eq!(reading.value, 1.25);
                 assert_eq!(reading.count, 7);
+                assert!(!reading.monitored);
                 assert_eq!(reading.seen_at.offset().whole_hours(), 8);
 
                 let encoded = serde_json::to_value(&reading).unwrap();
@@ -605,6 +617,7 @@ mod tests {
                         "id": "42",
                         "value": "1.25",
                         "count": "7",
+                        "monitored": "0",
                         "seenAt": "2024-08-14T16:41:48+08:00"
                     })
                 );

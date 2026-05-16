@@ -611,6 +611,7 @@ fn satay_parse_as_wire(parse_as: ParseAs) -> &'static str {
         ParseAs::I64 => "i64",
         ParseAs::F32 => "f32",
         ParseAs::F64 => "f64",
+        ParseAs::Bool => "bool",
         ParseAs::OffsetDateTime => "offset-datetime",
     }
 }
@@ -1961,6 +1962,7 @@ components:
         - stop
         - latitude
         - visit
+        - monitored
         - estimatedArrival
       properties:
         stop:
@@ -1976,6 +1978,10 @@ components:
           type: string
           x-satay:
             parse-as: u8
+        monitored:
+          type: string
+          x-satay:
+            parse-as: bool
         estimatedArrival:
           type: string
           x-satay:
@@ -1997,6 +2003,10 @@ components:
                 assert_eq!(
                     field(fields, "visit").ty,
                     TypeRef::ParsedString(ParseAs::U8)
+                );
+                assert_eq!(
+                    field(fields, "monitored").ty,
+                    TypeRef::ParsedString(ParseAs::Bool)
                 );
                 assert_eq!(
                     field(fields, "estimatedArrival").ty,
