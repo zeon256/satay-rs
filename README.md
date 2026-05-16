@@ -172,6 +172,29 @@ serde = ["dep:serde", "satay-runtime/serde"]
 json = ["serde", "dep:serde_json", "satay-runtime/json"]
 ```
 
+## Transport Adapters
+
+Satay's core contract is still Sans-IO: generated actions build `http::Request<Vec<u8>>` values and decode `satay_runtime::ResponseParts<B>`. The optional adapter crates only add small extension traits for common clients.
+
+With `satay-reqwest`, simple call sites can stay compact:
+
+```rust
+use satay_reqwest::{ReqwestActionExt, reqwest};
+
+let client = reqwest::Client::new();
+let response = api.get_bus_arrival("83139").send_with(&client).await?;
+```
+
+If your application needs transport features such as TLS, blocking support, proxies, or custom client configuration, keep a direct dependency on the transport crate and enable those features there:
+
+```toml
+[dependencies]
+satay-reqwest = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+```
+
+The adapter crate also depends on `reqwest` so it can name `reqwest::Client` in its extension trait. Cargo unifies compatible dependency versions, so this normally selects one shared `reqwest` build rather than two copies. The same model applies to `satay-ureq`: use the adapter for `.send_with(&agent)`, and let your application own the `ureq` configuration.
+
 ## Not supported yet
 
 These are known gaps rather than silent compatibility promises:
@@ -205,6 +228,8 @@ These are known gaps rather than silent compatibility promises:
 ## Examples
 
 - `examples/reqwest`: generates from `examples/openapi.yaml` at build time, sends the request with `reqwest`, and decodes with the generated action API.
+- `examples/reqwest-blocking`: uses the same generated action API with `reqwest::blocking`.
+- `examples/ureq`: sends generated actions with `ureq`.
 
 ## Workspace
 

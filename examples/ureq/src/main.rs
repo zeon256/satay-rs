@@ -2,9 +2,9 @@ include!(concat!(env!("OUT_DIR"), "/satay_generated.rs"));
 
 use std::env;
 use std::error::Error;
-use std::mem;
 
-use generated::{Api, GetBusArrivalAction, GetBusArrivalResponse};
+use generated::{Api, GetBusArrivalResponse};
+use satay_ureq::{UreqActionExt, ureq};
 
 fn main() -> Result<(), Box<dyn Error>> {
     let account_key = env::var("LTA_ACCOUNT_KEY")?;
@@ -18,33 +18,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         action = action.service_no(service_no);
     }
 
-    let request: http::Request<Vec<u8>> = action.request()?;
-
-    let url = request.uri().to_string();
-
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .build()
         .into();
 
-    let mut ureq_request = agent.get(&url);
-    for (name, value) in request.headers() {
-        ureq_request = ureq_request.header(name.as_str(), value.to_str()?);
-    }
+    let response = action.send_with(&agent)?;
 
-    let mut ureq_response = ureq_request.call()?;
-
-    let status = ureq_response.status();
-    let headers = mem::take(ureq_response.headers_mut());
-    let body = ureq_response.body_mut().read_to_vec()?;
-
-    let response = satay_runtime::ResponseParts {
-        status,
-        headers,
-        body,
-    };
-
-    match GetBusArrivalAction::decode(response)? {
+    match response {
         GetBusArrivalResponse::Ok(arrival) => {
             println!(
                 "{} services for bus stop {}",

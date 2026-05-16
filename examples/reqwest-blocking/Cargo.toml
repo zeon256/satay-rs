@@ -14,6 +14,7 @@ http = "1"
 nutype = { version = "0.7", features = ["serde"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
 satay-runtime = { path = "../../crates/satay-runtime", default-features = false }
+satay-reqwest = { path = "../../crates/satay-reqwest", features = ["blocking"] }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 

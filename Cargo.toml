@@ -1,12 +1,14 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/satay-cli",
-    "crates/satay-codegen",
-    "crates/satay-runtime",
-    "examples/reqwest",
-    "examples/reqwest-blocking",
-    "examples/ureq",
+  "crates/satay-cli",
+  "crates/satay-codegen",
+  "crates/satay-reqwest",
+  "crates/satay-runtime",
+  "crates/satay-ureq",
+  "examples/reqwest",
+  "examples/reqwest-blocking",
+  "examples/ureq",
 ]
 
 [workspace.package]
@@ -21,6 +23,8 @@ indexmap = "2"
 prettyplease = "0.2"
 proc-macro2 = "1"
 quote = "1"
+satay-reqwest = { path = "crates/satay-reqwest" }
+satay-ureq = { path = "crates/satay-ureq" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
@@ -32,6 +36,4 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [workspace.metadata.dylint]
-libraries = [
-    { git = "https://github.com/zeon256/style-rust-aku", branch = "main" },
-]
+libraries = [{ git = "https://github.com/zeon256/style-rust-aku", branch = "main" }]

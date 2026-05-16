@@ -2,10 +2,10 @@ include!(concat!(env!("OUT_DIR"), "/satay_generated.rs"));
 
 use std::env;
 use std::error::Error;
-use std::mem;
 
-use generated::{Api, GetBusArrivalAction, GetBusArrivalResponse};
-use reqwest::blocking;
+use generated::{Api, GetBusArrivalResponse};
+use satay_reqwest::ReqwestBlockingActionExt;
+use satay_reqwest::reqwest::blocking;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let account_key = env::var("LTA_ACCOUNT_KEY")?;
@@ -19,16 +19,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         action = action.service_no(service_no);
     }
 
-    let request: blocking::Request = action.request()?.try_into()?;
-    let mut response = blocking::Client::new().execute(request)?;
+    let response = action.send_with(&blocking::Client::new())?;
 
-    let response = satay_runtime::ResponseParts {
-        status: response.status(),
-        headers: mem::take(response.headers_mut()),
-        body: response.bytes()?.to_vec(),
-    };
-
-    match GetBusArrivalAction::decode(response)? {
+    match response {
         GetBusArrivalResponse::Ok(arrival) => {
             println!(
                 "{} services for bus stop {}",

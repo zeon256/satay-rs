@@ -45,6 +45,13 @@ pub enum Error {
     Json(#[from] serde_json::Error),
 }
 
+pub trait Action {
+    type Response;
+
+    fn request(self) -> Result<http::Request<Vec<u8>>, Error>;
+    fn decode<B: AsRef<[u8]>>(response: ResponseParts<B>) -> Result<Self::Response, Error>;
+}
+
 #[instrument(skip_all, fields(method = %method, uri = %uri))]
 pub fn into_request<B>(
     RequestParts {

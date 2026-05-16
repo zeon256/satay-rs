@@ -1043,6 +1043,7 @@ dependencies = [
  "nutype",
  "reqwest",
  "satay-codegen",
+ "satay-reqwest",
  "satay-runtime",
  "serde",
  "serde_json",
@@ -1057,6 +1058,7 @@ dependencies = [
  "nutype",
  "reqwest",
  "satay-codegen",
+ "satay-reqwest",
  "satay-runtime",
  "serde",
  "serde_json",
@@ -1070,9 +1072,19 @@ dependencies = [
  "nutype",
  "satay-codegen",
  "satay-runtime",
+ "satay-ureq",
  "serde",
  "serde_json",
  "ureq",
+]
+
+[[package]]
+name = "satay-reqwest"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
+ "satay-runtime",
+ "thiserror",
 ]
 
 [[package]]
@@ -1086,6 +1098,15 @@ dependencies = [
  "thiserror",
  "time",
  "tracing",
+]
+
+[[package]]
+name = "satay-ureq"
+version = "0.1.0"
+dependencies = [
+ "satay-runtime",
+ "thiserror",
+ "ureq",
 ]
 
 [[package]]

@@ -1,0 +1,9 @@
+[package]
+name = "satay-ureq"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+satay-runtime = { path = "../satay-runtime" }
+ureq = "3"
+thiserror.workspace = true

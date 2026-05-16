@@ -1,0 +1,13 @@
+[package]
+name = "satay-reqwest"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+blocking = ["reqwest/blocking"]
+
+[dependencies]
+satay-runtime = { path = "../satay-runtime" }
+reqwest = { version = "0.12", default-features = false }
+thiserror.workspace = true
