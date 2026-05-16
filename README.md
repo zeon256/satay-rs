@@ -1,10 +1,10 @@
-# Satay
+# satay
 
 <p align="center">
   <img src="logo.png" alt="satay-rs logo" width="180">
 </p>
 
-Satay is a Rust OpenAPI client generator for Sans-IO clients. It generates typed request builders, response decoders, and validation newtypes from OpenAPI constraints while leaving HTTP, WebSocket, tests, WASM, and other transports under your application's control.
+satay is a Rust OpenAPI client generator for [sans-io](https://fasterthanli.me/articles/the-case-for-sans-io) clients. It generates typed request builders, response decoders, and validation [newtypes](https://rust-unofficial.github.io/patterns/patterns/behavioural/newtype.html) from OpenAPI constraints while leaving HTTP, WebSocket, tests, WASM, and other transports under your application's control.
 
 > [!WARNING]
 > Satay is work in progress and currently prioritizes generating `lta-rs` clients with good ergonomics and validation. Support for other OpenAPI specs will grow as the supported subset becomes explicit and tested.
