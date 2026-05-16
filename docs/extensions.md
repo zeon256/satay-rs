@@ -38,7 +38,7 @@ pub struct Reading {
 }
 ```
 
-The wire format stays a string: serde deserializes from a JSON string and serializes back to one. Supported `parse-as` values are `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`, and `offset-datetime`. Float parsing uses `fast-float`; `bool` accepts `"1"`, `"0"`, `"true"`, `"false"`, `1`, `0`, `true`, and `false` and serializes as `"1"` or `"0"`; `offset-datetime` generates `satay_runtime::OffsetDateTime`.
+The wire format stays a string: serde deserializes from a JSON string and serializes back to one. Supported `parse-as` values are `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`, and `offset-datetime`. Float parsing uses `fast-float`; `offset-datetime` generates `satay_runtime::OffsetDateTime`. `bool` also supports integer schemas, accepting `1`, `0`, `"1"`, `"0"`, `true`, and `false`; integer-backed bool fields serialize as `1` or `0`.
 
 ## `enum-variants`
 

@@ -493,7 +493,7 @@ mod tests {
 }
 
 #[test]
-fn x_satay_parse_as_generates_string_backed_deserializers() {
+fn x_satay_parse_as_generates_wire_backed_deserializers() {
     let files = satay_codegen::generate(
         r#"
 openapi: 3.0.3
@@ -532,7 +532,7 @@ components:
           x-satay:
             parse-as: u8
         monitored:
-          type: string
+          type: integer
           x-satay:
             parse-as: bool
         seenAt:
@@ -566,7 +566,7 @@ components:
     assert!(
         types_rs
             .contents
-            .contains("with = \"satay_runtime::serde_string::as_bool\"")
+            .contains("with = \"satay_runtime::serde_integer::as_bool\"")
     );
     assert!(
         types_rs
@@ -617,7 +617,7 @@ mod tests {
                         "id": "42",
                         "value": "1.25",
                         "count": "7",
-                        "monitored": "0",
+                        "monitored": 0,
                         "seenAt": "2024-08-14T16:41:48+08:00"
                     })
                 );

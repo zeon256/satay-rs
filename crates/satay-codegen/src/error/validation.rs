@@ -123,11 +123,11 @@ pub enum ValidationError {
     #[error("{context}.x-satay.parse-as must be a string")]
     InvalidSatayParseAs { context: String },
 
-    /// `x-satay.parse-as` was applied to a non-string schema.
+    /// `x-satay.parse-as` was applied to an unsupported wire schema.
     ///
-    /// Error message: `{context} uses x-satay.parse-as `{parse_as}` on `{kind}`; only string schemas can be parsed as another Rust type`
+    /// Error message: `{context} uses x-satay.parse-as `{parse_as}` on `{kind}`; supported parse-as wire schemas are string schemas, plus integer schemas for bool`
     #[error(
-        "{context} uses x-satay.parse-as `{parse_as}` on `{kind}`; only string schemas can be parsed as another Rust type"
+        "{context} uses x-satay.parse-as `{parse_as}` on `{kind}`; supported parse-as wire schemas are string schemas, plus integer schemas for bool"
     )]
     SatayParseAsRequiresString {
         context: String,

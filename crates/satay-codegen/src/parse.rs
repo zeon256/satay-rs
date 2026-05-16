@@ -468,14 +468,17 @@ fn parse_type_ref_base(
 ) -> Result<TypeRef, ValidationError> {
     if let Some(parse_as) = parse_satay_parse_as(schema, context)? {
         let schema_type = schema.get("type").and_then(Value::as_str);
-        if schema_type != Some("string") {
-            return Err(ValidationError::SatayParseAsRequiresString {
-                context: context.to_owned(),
-                parse_as: satay_parse_as_wire(parse_as).to_owned(),
-                kind: schema_type.unwrap_or("missing").to_owned(),
-            });
+        match (schema_type, parse_as) {
+            (Some("string"), parse_as) => return Ok(TypeRef::ParsedString(parse_as)),
+            (Some("integer"), ParseAs::Bool) => return Ok(TypeRef::ParsedInteger(parse_as)),
+            _ => {
+                return Err(ValidationError::SatayParseAsRequiresString {
+                    context: context.to_owned(),
+                    parse_as: satay_parse_as_wire(parse_as).to_owned(),
+                    kind: schema_type.unwrap_or("missing").to_owned(),
+                });
+            }
         }
-        return Ok(TypeRef::ParsedString(parse_as));
     }
 
     if schema.contains_key("enum") {
@@ -551,6 +554,7 @@ fn parse_validation(
         TypeRef::F32 | TypeRef::F64 => parse_number_validation(schema, base, context),
         TypeRef::Array(_) => parse_array_validation(schema, context),
         TypeRef::ParsedString(_)
+        | TypeRef::ParsedInteger(_)
         | TypeRef::Bool
         | TypeRef::Named(_)
         | TypeRef::Constrained { .. }
@@ -1963,6 +1967,7 @@ components:
         - latitude
         - visit
         - monitored
+        - numericMonitored
         - estimatedArrival
       properties:
         stop:
@@ -1980,6 +1985,10 @@ components:
             parse-as: u8
         monitored:
           type: string
+          x-satay:
+            parse-as: bool
+        numericMonitored:
+          type: integer
           x-satay:
             parse-as: bool
         estimatedArrival:
@@ -2007,6 +2016,10 @@ components:
                 assert_eq!(
                     field(fields, "monitored").ty,
                     TypeRef::ParsedString(ParseAs::Bool)
+                );
+                assert_eq!(
+                    field(fields, "numericMonitored").ty,
+                    TypeRef::ParsedInteger(ParseAs::Bool)
                 );
                 assert_eq!(
                     field(fields, "estimatedArrival").ty,

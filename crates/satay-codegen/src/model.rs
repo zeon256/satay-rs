@@ -93,6 +93,7 @@ pub(crate) struct EnumVariant {
 pub(crate) enum TypeRef {
     String,
     ParsedString(ParseAs),
+    ParsedInteger(ParseAs),
     I32,
     I64,
     F32,

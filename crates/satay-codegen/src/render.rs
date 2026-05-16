@@ -635,6 +635,7 @@ fn collect_type_refs(ty: &TypeRef, names: &mut Vec<Ident>) {
         TypeRef::Nullable(inner) => collect_type_refs(inner, names),
         TypeRef::String
         | TypeRef::ParsedString(_)
+        | TypeRef::ParsedInteger(_)
         | TypeRef::I32
         | TypeRef::I64
         | TypeRef::F32
@@ -895,7 +896,7 @@ fn field_attrs(field: &Field, serde: bool) -> Vec<syn::Attribute> {
         serde_attrs.push(quote!(
             serialize_with = "satay_runtime::treat_error_as_none::serialize"
         ));
-    } else if let Some(module) = parsed_string_serde_module(field) {
+    } else if let Some(module) = parsed_serde_module(field) {
         serde_attrs.push(quote!(with = #module));
     }
     if !field.required || field.treat_error_as_none {
@@ -909,9 +910,12 @@ fn field_attrs(field: &Field, serde: bool) -> Vec<syn::Attribute> {
     }
 }
 
-fn parsed_string_serde_module(field: &Field) -> Option<LitStr> {
-    let parse_as = parsed_string_type(field.ty.non_nullable())?;
-    let module = parse_as_serde_module(parse_as);
+fn parsed_serde_module(field: &Field) -> Option<LitStr> {
+    let module = match field.ty.non_nullable() {
+        TypeRef::ParsedString(parse_as) => parse_as_string_serde_module(*parse_as),
+        TypeRef::ParsedInteger(parse_as) => parse_as_integer_serde_module(*parse_as),
+        _ => return None,
+    };
     let module = if !field.required || field.ty.is_nullable() {
         format!("{module}::option")
     } else {
@@ -1426,7 +1430,9 @@ fn operation_uses_input(operation: &Operation) -> bool {
 fn value_expr(base: syn::Expr, ty: &TypeRef) -> syn::Expr {
     match ty.non_nullable() {
         TypeRef::String => parse_quote!(#base.as_str()),
-        TypeRef::ParsedString(parse_as) => parsed_string_value_expr(base, *parse_as),
+        TypeRef::ParsedString(parse_as) | TypeRef::ParsedInteger(parse_as) => {
+            parsed_value_expr(base, *parse_as)
+        }
         TypeRef::Named(_) => parse_quote!(#base.as_ref()),
         TypeRef::Constrained { inner, .. } => constrained_value_expr(base, inner.non_nullable()),
         TypeRef::I32 | TypeRef::I64 | TypeRef::F32 | TypeRef::F64 | TypeRef::Bool => {
@@ -1439,7 +1445,9 @@ fn value_expr(base: syn::Expr, ty: &TypeRef) -> syn::Expr {
 fn constrained_value_expr(base: syn::Expr, inner: &TypeRef) -> syn::Expr {
     match inner {
         TypeRef::String | TypeRef::Named(_) => parse_quote!(#base.as_ref()),
-        TypeRef::ParsedString(parse_as) => parsed_string_value_expr(base, *parse_as),
+        TypeRef::ParsedString(parse_as) | TypeRef::ParsedInteger(parse_as) => {
+            parsed_value_expr(base, *parse_as)
+        }
         TypeRef::I32 | TypeRef::I64 | TypeRef::F32 | TypeRef::F64 | TypeRef::Bool => {
             parse_quote!(&#base.to_string())
         }
@@ -1452,7 +1460,9 @@ fn constrained_value_expr(base: syn::Expr, inner: &TypeRef) -> syn::Expr {
 fn rust_type(ty: &TypeRef) -> syn::Type {
     match ty {
         TypeRef::String => parse_quote!(String),
-        TypeRef::ParsedString(parse_as) => parse_as_rust_type(*parse_as),
+        TypeRef::ParsedString(parse_as) | TypeRef::ParsedInteger(parse_as) => {
+            parse_as_rust_type(*parse_as)
+        }
         TypeRef::I32 => parse_quote!(i32),
         TypeRef::I64 => parse_quote!(i64),
         TypeRef::F32 => parse_quote!(f32),
@@ -1476,14 +1486,7 @@ fn rust_type(ty: &TypeRef) -> syn::Type {
     }
 }
 
-fn parsed_string_type(ty: &TypeRef) -> Option<ParseAs> {
-    match ty {
-        TypeRef::ParsedString(parse_as) => Some(*parse_as),
-        _ => None,
-    }
-}
-
-fn parsed_string_value_expr(base: syn::Expr, parse_as: ParseAs) -> syn::Expr {
+fn parsed_value_expr(base: syn::Expr, parse_as: ParseAs) -> syn::Expr {
     match parse_as {
         ParseAs::OffsetDateTime => parse_quote!(&satay_runtime::format_offset_datetime(&#base)),
         ParseAs::U8
@@ -1517,7 +1520,7 @@ fn parse_as_rust_type(parse_as: ParseAs) -> syn::Type {
     }
 }
 
-fn parse_as_serde_module(parse_as: ParseAs) -> &'static str {
+fn parse_as_string_serde_module(parse_as: ParseAs) -> &'static str {
     match parse_as {
         ParseAs::U8 => "satay_runtime::serde_string::as_u8",
         ParseAs::U16 => "satay_runtime::serde_string::as_u16",
@@ -1531,6 +1534,23 @@ fn parse_as_serde_module(parse_as: ParseAs) -> &'static str {
         ParseAs::F64 => "satay_runtime::serde_string::as_f64",
         ParseAs::Bool => "satay_runtime::serde_string::as_bool",
         ParseAs::OffsetDateTime => "satay_runtime::serde_string::as_offset_datetime",
+    }
+}
+
+fn parse_as_integer_serde_module(parse_as: ParseAs) -> &'static str {
+    match parse_as {
+        ParseAs::Bool => "satay_runtime::serde_integer::as_bool",
+        ParseAs::U8
+        | ParseAs::U16
+        | ParseAs::U32
+        | ParseAs::U64
+        | ParseAs::I8
+        | ParseAs::I16
+        | ParseAs::I32
+        | ParseAs::I64
+        | ParseAs::F32
+        | ParseAs::F64
+        | ParseAs::OffsetDateTime => unreachable!("only bool can parse from integer"),
     }
 }
 

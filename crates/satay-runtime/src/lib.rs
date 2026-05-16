@@ -516,6 +516,48 @@ pub mod serde_string {
     }
 }
 
+#[cfg(feature = "serde")]
+pub mod serde_integer {
+    pub mod as_bool {
+        use crate::serde_string::as_bool as string_bool;
+
+        pub fn serialize<S>(value: &bool, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            serializer.serialize_u8(u8::from(*value))
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<bool, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            string_bool::deserialize(deserializer)
+        }
+
+        pub mod option {
+            use crate::serde_string::as_bool::option as string_bool_option;
+
+            pub fn serialize<S>(value: &Option<bool>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                match value {
+                    Some(value) => super::serialize(value, serializer),
+                    None => serializer.serialize_none(),
+                }
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                string_bool_option::deserialize(deserializer)
+            }
+        }
+    }
+}
+
 #[cfg(feature = "json")]
 pub mod treat_error_as_none {
     use serde::de::DeserializeOwned;
@@ -668,5 +710,21 @@ mod tests {
 
         let encoded = serde_json::to_value(Value { monitored: false }).unwrap();
         assert_eq!(encoded, serde_json::json!({ "monitored": "0" }));
+    }
+
+    #[cfg(all(feature = "serde", feature = "json"))]
+    #[test]
+    fn serde_integer_bool_accepts_numeric_values() {
+        #[derive(serde::Deserialize, serde::Serialize)]
+        struct Value {
+            #[serde(with = "crate::serde_integer::as_bool")]
+            monitored: bool,
+        }
+
+        let numeric = serde_json::from_str::<Value>(r#"{"monitored":0}"#).unwrap();
+        assert!(!numeric.monitored);
+
+        let encoded = serde_json::to_value(Value { monitored: true }).unwrap();
+        assert_eq!(encoded, serde_json::json!({ "monitored": 1 }));
     }
 }

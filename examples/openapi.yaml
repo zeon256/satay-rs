@@ -219,7 +219,6 @@ components:
           description: >
             Estimated arrival date-time in Singapore Standard Time, represented
             as an ISO 8601 timestamp with +08:00 offset.
-            May be an empty string when no subsequent bus data is available.
           example: "2024-08-14T16:41:48+08:00"
           x-satay:
             parse-as: offset-datetime
@@ -228,7 +227,7 @@ components:
           type: string
           description: >
             Current estimated latitude of the bus at the point of published data.
-            May be "0.0" for schedule-based values, or an empty string when unavailable.
+            May be "0.0" for schedule-based values.
           example: "1.3154918333333334"
           x-satay:
             parse-as: f64
@@ -237,7 +236,7 @@ components:
           type: string
           description: >
             Current estimated longitude of the bus at the point of published data.
-            May be "0.0" for schedule-based values, or an empty string when unavailable.
+            May be "0.0" for schedule-based values.
           example: "103.9059125"
           x-satay:
             parse-as: f64
@@ -246,8 +245,7 @@ components:
           type: string
           description: >
             Ordinal visit number of this vehicle at the bus stop.
-            "1" = first visit, "2" = second visit.
-            May be an empty string when unavailable.
+            1 = first visit, 2 = second visit etc
           example: "1"
           x-satay:
             parse-as: u8
@@ -256,7 +254,6 @@ components:
           type: string
           description: >
             Current occupancy / crowding level.
-            May be an empty string when unavailable.
           enum:
             - SEA
             - SDA
@@ -274,8 +271,6 @@ components:
           type: string
           description: >
             Wheelchair accessibility indicator.
-            "WAB" = wheelchair-accessible bus.
-            Empty string indicates no such value.
           enum:
             - WAB
             - ""
@@ -283,13 +278,12 @@ components:
           x-satay:
             enum-variants:
               WAB: WheelchairAccessible
-              "": NotWheelchairAccessible
+              "": Unknown
 
         Type:
           type: string
           description: >
-            Vehicle type.
-            May be an empty string when unavailable.
+            Vehicle type of the bus.
           enum:
             - SD
             - DD
@@ -304,14 +298,12 @@ components:
               "": Unknown
 
         Monitored:
-          type: string
+          type: integer
           description: >
             Indicator of whether the bus is currently being monitored by the system.
-            "1" = monitored, "0" = not monitored.
-            May be an empty string when unavailable.
           enum:
-            - "1"
-            - "0"
-          example: "1"
+            - 1
+            - 0
+          example: 1
           x-satay:
             parse-as: bool
