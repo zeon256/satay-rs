@@ -11,6 +11,13 @@ Satay is a Rust OpenAPI client generator for Sans-IO clients. It generates typed
 
 ## Quick Start
 
+Install the CLI from a checkout of this repository:
+
+```bash
+cargo install --path crates/satay-cli
+satay --help
+```
+
 Generate Rust code from an OpenAPI document:
 
 ```bash
