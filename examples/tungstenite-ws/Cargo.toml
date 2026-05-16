@@ -1,0 +1,24 @@
+[package]
+name = "satay-example-tungstenite-ws"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[features]
+default = ["serde", "json"]
+serde = ["dep:serde", "satay-runtime/serde"]
+json = ["serde", "dep:serde_json", "satay-runtime/json"]
+
+[dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
+http = "1"
+nutype = { version = "0.7", features = ["serde"] }
+satay-runtime = { path = "../../crates/satay-runtime", default-features = false }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
+tokio-tungstenite = "0.27"
+
+[build-dependencies]
+satay-codegen = { path = "../../crates/satay-codegen" }

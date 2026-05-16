@@ -391,6 +391,7 @@ These are known gaps rather than silent compatibility promises:
 - `examples/reqwest`: generates from `examples/openapi.yaml` at build time, sends the request with `reqwest`, and decodes with the generated action API.
 - `examples/reqwest-blocking`: uses the same generated action API with `reqwest::blocking`.
 - `examples/reqwest-manual`: sends with `reqwest` directly without using `satay-reqwest`.
+- `examples/tungstenite-ws`: sends generated actions over a local WebSocket using `tokio-tungstenite`.
 - `examples/ureq`: sends generated actions with `ureq`.
 
 ## Workspace

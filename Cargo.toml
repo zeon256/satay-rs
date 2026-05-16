@@ -9,6 +9,7 @@ members = [
   "examples/reqwest",
   "examples/reqwest-blocking",
   "examples/reqwest-manual",
+  "examples/tungstenite-ws",
   "examples/ureq",
 ]
 
