@@ -1,4 +1,4 @@
-# satay
+# Satay
 
 [![Crates.io](https://img.shields.io/crates/v/satay)](https://crates.io/crates/satay)
 [![Crates.io Downloads](https://img.shields.io/crates/d/satay)](https://crates.io/crates/satay)
