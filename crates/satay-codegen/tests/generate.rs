@@ -741,6 +741,71 @@ fn inline_enum_generates_proper_enum_types() {
 }
 
 #[test]
+fn x_satay_enum_variants_generate_named_variants() {
+    let files = satay_codegen::generate(
+        r#"
+openapi: 3.0.3
+info:
+  title: Enum Variants API
+  version: 1.0.0
+paths:
+  /arrival:
+    get:
+      operationId: getArrival
+      responses:
+        '200':
+          description: Arrival
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BusArrivalTiming'
+components:
+  schemas:
+    BusArrivalTiming:
+      type: object
+      required:
+        - Type
+      properties:
+        Type:
+          type: string
+          description: Vehicle type.
+          enum:
+            - SD
+            - DD
+            - BD
+            - ""
+          example: SD
+          x-satay:
+            enum-variants:
+              SD: SingleDecker
+              DD: DoubleDecker
+              BD: Bendy
+              "": Unknown
+"#,
+    )
+    .expect("generate enum variants fixture");
+
+    let types_rs = find_file(&files, "types.rs");
+    let enum_start = types_rs
+        .contents
+        .find("pub enum BusArrivalTimingType")
+        .expect("BusArrivalTimingType enum exists");
+    let enum_contents = &types_rs.contents[enum_start..enum_start + 600];
+
+    assert!(enum_contents.contains("SingleDecker"));
+    assert!(enum_contents.contains("DoubleDecker"));
+    assert!(enum_contents.contains("Bendy"));
+    assert!(enum_contents.contains(r#"serde(rename = "SD")"#));
+    assert!(enum_contents.contains(r#"serde(rename = "DD")"#));
+    assert!(enum_contents.contains(r#"serde(rename = "BD")"#));
+    assert!(enum_contents.contains("serde(other)"));
+    assert!(!enum_contents.contains("Sd"));
+    assert!(!enum_contents.contains("Dd"));
+    assert!(!enum_contents.contains("Bd"));
+    assert!(!enum_contents.contains(r#"rename = """#));
+}
+
+#[test]
 fn generated_inline_enum_compiles_and_handles_unknown() {
     let files = satay_codegen::generate(INLINE_ENUM).expect("generate inline-enum fixture");
 

@@ -61,6 +61,32 @@ pub enum ValidationError {
     #[error("{context} contains a non-string enum value; only string enums are supported")]
     NonStringEnumValue { context: String },
 
+    /// An `x-satay.enum-variants` value is not an object.
+    ///
+    /// Error message: `{context}.x-satay.enum-variants must be an object`
+    #[error("{context}.x-satay.enum-variants must be an object")]
+    InvalidSatayEnumVariants { context: String },
+
+    /// An `x-satay.enum-variants` entry points at a value that is not in the enum.
+    ///
+    /// Error message: `{context}.x-satay.enum-variants contains `{wire_name}`, which is not declared in the enum`
+    #[error(
+        "{context}.x-satay.enum-variants contains `{wire_name}`, which is not declared in the enum"
+    )]
+    UnknownSatayEnumVariantValue { context: String, wire_name: String },
+
+    /// An `x-satay.enum-variants` entry has a non-string Rust variant name.
+    ///
+    /// Error message: `{context}.x-satay.enum-variants[{wire_name:?}] must be a string`
+    #[error("{context}.x-satay.enum-variants[{wire_name:?}] must be a string")]
+    InvalidSatayEnumVariantName { context: String, wire_name: String },
+
+    /// Two `x-satay.enum-variants` entries produce the same Rust variant name.
+    ///
+    /// Error message: `{context}.x-satay.enum-variants maps multiple values to `{rust_name}``
+    #[error("{context}.x-satay.enum-variants maps multiple values to `{rust_name}`")]
+    DuplicateSatayEnumVariantName { context: String, rust_name: String },
+
     /// A schema has a `required` field that is not an array.
     ///
     /// Error message: `{context} has a non-array `required` field`

@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value};
 
@@ -277,22 +277,89 @@ fn parse_string_enum(
         });
     }
 
-    let mut used = BTreeSet::new();
-    let mut variants = Vec::with_capacity(values.len());
+    let mut wire_values = BTreeSet::new();
+    let mut wire_names = Vec::with_capacity(values.len());
     for value in values {
         let Some(value) = value.as_str() else {
             return Err(ValidationError::NonStringEnumValue {
                 context: context.to_owned(),
             });
         };
-        let rust_name = unique_ident(variant_ident(value), &mut used);
+        wire_values.insert(value.to_owned());
+        wire_names.push(value);
+    }
+
+    let explicit_variants = parse_satay_enum_variants(schema, context, &wire_values)?;
+    let mut used = BTreeSet::from(["Unknown".to_owned()]);
+    for rust_name in explicit_variants.values() {
+        if rust_name != "Unknown" {
+            used.insert(rust_name.clone());
+        }
+    }
+
+    let mut variants = Vec::with_capacity(values.len());
+    for wire_name in wire_names {
+        let rust_name = if let Some(rust_name) = explicit_variants.get(wire_name) {
+            if rust_name == "Unknown" {
+                continue;
+            }
+            rust_name.clone()
+        } else {
+            unique_ident(variant_ident(wire_name), &mut used)
+        };
         variants.push(EnumVariant {
-            wire_name: value.to_owned(),
+            wire_name: wire_name.to_owned(),
             rust_name,
         });
     }
 
     Ok(variants)
+}
+
+fn parse_satay_enum_variants(
+    schema: &Map<String, Value>,
+    context: &str,
+    enum_values: &BTreeSet<String>,
+) -> Result<BTreeMap<String, String>, ValidationError> {
+    let Some(satay) = optional_object(schema, "x-satay", context)? else {
+        return Ok(BTreeMap::new());
+    };
+    let Some(value) = satay.get("enum-variants") else {
+        return Ok(BTreeMap::new());
+    };
+    let Some(value) = value.as_object() else {
+        return Err(ValidationError::InvalidSatayEnumVariants {
+            context: context.to_owned(),
+        });
+    };
+
+    let mut mappings = BTreeMap::new();
+    let mut explicit_names = BTreeSet::new();
+    for (wire_name, rust_name) in value {
+        if !enum_values.contains(wire_name) {
+            return Err(ValidationError::UnknownSatayEnumVariantValue {
+                context: context.to_owned(),
+                wire_name: wire_name.clone(),
+            });
+        }
+
+        let Some(rust_name) = rust_name.as_str() else {
+            return Err(ValidationError::InvalidSatayEnumVariantName {
+                context: context.to_owned(),
+                wire_name: wire_name.clone(),
+            });
+        };
+        let rust_name = variant_ident(rust_name);
+        if rust_name != "Unknown" && !explicit_names.insert(rust_name.clone()) {
+            return Err(ValidationError::DuplicateSatayEnumVariantName {
+                context: context.to_owned(),
+                rust_name,
+            });
+        }
+        mappings.insert(wire_name.clone(), rust_name);
+    }
+
+    Ok(mappings)
 }
 
 fn parse_struct_fields(
@@ -413,7 +480,8 @@ fn parse_type_ref_base(
 
     if schema.contains_key("enum") {
         let mut variants = parse_string_enum(schema, context)?;
-        variants.retain(|v| !v.wire_name.is_empty());
+        let default_empty_variant = variant_ident("");
+        variants.retain(|v| !v.wire_name.is_empty() || v.rust_name != default_empty_variant);
         if variants.is_empty() {
             return Ok(TypeRef::String);
         }
@@ -1936,6 +2004,121 @@ components:
                 );
             }
             other => panic!("expected Arrival struct, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_x_satay_enum_variants() {
+        let api = parse_valid(
+            r#"
+openapi: 3.0.3
+paths:
+  /arrival:
+    get:
+      operationId: getArrival
+      responses:
+        '200':
+          description: Arrival
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Arrival'
+components:
+  schemas:
+    VehicleType:
+      type: string
+      enum:
+        - SD
+        - DD
+        - BD
+        - ""
+      x-satay:
+        enum-variants:
+          SD: SingleDecker
+          DD: DoubleDecker
+          BD: Bendy
+          "": Unknown
+    Arrival:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - SD
+            - DD
+            - BD
+            - ""
+          x-satay:
+            enum-variants:
+              SD: SingleDecker
+              DD: DoubleDecker
+              BD: Bendy
+              "": Unknown
+"#,
+        );
+
+        let vehicle_type = component(&api, "VehicleType");
+        match &vehicle_type.kind {
+            ComponentKind::Enum(variants) => {
+                assert_eq!(variants.len(), 3);
+                assert_eq!(variants[0].wire_name, "SD");
+                assert_eq!(variants[0].rust_name, "SingleDecker");
+                assert_eq!(variants[1].wire_name, "DD");
+                assert_eq!(variants[1].rust_name, "DoubleDecker");
+                assert_eq!(variants[2].wire_name, "BD");
+                assert_eq!(variants[2].rust_name, "Bendy");
+            }
+            other => panic!("expected VehicleType enum, got {other:?}"),
+        }
+
+        let arrival_type = component(&api, "ArrivalType");
+        match &arrival_type.kind {
+            ComponentKind::Enum(variants) => {
+                assert_eq!(variants.len(), 3);
+                assert_eq!(variants[0].rust_name, "SingleDecker");
+                assert_eq!(variants[1].rust_name, "DoubleDecker");
+                assert_eq!(variants[2].rust_name, "Bendy");
+            }
+            other => panic!("expected ArrivalType enum, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_x_satay_enum_variants_for_values_outside_enum() {
+        let err = parse_invalid(
+            r#"
+openapi: 3.0.3
+paths:
+  /arrival:
+    get:
+      operationId: getArrival
+      responses:
+        '200':
+          description: Arrival
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehicleType'
+components:
+  schemas:
+    VehicleType:
+      type: string
+      enum:
+        - SD
+      x-satay:
+        enum-variants:
+          DD: DoubleDecker
+"#,
+        );
+
+        match err {
+            ValidationError::UnknownSatayEnumVariantValue { context, wire_name } => {
+                assert_eq!(context, "schema `VehicleType`");
+                assert_eq!(wire_name, "DD");
+            }
+            other => panic!("unexpected error: {other}"),
         }
     }
 

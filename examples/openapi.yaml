@@ -285,3 +285,9 @@ components:
             - BD
             - ""
           example: SD
+          x-satay:
+            enum-variants:
+              SD: SingleDecker
+              DD: DoubleDecker
+              BD: Bendy
+              "": Unknown

@@ -44,6 +44,7 @@ Satay targets OpenAPI 3.0.x and a small, typed subset.
 - Optional fields and optional request bodies.
 - `serde` derives and field renames behind the generated crate's `serde` feature.
 - Satay-specific `x-satay.parse-as` hints for string fields whose wire values should become stronger Rust types.
+- Satay-specific `x-satay.enum-variants` hints for naming generated Rust enum variants.
 - Satay-specific `x-satay.treat-error-as-none` hints for struct fields where deserialization errors should produce `None` instead of failing.
 - Validation constraints rendered through `nutype` for:
   - string `minLength` / `maxLength`
@@ -107,6 +108,28 @@ pub struct Reading {
 The wire format stays a string — serde deserializes from a JSON string and serializes back to one — but the Rust type is `u32`, `f64`, `u8`, or `OffsetDateTime`.
 
 Supported `parse-as` values are `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, and `offset-datetime`. Float parsing uses `fast-float`; `offset-datetime` generates `satay_runtime::OffsetDateTime`.
+
+### `enum-variants`
+
+Use `x-satay.enum-variants` on string enums when the wire values are terse codes but the Rust variants should be descriptive. Map each wire value to the desired Rust variant name. Mapping a value to `Unknown` folds it into Satay's generated fallback variant.
+
+```yaml
+Type:
+  type: string
+  enum:
+    - SD
+    - DD
+    - BD
+    - ""
+  x-satay:
+    enum-variants:
+      SD: SingleDecker
+      DD: DoubleDecker
+      BD: Bendy
+      "": Unknown
+```
+
+This generates `SingleDecker`, `DoubleDecker`, and `Bendy` variants with `serde(rename = "...")` attributes, plus the default `Unknown` fallback.
 
 ### `treat-error-as-none`
 
