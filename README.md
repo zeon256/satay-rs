@@ -185,12 +185,12 @@ let client = reqwest::Client::new();
 let response = api.get_bus_arrival("83139").send_with(&client).await?;
 ```
 
-If your application needs transport features such as TLS, blocking support, proxies, or custom client configuration, keep a direct dependency on the transport crate and enable those features there:
+If your application needs transport features such as blocking support, proxies, or custom client configuration, keep a direct dependency on the transport crate and enable those features there. Reqwest 0.13 uses rustls by default, so simple HTTPS clients do not need an explicit TLS feature:
 
 ```toml
 [dependencies]
 satay-reqwest = "0.1"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+reqwest = "0.13.3"
 ```
 
 The adapter crate also depends on `reqwest` so it can name `reqwest::Client` in its extension trait. Cargo unifies compatible dependency versions, so this normally selects one shared `reqwest` build rather than two copies. The same model applies to `satay-ureq`: use the adapter for `.send_with(&agent)`, and let your application own the `ureq` configuration.
