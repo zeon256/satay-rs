@@ -8,6 +8,7 @@ members = [
   "crates/satay-ureq",
   "examples/reqwest",
   "examples/reqwest-blocking",
+  "examples/reqwest-manual",
   "examples/ureq",
 ]
 

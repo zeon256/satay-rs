@@ -195,6 +195,8 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 
 The adapter crate also depends on `reqwest` so it can name `reqwest::Client` in its extension trait. Cargo unifies compatible dependency versions, so this normally selects one shared `reqwest` build rather than two copies. The same model applies to `satay-ureq`: use the adapter for `.send_with(&agent)`, and let your application own the `ureq` configuration.
 
+For the lower-level path without an adapter crate, see `examples/reqwest-manual`. It calls `action.request()`, sends the request with `reqwest`, builds `satay_runtime::ResponseParts`, and calls the generated decoder directly.
+
 ## Not supported yet
 
 These are known gaps rather than silent compatibility promises:
@@ -229,6 +231,7 @@ These are known gaps rather than silent compatibility promises:
 
 - `examples/reqwest`: generates from `examples/openapi.yaml` at build time, sends the request with `reqwest`, and decodes with the generated action API.
 - `examples/reqwest-blocking`: uses the same generated action API with `reqwest::blocking`.
+- `examples/reqwest-manual`: sends with `reqwest` directly without using `satay-reqwest`.
 - `examples/ureq`: sends generated actions with `ureq`.
 
 ## Workspace
