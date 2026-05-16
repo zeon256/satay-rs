@@ -2,6 +2,7 @@
 name = "satay-ureq"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 satay-runtime = { path = "../satay-runtime" }
