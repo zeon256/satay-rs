@@ -262,6 +262,12 @@ components:
             - LSD
             - ""
           example: SEA
+          x-satay:
+            enum-variants:
+              SEA: SeatsAvailable
+              SDA: StandingAvailable
+              LSD: LimitedStanding
+              "": Unknown
 
         Feature:
           type: string
@@ -273,6 +279,10 @@ components:
             - WAB
             - ""
           example: WAB
+          x-satay:
+            enum-variants:
+              WAB: WheelchairAccessible
+              "": NotWheelchairAccessible
 
         Type:
           type: string
