@@ -272,6 +272,9 @@ components:
           type: string
           description: >
             Frequency of dispatch for AM Peak 0630H - 0830H, as a range in minutes.
+            The live API has returned outliers such as "115-115", "75-75", and
+            "18-62", so this schema accepts values beyond ordinary short
+            dispatch intervals.
           minimum: 1
           maximum: 600
           example: "14-17"
@@ -282,6 +285,8 @@ components:
           type: string
           description: >
             Frequency of dispatch for AM Off-Peak 0831H - 1659H, as a range in minutes.
+            The live API has returned outliers such as "10-528", so this schema
+            accepts values beyond ordinary short dispatch intervals.
           minimum: 1
           maximum: 600
           example: "10-16"
@@ -292,6 +297,9 @@ components:
           type: string
           description: >
             Frequency of dispatch for PM Peak 1700H - 1900H, as a range in minutes.
+            The live API has returned outliers such as "08-131", "80-80", and
+            "68-68", so this schema accepts values beyond ordinary short
+            dispatch intervals.
           minimum: 1
           maximum: 600
           example: "12-15"
@@ -302,6 +310,8 @@ components:
           type: string
           description: >
             Frequency of dispatch for PM Off-Peak after 1900H, as a range in minutes.
+            The live API has returned outliers such as "81-81" and "09-80", so
+            this schema accepts values beyond ordinary short dispatch intervals.
           minimum: 1
           maximum: 600
           example: "12-15"
