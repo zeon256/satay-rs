@@ -364,7 +364,7 @@ pub mod serde_string {
                     D: serde::Deserializer<'de>,
                 {
                     let value = <String as Deserialize>::deserialize(deserializer)?;
-                    fast_float::parse::<$ty, _>(&value).map_err(DeError::custom)
+                    fast_float2::parse::<$ty, _>(&value).map_err(DeError::custom)
                 }
 
                 pub mod option {
@@ -388,7 +388,7 @@ pub mod serde_string {
                         let value = <Option<String> as Deserialize>::deserialize(deserializer)?;
                         value
                             .map(|value| {
-                                fast_float::parse::<$ty, _>(&value).map_err(DeError::custom)
+                                fast_float2::parse::<$ty, _>(&value).map_err(DeError::custom)
                             })
                             .transpose()
                     }

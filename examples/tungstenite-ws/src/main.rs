@@ -6,7 +6,7 @@ mod transport;
 mod wire;
 
 use error::Error;
-use generated::{Api, BusServiceNumber, BusStopCode, GetBusArrivalResponse};
+use generated::{Api, BusServiceNumber, GetBusArrivalResponse};
 use transport::{TungsteniteActionExt, TungsteniteTransport};
 
 #[tokio::main]
@@ -19,7 +19,7 @@ async fn main() -> Result<(), Error> {
         .account_key("local-dev-key");
 
     let response = api
-        .get_bus_arrival(BusStopCode::try_new("83139").expect("valid bus stop code"))
+        .get_bus_arrival(83139)
         .service_no(BusServiceNumber::try_from("15".to_owned()).expect("valid bus service number"))
         .send_over_ws(&mut transport)
         .await?;

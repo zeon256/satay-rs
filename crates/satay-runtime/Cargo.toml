@@ -6,11 +6,11 @@ license.workspace = true
 
 [features]
 default = ["serde", "json"]
-serde = ["dep:fast-float", "dep:serde"]
+serde = ["dep:fast-float2", "dep:serde"]
 json = ["serde", "dep:serde_json"]
 
 [dependencies]
-fast-float = { workspace = true, optional = true }
+fast-float2 = { workspace = true, optional = true }
 http.workspace = true
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
