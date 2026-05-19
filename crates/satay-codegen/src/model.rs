@@ -158,6 +158,7 @@ pub(crate) enum ParseAs {
     F64,
     Bool,
     OffsetDateTime,
+    Time,
     IntegerRange,
     NumberRange,
 }
@@ -256,6 +257,7 @@ impl ParseAs {
             "f64" => Some(Self::F64),
             "bool" => Some(Self::Bool),
             "offset-datetime" => Some(Self::OffsetDateTime),
+            "time" => Some(Self::Time),
             "integer-range" => Some(Self::IntegerRange),
             "number-range" => Some(Self::NumberRange),
             _ => None,

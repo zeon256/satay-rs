@@ -679,6 +679,12 @@ paths:
   /readings:
     get:
       operationId: getReading
+      parameters:
+        - name: readingId
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/ReadingId'
       responses:
         '200':
           description: Reading
@@ -696,6 +702,9 @@ components:
         - count
         - monitored
         - seenAt
+        - startsAt
+        - noServiceAt
+        - aliasId
         - frequency
         - tolerance
       properties:
@@ -719,6 +728,18 @@ components:
           type: string
           x-satay:
             parse-as: offset-datetime
+        startsAt:
+          type: string
+          nullable: true
+          x-satay:
+            parse-as: time
+        noServiceAt:
+          type: string
+          nullable: true
+          x-satay:
+            parse-as: time
+        aliasId:
+          $ref: '#/components/schemas/ReadingId'
         frequency:
           type: string
           minimum: 1
@@ -730,11 +751,16 @@ components:
           format: double
           x-satay:
             parse-as: number-range
+    ReadingId:
+      type: string
+      x-satay:
+        parse-as: u32
 "#,
     )
     .expect("generate parse-as fixture");
 
     let types_rs = find_file(&files, "types.rs");
+    assert!(types_rs.contents.contains("pub type ReadingId = u32"));
     assert!(types_rs.contents.contains("pub id: u32"));
     assert!(types_rs.contents.contains("pub value: f64"));
     assert!(types_rs.contents.contains("pub count: u8"));
@@ -744,6 +770,17 @@ components:
             .contents
             .contains("pub seen_at: satay_runtime::OffsetDateTime")
     );
+    assert!(
+        types_rs
+            .contents
+            .contains("pub starts_at: Option<satay_runtime::Time>")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("pub no_service_at: Option<satay_runtime::Time>")
+    );
+    assert!(types_rs.contents.contains("pub alias_id: ReadingId"));
     assert!(
         types_rs
             .contents
@@ -779,6 +816,20 @@ components:
             .contents
             .contains("with = \"satay_runtime::serde_string::as_offset_datetime\"")
     );
+    assert!(
+        types_rs
+            .contents
+            .contains("with = \"satay_runtime::serde_string::as_time::option\"")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("with = \"satay_runtime::serde_string::as_u32\"")
+    );
+
+    let parts_rs = find_file(&files, "get_reading/parts.rs");
+    assert!(parts_rs.contents.contains("pub reading_id: ReadingId"));
+    assert!(parts_rs.contents.contains("input.reading_id.to_string()"));
 
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();
@@ -800,10 +851,13 @@ mod tests {
 
     #[test]
     fn decodes_and_encodes_string_backed_values() {
+        let parts = get_reading_parts(GetReadingInput::new(42)).expect("request parts");
+        assert_eq!(parts.uri, "/readings?readingId=42");
+
         let response = satay_runtime::ResponseParts {
             status: http::StatusCode::OK,
             headers: http::HeaderMap::new(),
-            body: br#"{"id":"42","value":"1.25","count":"7","monitored":0,"seenAt":"2024-08-14T16:41:48+08:00","frequency":"14-17","tolerance":"1.5-2.75"}"#
+            body: br#"{"id":"42","value":"1.25","count":"7","monitored":0,"seenAt":"2024-08-14T16:41:48+08:00","startsAt":"0620","noServiceAt":"","aliasId":"42","frequency":"14-17","tolerance":"1.5-2.75"}"#
                 .to_vec(),
         };
         let decoded = decode_get_reading_response(response).expect("decoded response");
@@ -815,6 +869,11 @@ mod tests {
                 assert_eq!(reading.count, 7);
                 assert!(!reading.monitored);
                 assert_eq!(reading.seen_at.offset().whole_hours(), 8);
+                let starts_at = reading.starts_at.expect("startsAt parsed");
+                assert_eq!(starts_at.hour(), 6);
+                assert_eq!(starts_at.minute(), 20);
+                assert_eq!(reading.no_service_at, None);
+                assert_eq!(reading.alias_id, 42);
                 assert_eq!(reading.frequency.min, Some(14));
                 assert_eq!(reading.frequency.max, Some(17));
                 assert_eq!(reading.tolerance.min, Some(1.5));
@@ -829,6 +888,9 @@ mod tests {
                         "count": "7",
                         "monitored": 0,
                         "seenAt": "2024-08-14T16:41:48+08:00",
+                        "startsAt": "0620",
+                        "noServiceAt": null,
+                        "aliasId": "42",
                         "frequency": "14-17",
                         "tolerance": "1.5-2.75"
                     })

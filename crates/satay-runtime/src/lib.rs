@@ -6,8 +6,8 @@ use std::str::FromStr;
 use http::header::{self, CONTENT_TYPE, HeaderName, HeaderValue};
 #[cfg(feature = "json")]
 use serde::de;
-pub use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+pub use time::{OffsetDateTime, Time};
 
 use tracing::{debug, instrument};
 
@@ -58,6 +58,15 @@ pub enum ParseRangeError {
 
     #[error("invalid range maximum `{value}`: {message}")]
     InvalidMaximum { value: String, message: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ParseTimeError {
+    #[error("time must be exactly four ASCII digits in HHMM format")]
+    InvalidFormat,
+
+    #[error("time is outside valid HHMM range")]
+    ComponentRange,
 }
 
 pub trait Action {
@@ -191,6 +200,22 @@ pub fn format_offset_datetime(value: &OffsetDateTime) -> String {
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }
 
+pub fn parse_time(value: &str) -> Result<Time, ParseTimeError> {
+    let value = value.trim();
+    let bytes = value.as_bytes();
+    if bytes.len() != 4 || !bytes.iter().all(u8::is_ascii_digit) {
+        return Err(ParseTimeError::InvalidFormat);
+    }
+
+    let hour = (bytes[0] - b'0') * 10 + (bytes[1] - b'0');
+    let minute = (bytes[2] - b'0') * 10 + (bytes[3] - b'0');
+    Time::from_hms(hour, minute, 0).map_err(|_| ParseTimeError::ComponentRange)
+}
+
+pub fn format_time(value: &Time) -> String {
+    format!("{:02}{:02}", value.hour(), value.minute())
+}
+
 pub fn format_bool(value: &bool) -> &'static str {
     if *value { "1" } else { "0" }
 }
@@ -280,7 +305,7 @@ pub mod serde_string {
     use serde::de::Error as DeError;
     use time::format_description::well_known::Rfc3339;
 
-    use crate::OffsetDateTime;
+    use crate::{OffsetDateTime, Time};
 
     macro_rules! string_from_str_module {
         ($module:ident, $ty:ty) => {
@@ -555,6 +580,60 @@ pub mod serde_string {
         }
     }
 
+    pub mod as_time {
+        use serde::Deserialize;
+        use serde::de::Error as DeError;
+
+        use super::*;
+
+        pub fn serialize<S>(value: &Time, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            serializer.serialize_str(&crate::format_time(value))
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Time, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            let value = <String as Deserialize>::deserialize(deserializer)?;
+            crate::parse_time(&value).map_err(DeError::custom)
+        }
+
+        pub mod option {
+            use serde::Deserialize;
+            use serde::de::Error as DeError;
+
+            use super::*;
+
+            pub fn serialize<S>(value: &Option<Time>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                match value {
+                    Some(value) => super::serialize(value, serializer),
+                    None => serializer.serialize_none(),
+                }
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Time>, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let value = <Option<String> as Deserialize>::deserialize(deserializer)?;
+                let Some(value) = value else {
+                    return Ok(None);
+                };
+                let value = value.trim();
+                if value.is_empty() {
+                    return Ok(None);
+                }
+                crate::parse_time(value).map(Some).map_err(DeError::custom)
+            }
+        }
+    }
+
     fn serialize_display<T, S>(value: &T, serializer: S) -> Result<S::Ok, S::Error>
     where
         T: fmt::Display,
@@ -774,6 +853,16 @@ mod tests {
         assert_eq!(format_range(&Some(14), &None::<u8>), "14-");
         assert_eq!(format_range(&None::<u8>, &Some(17)), "-17");
         assert_eq!(format_range(&None::<u8>, &None::<u8>), "");
+    }
+
+    #[test]
+    fn parses_and_formats_time_strings() {
+        let time = parse_time("0620").unwrap();
+        assert_eq!(time.hour(), 6);
+        assert_eq!(time.minute(), 20);
+        assert_eq!(format_time(&time), "0620");
+        assert_eq!(parse_time("6:20"), Err(ParseTimeError::InvalidFormat));
+        assert_eq!(parse_time("2400"), Err(ParseTimeError::ComponentRange));
     }
 
     #[test]

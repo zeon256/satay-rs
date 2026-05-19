@@ -212,7 +212,7 @@ fn render_types_file(api: &Api) -> syn::File {
         ));
     }
     for component in &api.components {
-        render_component(component, &mut items);
+        render_component(api, component, &mut items);
     }
     for constrained_type in &api.constrained_types {
         items.push(Item::Struct(render_constrained_type(constrained_type)));
@@ -259,7 +259,7 @@ fn render_endpoint_parts_file(api: &Api, operation: &Operation) -> syn::File {
         items.push(Item::Impl(default_impl));
     }
     items.push(Item::Enum(render_response(operation)));
-    items.push(Item::Fn(render_parts_function(operation)));
+    items.push(Item::Fn(render_parts_function(api, operation)));
 
     syn::File {
         shebang: None,
@@ -664,7 +664,7 @@ fn collect_type_refs(ty: &TypeRef, names: &mut Vec<Ident>) {
     }
 }
 
-fn render_component(component: &Component, items: &mut Vec<syn::Item>) {
+fn render_component(api: &Api, component: &Component, items: &mut Vec<syn::Item>) {
     match &component.kind {
         ComponentKind::Struct(fields) => {
             items.push(Item::Struct(render_struct(
@@ -672,6 +672,7 @@ fn render_component(component: &Component, items: &mut Vec<syn::Item>) {
                 component.description.as_deref(),
                 fields,
                 true,
+                Some(api),
             )));
         }
         ComponentKind::Enum(variants) => items.extend(render_enum(
@@ -930,12 +931,13 @@ fn render_struct(
     description: Option<&str>,
     fields: &[Field],
     serde: bool,
+    api: Option<&Api>,
 ) -> syn::ItemStruct {
     let name = ident(name);
     let attrs = struct_attrs(description, serde);
     let fields = fields
         .iter()
-        .map(|field| render_struct_field(field, serde))
+        .map(|field| render_struct_field(field, serde, api))
         .collect::<Vec<_>>();
 
     parse_quote!(
@@ -957,15 +959,15 @@ fn struct_attrs(description: Option<&str>, serde: bool) -> Vec<syn::Attribute> {
     attrs
 }
 
-fn render_struct_field(field: &Field, serde: bool) -> syn::Field {
+fn render_struct_field(field: &Field, serde: bool, api: Option<&Api>) -> syn::Field {
     let name = ident(&field.rust_name);
     let ty = rust_field_type(&field.ty, field.required, field.treat_error_as_none);
-    let attrs = field_attrs(field, serde);
+    let attrs = field_attrs(field, serde, api);
 
     parse_quote!(#(#attrs)* pub #name: #ty)
 }
 
-fn field_attrs(field: &Field, serde: bool) -> Vec<syn::Attribute> {
+fn field_attrs(field: &Field, serde: bool, api: Option<&Api>) -> Vec<syn::Attribute> {
     let mut attrs = doc_attrs(field.description.as_deref());
     if !serde {
         return attrs;
@@ -983,7 +985,7 @@ fn field_attrs(field: &Field, serde: bool) -> Vec<syn::Attribute> {
         serde_attrs.push(quote!(
             serialize_with = "satay_runtime::treat_error_as_none::serialize"
         ));
-    } else if let Some(module) = parsed_serde_module(field) {
+    } else if let Some(module) = parsed_serde_module(field, api) {
         serde_attrs.push(quote!(with = #module));
     }
     if !field.required || field.treat_error_as_none {
@@ -996,18 +998,49 @@ fn field_attrs(field: &Field, serde: bool) -> Vec<syn::Attribute> {
     attrs
 }
 
-fn parsed_serde_module(field: &Field) -> Option<LitStr> {
-    let module = match field.ty.non_nullable() {
+fn parsed_serde_module(field: &Field, api: Option<&Api>) -> Option<LitStr> {
+    let ty = parsed_serde_type(field.ty.non_nullable(), api);
+    let module = match ty.non_nullable() {
         TypeRef::ParsedString(parse_as) => parse_as_string_serde_module(*parse_as),
         TypeRef::ParsedInteger(parse_as) => parse_as_integer_serde_module(*parse_as),
         _ => return None,
     };
-    let module = if !field.required || field.ty.is_nullable() {
+    let module = if !field.required || is_nullable_type(&field.ty, api) {
         format!("{module}::option")
     } else {
         module.to_owned()
     };
     Some(lit_str(&module))
+}
+
+fn parsed_serde_type<'a>(ty: &'a TypeRef, api: Option<&'a Api>) -> &'a TypeRef {
+    match (ty, api) {
+        (TypeRef::Named(name), Some(api)) => match component_kind(api, name) {
+            Some(ComponentKind::Alias(alias)) => parsed_serde_type(alias.non_nullable(), Some(api)),
+            _ => ty,
+        },
+        _ => ty,
+    }
+}
+
+fn is_nullable_type(ty: &TypeRef, api: Option<&Api>) -> bool {
+    match ty {
+        TypeRef::Nullable(_) => true,
+        TypeRef::Named(name) => api
+            .and_then(|api| component_kind(api, name))
+            .is_some_and(|kind| match kind {
+                ComponentKind::Alias(alias) => is_nullable_type(alias, api),
+                _ => false,
+            }),
+        _ => false,
+    }
+}
+
+fn component_kind<'a>(api: &'a Api, name: &str) -> Option<&'a ComponentKind> {
+    api.components
+        .iter()
+        .find(|component| component.rust_name == name)
+        .map(|component| &component.kind)
 }
 
 fn render_enum(name: &str, description: Option<&str>, variants: &[EnumVariant]) -> Vec<syn::Item> {
@@ -1082,6 +1115,7 @@ fn render_input(operation: &Operation) -> syn::ItemStruct {
         operation.description.as_deref(),
         &input_fields,
         false,
+        None,
     )
 }
 
@@ -1248,7 +1282,7 @@ fn render_response_variant(response: &ResponseCase) -> syn::Variant {
     }
 }
 
-fn render_parts_function(operation: &Operation) -> syn::ItemFn {
+fn render_parts_function(api: &Api, operation: &Operation) -> syn::ItemFn {
     let docs = doc_attrs(operation.description.as_deref());
     let body_type = operation.request_body.as_ref().map_or_else(
         || parse_quote!(()),
@@ -1264,9 +1298,9 @@ fn render_parts_function(operation: &Operation) -> syn::ItemFn {
     let path_capacity = Literal::usize_unsuffixed(operation.path.len());
 
     let mut statements = vec![parse_quote!(let mut uri = String::with_capacity(#path_capacity);)];
-    statements.extend(render_path(operation));
-    statements.extend(render_query(operation));
-    statements.extend(render_header_statements(operation));
+    statements.extend(render_path(api, operation));
+    statements.extend(render_query(api, operation));
+    statements.extend(render_header_statements(api, operation));
     let request_parts = render_request_parts_return(operation);
 
     parse_quote!(
@@ -1280,7 +1314,7 @@ fn render_parts_function(operation: &Operation) -> syn::ItemFn {
     )
 }
 
-fn render_header_statements(operation: &Operation) -> Vec<syn::Stmt> {
+fn render_header_statements(api: &Api, operation: &Operation) -> Vec<syn::Stmt> {
     let header_parameters = operation
         .parameters
         .iter()
@@ -1317,13 +1351,13 @@ fn render_header_statements(operation: &Operation) -> Vec<syn::Stmt> {
     for parameter in header_parameters {
         let wire_name = lit_str(&parameter.wire_name);
         let field = ident(&parameter.rust_name);
-        let expr = value_expr(input_field(&parameter.rust_name), &parameter.ty);
+        let expr = value_expr(input_field(&parameter.rust_name), &parameter.ty, api);
         if parameter.required {
             statements.push(parse_quote!(
                 satay_runtime::insert_header(&mut headers, #wire_name, #expr)?;
             ));
         } else {
-            let expr = value_expr(parse_quote!(value), &parameter.ty);
+            let expr = value_expr(parse_quote!(value), &parameter.ty, api);
             statements.push(parse_quote!(
                 if let Some(value) = &input.#field {
                     satay_runtime::insert_header(&mut headers, #wire_name, #expr)?;
@@ -1355,7 +1389,7 @@ fn render_request_parts_return(operation: &Operation) -> syn::Expr {
     )
 }
 
-fn render_path(operation: &Operation) -> Vec<syn::Stmt> {
+fn render_path(api: &Api, operation: &Operation) -> Vec<syn::Stmt> {
     let mut statements = Vec::new();
     for segment in &operation.path_segments {
         match segment {
@@ -1373,7 +1407,7 @@ fn render_path(operation: &Operation) -> Vec<syn::Stmt> {
                             && parameter.wire_name == *name
                     })
                     .expect("path parameters validated before render");
-                let expr = value_expr(input_field(&parameter.rust_name), &parameter.ty);
+                let expr = value_expr(input_field(&parameter.rust_name), &parameter.ty, api);
                 statements.push(parse_quote!(
                     satay_runtime::append_path_segment(&mut uri, #expr);
                 ));
@@ -1383,7 +1417,7 @@ fn render_path(operation: &Operation) -> Vec<syn::Stmt> {
     statements
 }
 
-fn render_query(operation: &Operation) -> Vec<syn::Stmt> {
+fn render_query(api: &Api, operation: &Operation) -> Vec<syn::Stmt> {
     let query_parameters = operation
         .parameters
         .iter()
@@ -1395,25 +1429,25 @@ fn render_query(operation: &Operation) -> Vec<syn::Stmt> {
 
     let mut statements = vec![parse_quote!(let mut first_query = true;)];
     for parameter in query_parameters {
-        statements.extend(render_query_parameter(parameter));
+        statements.extend(render_query_parameter(api, parameter));
     }
     statements
 }
 
-fn render_query_parameter(parameter: &Parameter) -> Vec<syn::Stmt> {
-    if let Some(item) = array_item_type(parameter.ty.non_nullable()) {
-        return render_array_query_parameter(parameter, item);
+fn render_query_parameter(api: &Api, parameter: &Parameter) -> Vec<syn::Stmt> {
+    if let Some(item) = array_item_type(parameter.ty.non_nullable(), api) {
+        return render_array_query_parameter(api, parameter, item);
     }
 
     let wire_name = lit_str(&parameter.wire_name);
     if parameter.required {
-        let expr = value_expr(input_field(&parameter.rust_name), &parameter.ty);
+        let expr = value_expr(input_field(&parameter.rust_name), &parameter.ty, api);
         vec![parse_quote!(
             satay_runtime::append_query_pair(&mut uri, &mut first_query, #wire_name, #expr);
         )]
     } else {
         let field = ident(&parameter.rust_name);
-        let expr = value_expr(parse_quote!(value), &parameter.ty);
+        let expr = value_expr(parse_quote!(value), &parameter.ty, api);
         vec![parse_quote!(
             if let Some(value) = &input.#field {
                 satay_runtime::append_query_pair(&mut uri, &mut first_query, #wire_name, #expr);
@@ -1422,15 +1456,20 @@ fn render_query_parameter(parameter: &Parameter) -> Vec<syn::Stmt> {
     }
 }
 
-fn render_array_query_parameter(parameter: &Parameter, item: &TypeRef) -> Vec<syn::Stmt> {
+fn render_array_query_parameter(
+    api: &Api,
+    parameter: &Parameter,
+    item: &TypeRef,
+) -> Vec<syn::Stmt> {
     let wire_name = lit_str(&parameter.wire_name);
-    let value = value_expr(parse_quote!(value), item);
+    let value = value_expr(parse_quote!(value), item, api);
 
     if parameter.required {
         let values = array_values_expr(
             input_field(&parameter.rust_name),
             &parameter.ty,
             ArrayValueBase::Owned,
+            api,
         );
         vec![parse_quote!(
             for value in #values {
@@ -1443,6 +1482,7 @@ fn render_array_query_parameter(parameter: &Parameter, item: &TypeRef) -> Vec<sy
             parse_quote!(values),
             &parameter.ty,
             ArrayValueBase::Borrowed,
+            api,
         );
         vec![parse_quote!(
             if let Some(values) = &input.#field {
@@ -1454,10 +1494,17 @@ fn render_array_query_parameter(parameter: &Parameter, item: &TypeRef) -> Vec<sy
     }
 }
 
-fn array_item_type(ty: &TypeRef) -> Option<&TypeRef> {
+fn array_item_type<'a>(ty: &'a TypeRef, api: &'a Api) -> Option<&'a TypeRef> {
     match ty {
         TypeRef::Array(item) => Some(item),
-        TypeRef::Constrained { inner, .. } => array_item_type(inner.non_nullable()),
+        TypeRef::Constrained { inner, .. } => array_item_type(inner.non_nullable(), api),
+        TypeRef::Named(name) => match component_kind(api, name) {
+            Some(ComponentKind::Alias(alias)) => array_item_type(alias.non_nullable(), api),
+            Some(ComponentKind::Nutype(constrained_type)) => {
+                array_item_type(constrained_type.inner.non_nullable(), api)
+            }
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -1468,7 +1515,12 @@ enum ArrayValueBase {
     Borrowed,
 }
 
-fn array_values_expr(base: syn::Expr, ty: &TypeRef, base_kind: ArrayValueBase) -> syn::Expr {
+fn array_values_expr(
+    base: syn::Expr,
+    ty: &TypeRef,
+    base_kind: ArrayValueBase,
+    api: &Api,
+) -> syn::Expr {
     match ty.non_nullable() {
         TypeRef::Array(_) => match base_kind {
             ArrayValueBase::Owned => parse_quote!(&#base),
@@ -1477,6 +1529,48 @@ fn array_values_expr(base: syn::Expr, ty: &TypeRef, base_kind: ArrayValueBase) -
         TypeRef::Constrained { inner, .. } if is_array_type(inner.non_nullable()) => {
             parse_quote!(#base.as_ref())
         }
+        TypeRef::Named(name) => match component_kind(api, name) {
+            Some(ComponentKind::Alias(alias)) => {
+                alias_array_values_expr(base, alias.non_nullable(), base_kind, api)
+            }
+            Some(ComponentKind::Nutype(constrained_type))
+                if array_item_type(constrained_type.inner.non_nullable(), api).is_some() =>
+            {
+                parse_quote!(#base.as_ref())
+            }
+            _ => unreachable!("array values are only rendered for array types"),
+        },
+        _ => unreachable!("array values are only rendered for array types"),
+    }
+}
+
+fn alias_array_values_expr(
+    base: syn::Expr,
+    ty: &TypeRef,
+    base_kind: ArrayValueBase,
+    api: &Api,
+) -> syn::Expr {
+    match ty.non_nullable() {
+        TypeRef::Array(_) => match base_kind {
+            ArrayValueBase::Owned => parse_quote!(&#base),
+            ArrayValueBase::Borrowed => base,
+        },
+        TypeRef::Constrained { inner, .. }
+            if array_item_type(inner.non_nullable(), api).is_some() =>
+        {
+            parse_quote!(#base.as_ref())
+        }
+        TypeRef::Named(name) => match component_kind(api, name) {
+            Some(ComponentKind::Alias(alias)) => {
+                alias_array_values_expr(base, alias.non_nullable(), base_kind, api)
+            }
+            Some(ComponentKind::Nutype(constrained_type))
+                if array_item_type(constrained_type.inner.non_nullable(), api).is_some() =>
+            {
+                parse_quote!(#base.as_ref())
+            }
+            _ => unreachable!("array values are only rendered for array types"),
+        },
         _ => unreachable!("array values are only rendered for array types"),
     }
 }
@@ -1548,15 +1642,17 @@ fn operation_uses_input(operation: &Operation) -> bool {
     !operation.parameters.is_empty() || operation.request_body.is_some()
 }
 
-fn value_expr(base: syn::Expr, ty: &TypeRef) -> syn::Expr {
+fn value_expr(base: syn::Expr, ty: &TypeRef, api: &Api) -> syn::Expr {
     match ty.non_nullable() {
         TypeRef::String => parse_quote!(#base.as_str()),
         TypeRef::ParsedString(parse_as) | TypeRef::ParsedInteger(parse_as) => {
             parsed_value_expr(base, *parse_as)
         }
-        TypeRef::Named(_) => parse_quote!(#base.as_ref()),
+        TypeRef::Named(name) => named_value_expr(base, name, api),
         TypeRef::Range(_) => parse_quote!(&#base.to_string()),
-        TypeRef::Constrained { inner, .. } => constrained_value_expr(base, inner.non_nullable()),
+        TypeRef::Constrained { inner, .. } => {
+            constrained_value_expr(base, inner.non_nullable(), api)
+        }
         TypeRef::Integer(_) | TypeRef::F32 | TypeRef::F64 | TypeRef::Bool => {
             parse_quote!(&#base.to_string())
         }
@@ -1564,10 +1660,22 @@ fn value_expr(base: syn::Expr, ty: &TypeRef) -> syn::Expr {
     }
 }
 
-fn constrained_value_expr(base: syn::Expr, inner: &TypeRef) -> syn::Expr {
+fn named_value_expr(base: syn::Expr, name: &str, api: &Api) -> syn::Expr {
+    match component_kind(api, name) {
+        Some(ComponentKind::Alias(alias)) => value_expr(base, alias, api),
+        Some(ComponentKind::Nutype(constrained_type)) => {
+            constrained_value_expr(base, constrained_type.inner.non_nullable(), api)
+        }
+        Some(ComponentKind::Range(_)) => parse_quote!(&#base.to_string()),
+        Some(ComponentKind::Enum(_)) | None => parse_quote!(#base.as_ref()),
+        Some(ComponentKind::Struct(_)) => parse_quote!(#base.as_ref()),
+    }
+}
+
+fn constrained_value_expr(base: syn::Expr, inner: &TypeRef, api: &Api) -> syn::Expr {
     match inner {
         TypeRef::String => parse_quote!(#base.as_ref()),
-        TypeRef::Named(_) => parse_quote!(#base.as_ref()),
+        TypeRef::Named(name) => named_value_expr(base, name, api),
         TypeRef::Range(_) => parse_quote!(&#base.to_string()),
         TypeRef::ParsedString(parse_as) | TypeRef::ParsedInteger(parse_as) => {
             parsed_value_expr(base, *parse_as)
@@ -1637,6 +1745,7 @@ fn integer_rust_type(integer_type: IntegerType) -> syn::Type {
 fn parsed_value_expr(base: syn::Expr, parse_as: ParseAs) -> syn::Expr {
     match parse_as {
         ParseAs::OffsetDateTime => parse_quote!(&satay_runtime::format_offset_datetime(&#base)),
+        ParseAs::Time => parse_quote!(&satay_runtime::format_time(&#base)),
         ParseAs::U8
         | ParseAs::U16
         | ParseAs::U32
@@ -1668,6 +1777,7 @@ fn parse_as_rust_type(parse_as: ParseAs) -> syn::Type {
         ParseAs::F64 => parse_quote!(f64),
         ParseAs::Bool => parse_quote!(bool),
         ParseAs::OffsetDateTime => parse_quote!(satay_runtime::OffsetDateTime),
+        ParseAs::Time => parse_quote!(satay_runtime::Time),
         ParseAs::IntegerRange | ParseAs::NumberRange => {
             unreachable!("range parse-as uses generated range types")
         }
@@ -1688,6 +1798,7 @@ fn parse_as_string_serde_module(parse_as: ParseAs) -> &'static str {
         ParseAs::F64 => "satay_runtime::serde_string::as_f64",
         ParseAs::Bool => "satay_runtime::serde_string::as_bool",
         ParseAs::OffsetDateTime => "satay_runtime::serde_string::as_offset_datetime",
+        ParseAs::Time => "satay_runtime::serde_string::as_time",
         ParseAs::IntegerRange | ParseAs::NumberRange => {
             unreachable!("range parse-as uses generated range types")
         }
@@ -1708,6 +1819,7 @@ fn parse_as_integer_serde_module(parse_as: ParseAs) -> &'static str {
         | ParseAs::F32
         | ParseAs::F64
         | ParseAs::OffsetDateTime
+        | ParseAs::Time
         | ParseAs::IntegerRange
         | ParseAs::NumberRange => unreachable!("only bool can parse from integer"),
     }
@@ -1947,7 +2059,15 @@ mod tests {
             }],
         };
 
-        let parts = render_parts_function(&operation);
+        let api = Api {
+            server_url: String::new(),
+            api_key_security_schemes: vec![],
+            components: vec![],
+            constrained_types: vec![],
+            operations: vec![],
+        };
+
+        let parts = render_parts_function(&api, &operation);
         let if_expr = parts
             .block
             .stmts

@@ -2,17 +2,17 @@ include!(concat!(env!("OUT_DIR"), "/satay_generated.rs"));
 
 use generated::{Api, GetBusArrivalResponse};
 use satay_reqwest::{ReqwestActionExt, reqwest};
-use std::env;
+use std::{env, error::Error};
 
-use crate::generated::{BusServiceNumber, BusStopCode};
+use crate::generated::BusServiceNumber;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn Error>> {
     let api = Api::new().account_key(env::var("LTA_ACCOUNT_KEY")?);
 
     let client = reqwest::Client::new();
     let response = api
-        .get_bus_arrival(BusStopCode::try_new("83139")?)
+        .get_bus_arrival(83139)
         .service_no(BusServiceNumber::try_new("15")?)
         .send_with(&client)
         .await?;

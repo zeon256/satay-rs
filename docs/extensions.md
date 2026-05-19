@@ -21,6 +21,13 @@ EstimatedArrival:
   type: string
   x-satay:
     parse-as: offset-datetime
+
+FirstBus:
+  type: string
+  nullable: true
+  x-satay:
+    parse-as: time
+
 Monitored:
   type: integer
   x-satay:
@@ -39,14 +46,17 @@ pub struct Bus {
     
     #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_offset_datetime"))]
     pub estimated_arrival: satay_runtime::OffsetDateTime,
-    
-    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_bool"))]
+
+    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_time::option"))]
+    pub first_bus: Option<satay_runtime::Time>,
+
+    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_integer::as_bool"))]
     pub monitored: bool,
 }
 ```
 
 
-The wire format stays a string: serde deserializes from a JSON string and serializes back to one. Supported `parse-as` values are `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`, and `offset-datetime`. Float parsing uses `fast-float`; `offset-datetime` generates `satay_runtime::OffsetDateTime`. `bool` also supports integer schemas, accepting `1`, `0`, `"1"`, `"0"`, `true`, and `false`; integer-backed bool fields serialize as `1` or `0`.
+The wire format stays a string: serde deserializes from a JSON string and serializes back to one. Supported string-backed `parse-as` values are `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`, `offset-datetime`, and `time`. Float parsing uses `fast-float`; `offset-datetime` generates `satay_runtime::OffsetDateTime`; `time` generates `satay_runtime::Time` and expects `HHMM` values such as `0620` or `2352`. Nullable `time` fields generate `Option<satay_runtime::Time>` and treat an empty string as `None`. `bool` also supports integer schemas, accepting `1`, `0`, `"1"`, `"0"`, `true`, and `false`; integer-backed bool fields serialize as `1` or `0`.
 
 ## `integer-type`
 

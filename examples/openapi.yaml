@@ -5,7 +5,7 @@ info:
   version: "3.0"
   description: >
     OpenAPI schema for LTA DataMall bus APIs.
-    Returns real-time bus arrival information and bus service details.
+    Returns real-time bus arrival information, bus service details, and bus route details.
 
 servers:
   - url: https://datamall2.mytransport.sg/ltaodataservice
@@ -167,6 +167,62 @@ paths:
                     PM_Offpeak_Freq: "12-15"
                     LoopDesc: "Raffles Blvd"
 
+  /BusRoutes:
+    get:
+      operationId: getBusRoutes
+      summary: Get bus route details
+      description: >
+        Returns detailed route information for all bus services currently in operation,
+        including all bus stops along each route and first / last bus timings for
+        each stop.
+
+        The dataset is updated ad hoc.
+      security:
+        - accountKeyAuth: []
+      parameters:
+        - name: $skip
+          in: query
+          required: false
+          description: Number of records to skip for pagination.
+          schema:
+            type: integer
+            minimum: 0
+          example: 500
+
+        - name: accept
+          in: header
+          required: false
+          description: Optional response format header. JSON is the default.
+          schema:
+            type: string
+            enum:
+              - application/json
+              - application/atom+xml
+            default: application/json
+
+      responses:
+        "200":
+          description: Successful Bus Routes response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BusRoutesResponse"
+              example:
+                odata.metadata: "https://datamall2.mytransport.sg/ltaodataservice/$metadata#BusRoutes"
+                value:
+                  - ServiceNo: "107M"
+                    Operator: "SBST"
+                    Direction: 1
+                    StopSequence: 28
+                    BusStopCode: "01219"
+                    Distance: 10.3
+                    WD_FirstBus: "2025"
+                    WD_LastBus: "2352"
+                    SAT_FirstBus: "1427"
+                    SAT_LastBus: "2349"
+                    SUN_FirstBus: "0620"
+                    SUN_LastBus: "2349"
+
 components:
   securitySchemes:
     accountKeyAuth:
@@ -319,6 +375,125 @@ components:
           description: Location at which the bus service loops, empty if not a loop service.
           example: "Raffles Blvd"
 
+    BusRoutesResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - odata.metadata
+        - value
+      properties:
+        odata.metadata:
+          type: string
+          format: uri
+          description: OData metadata URL.
+          example: "https://datamall2.mytransport.sg/ltaodataservice/$metadata#BusRoutes"
+
+        value:
+          type: array
+          description: Bus route details.
+          items:
+            $ref: "#/components/schemas/BusRoute"
+
+    BusRoute:
+      type: object
+      additionalProperties: false
+      required:
+        - ServiceNo
+        - Operator
+        - Direction
+        - StopSequence
+        - BusStopCode
+        - Distance
+        - WD_FirstBus
+        - WD_LastBus
+        - SAT_FirstBus
+        - SAT_LastBus
+        - SUN_FirstBus
+        - SUN_LastBus
+      properties:
+        ServiceNo:
+          $ref: "#/components/schemas/BusServiceNumber"
+
+        Operator:
+          $ref: "#/components/schemas/BusOperator"
+
+        Direction:
+          type: integer
+          format: int32
+          description: >
+            The direction in which the bus travels. Valid values are 1 or 2;
+            loop services only have 1 direction.
+          example: 1
+          minimum: 1
+          maximum: 2
+
+        StopSequence:
+          type: integer
+          format: int32
+          description: The i-th bus stop for this route.
+          example: 28
+          minimum: 1
+
+        BusStopCode:
+          $ref: "#/components/schemas/BusStopCode"
+          description: Unique 5-digit identifier for the physical bus stop.
+          example: "01219"
+
+        Distance:
+          type: number
+          format: double
+          description: Distance travelled by bus from starting location to this bus stop, in kilometres.
+          example: 10.3
+          minimum: 0
+
+        WD_FirstBus:
+          type: string
+          description: Scheduled arrival of first bus on weekdays.
+          nullable: true
+          example: "2025"
+          x-satay:
+            parse-as: time
+
+        WD_LastBus:
+          type: string
+          description: Scheduled arrival of last bus on weekdays.
+          nullable: true
+          example: "2352"
+          x-satay:
+            parse-as: time
+
+        SAT_FirstBus:
+          type: string
+          description: Scheduled arrival of first bus on Saturdays.
+          nullable: true
+          example: "1427"
+          x-satay:
+            parse-as: time
+
+        SAT_LastBus:
+          type: string
+          description: Scheduled arrival of last bus on Saturdays.
+          nullable: true
+          example: "2349"
+          x-satay:
+            parse-as: time
+
+        SUN_FirstBus:
+          type: string
+          description: Scheduled arrival of first bus on Sundays.
+          nullable: true
+          example: "0620"
+          x-satay:
+            parse-as: time
+
+        SUN_LastBus:
+          type: string
+          description: Scheduled arrival of last bus on Sundays.
+          nullable: true
+          example: "2349"
+          x-satay:
+            parse-as: time
+
     BusArrivalResponse:
       type: object
       additionalProperties: false
@@ -389,7 +564,7 @@ components:
       type: string
       description: The bus service number.
       maxLength: 5
-      pattern: '^[a-zA-Z0-9]+$'
+      pattern: "^[a-zA-Z0-9]+$"
       example: "107M"
 
     BusStopCode:
@@ -397,6 +572,8 @@ components:
       description: Unique 5-digit bus stop reference code.
       pattern: '^\d{5}$'
       example: "83139"
+      x-satay:
+        parse-as: u32
 
     BusArrivalTiming:
       type: object
