@@ -16,6 +16,13 @@ satay is a Rust OpenAPI client generator for [sans-io](https://fasterthanli.me/a
 > [!WARNING]
 > Satay is work in progress and currently prioritizes generating `lta-rs` clients with good ergonomics and validation. Support for other OpenAPI specs will grow as the supported subset becomes explicit and tested.
 
+## Features
+
+- Generates from OpenAPI 3.0 documents
+- Sans-IO design from the ground up, with optional transport adapters for `reqwest` and `ureq`
+- Validation newtypes for OpenAPI string, number, integer, and array constraints
+- Automatic number type deduction from specified bounds (i.e. if `maximum` is less than `u8::MAX`, the generated type will be a `u8` newtype instead of `u64`)
+
 ## Quick Start
 
 Install the CLI from a checkout of this repository:
