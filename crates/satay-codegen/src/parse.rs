@@ -733,20 +733,21 @@ fn parse_integer_type(
     context: &str,
     explicit: Option<IntegerType>,
 ) -> Result<IntegerType, ValidationError> {
-    let format_type = parse_integer_format_type(schema, context)?;
+    let (format_type, explicit_format) = parse_integer_format_type(schema, context)?;
     match explicit {
         Some(integer_type) => Ok(integer_type),
-        None => infer_integer_type(schema, format_type, context),
+        None => infer_integer_type(schema, format_type, explicit_format, context),
     }
 }
 
 fn parse_integer_format_type(
     schema: &Map<String, Value>,
     context: &str,
-) -> Result<IntegerType, ValidationError> {
+) -> Result<(IntegerType, bool), ValidationError> {
     match schema.get("format").and_then(Value::as_str) {
-        Some("int32") => Ok(IntegerType::I32),
-        Some("int64") | None => Ok(IntegerType::I64),
+        Some("int32") => Ok((IntegerType::I32, true)),
+        Some("int64") => Ok((IntegerType::I64, true)),
+        None => Ok((IntegerType::I64, false)),
         Some(format) => Err(ValidationError::UnsupportedIntegerFormat {
             context: context.to_owned(),
             format: format.to_owned(),
@@ -757,12 +758,20 @@ fn parse_integer_format_type(
 fn infer_integer_type(
     schema: &Map<String, Value>,
     format_type: IntegerType,
+    explicit_format: bool,
     context: &str,
 ) -> Result<IntegerType, ValidationError> {
     let minimum = optional_integer_limit(schema, "minimum", "exclusiveMinimum", context)?;
     let maximum = optional_integer_limit(schema, "maximum", "exclusiveMaximum", context)?;
-    let (Some(minimum), Some(maximum)) = (minimum, maximum) else {
-        return Ok(format_type);
+    let (minimum, maximum) = match (minimum, maximum) {
+        (Some(minimum), Some(maximum)) => (minimum, maximum),
+        (Some(minimum), None) => {
+            if !explicit_format && effective_integer_min(minimum)? >= 0 {
+                return Ok(IntegerType::U64);
+            }
+            return Ok(format_type);
+        }
+        _ => return Ok(format_type),
     };
 
     let raw_minimum = effective_integer_min(minimum)?;

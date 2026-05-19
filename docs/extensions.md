@@ -50,7 +50,7 @@ The wire format stays a string: serde deserializes from a JSON string and serial
 
 ## `integer-type`
 
-Satay infers the smallest Rust integer primitive for `type: integer` schemas that declare both `minimum` and `maximum`. Bounds that remain narrower than the primitive still generate validation newtypes.
+Satay infers the smallest Rust integer primitive for `type: integer` schemas that declare both `minimum` and `maximum`. Unformatted integer schemas with a one-sided non-negative lower bound and no `maximum` infer `u64`. Bounds that remain narrower than the primitive still generate validation newtypes.
 
 ```yaml
 Direction:

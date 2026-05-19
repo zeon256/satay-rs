@@ -6,7 +6,7 @@ Satay targets OpenAPI 3.0.x and a small, typed subset.
 
 - YAML or JSON OpenAPI documents.
 - `components.schemas` as Rust structs, string enums, primitive aliases, and constrained newtypes.
-- Schema types: `string`, `integer` (`int32`, `int64`, or no format, with Rust integer inference from bounds), `number` (`float`, `double`, or no format), `boolean`, arrays, nullable values, and local `#/components/schemas/...` references.
+- Schema types: `string`, `integer` (`int32`, `int64`, or no format, with Rust integer inference from bounds), `number` (`float`, `double`, or no format), `boolean`, arrays, nullable values, and local `#/components/schemas/...` references. Unformatted non-negative open-ended integers infer `u64`.
 - Operations for standard HTTP methods with explicit `operationId`, or inferred names from method + path.
 - Path, query, and header parameters declared with `schema`.
 - Path-level parameters with operation-level overrides.

@@ -125,6 +125,15 @@ paths:
             type: string
           example: "107M"
 
+        - name: $skip
+          in: query
+          required: false
+          description: Number of records to skip for pagination.
+          schema:
+            type: integer
+            minimum: 0
+          example: 500
+
         - name: accept
           in: header
           required: false
@@ -449,7 +458,7 @@ components:
         Feature:
           type: string
           description: >
-            Wheelchair accessibility indicator.
+            Wheelchair accessibility indicator. Possibly can be extended in the future
           enum:
             - WAB
             - ""

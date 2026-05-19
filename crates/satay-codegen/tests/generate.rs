@@ -625,6 +625,52 @@ components:
 }
 
 #[test]
+fn open_ended_non_negative_unformatted_integer_parameters_use_unsigned() {
+    let files = satay_codegen::generate(
+        r#"
+openapi: 3.0.3
+paths:
+  /buses:
+    get:
+      operationId: getBuses
+      parameters:
+        - name: $skip
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int32
+            minimum: 0
+      responses:
+        '204':
+          description: No content
+"#,
+    )
+    .expect("generate open-ended integer parameter fixture");
+
+    let parts_rs = find_file(&files, "get_buses/parts.rs");
+    assert!(parts_rs.contents.contains("pub skip: Option<u64>"));
+    assert!(!parts_rs.contents.contains("GetBusesSkipParameter"));
+    let types_rs = find_file(&files, "types.rs");
+    assert!(
+        types_rs
+            .contents
+            .contains("pub struct GetBusesPageParameter(i32);")
+    );
+    assert!(
+        parts_rs
+            .contents
+            .contains("pub page: Option<GetBusesPageParameter>")
+    );
+}
+
+#[test]
 fn x_satay_parse_as_generates_wire_backed_deserializers() {
     let files = satay_codegen::generate(
         r#"

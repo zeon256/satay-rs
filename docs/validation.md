@@ -103,7 +103,7 @@ pub struct User {
 }
 ```
 
-Integer schemas with both `minimum` and `maximum` infer the smallest Rust integer primitive that fits the declared range. In the `Age` example, `minimum: 0` is enforced by the `u8` backing type and the remaining `maximum: 130` constraint is enforced by `nutype`.
+Integer schemas with both `minimum` and `maximum` infer the smallest Rust integer primitive that fits the declared range. In the `Age` example, `minimum: 0` is enforced by the `u8` backing type and the remaining `maximum: 130` constraint is enforced by `nutype`. Unformatted integer schemas with a one-sided non-negative lower bound and no `maximum` infer `u64`.
 
 ## Operation Parameters
 
