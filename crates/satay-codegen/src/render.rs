@@ -772,6 +772,7 @@ fn nutype_derives(validation: &Validation) -> Vec<TokenStream> {
                 quote!(TryFrom),
                 quote!(Into),
                 quote!(Display),
+                quote!(Hash),
             ]);
         }
         Validation::Integer { .. } => {

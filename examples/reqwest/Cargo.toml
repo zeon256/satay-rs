@@ -12,13 +12,14 @@ json = ["serde", "dep:serde_json", "satay-runtime/json"]
 
 [dependencies]
 http = "1"
-nutype = { version = "0.7", features = ["serde"] }
+nutype = { version = "0.7", features = ["serde", "regex"] }
 reqwest = "0.13.3"
 satay-runtime = { path = "../../crates/satay-runtime", default-features = false }
 satay-reqwest = { path = "../../crates/satay-reqwest" }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+regex = "1"
 
 [build-dependencies]
 satay-codegen = { path = "../../crates/satay-codegen" }

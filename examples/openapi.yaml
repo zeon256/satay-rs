@@ -41,7 +41,7 @@ paths:
           required: false
           description: Optional bus service number filter.
           schema:
-            type: string
+            $ref: "#/components/schemas/BusServiceNumber"
           example: "15"
 
         - name: accept
@@ -122,7 +122,7 @@ paths:
           required: false
           description: Optional bus service number filter.
           schema:
-            type: string
+            $ref: "#/components/schemas/BusServiceNumber"
           example: "107M"
 
         - name: $skip
@@ -212,9 +212,7 @@ components:
         - LoopDesc
       properties:
         ServiceNo:
-          type: string
-          description: The bus service number.
-          example: "107M"
+          $ref: "#/components/schemas/BusServiceNumber"
 
         Operator:
           $ref: "#/components/schemas/BusOperator"
@@ -337,9 +335,7 @@ components:
         - NextBus3
       properties:
         ServiceNo:
-          type: string
-          description: Bus service number.
-          example: "15"
+          $ref: "#/components/schemas/BusServiceNumber"
 
         Operator:
           $ref: "#/components/schemas/BusOperator"
@@ -368,6 +364,13 @@ components:
         - TTS
         - GAS
       example: "SBST"
+
+    BusServiceNumber:
+      type: string
+      description: The bus service number.
+      maxLength: 5
+      pattern: '^[a-zA-Z0-9]+$'
+      example: "107M"
 
     BusArrivalTiming:
       type: object

@@ -1,7 +1,7 @@
 include!(concat!(env!("OUT_DIR"), "/satay_generated.rs"));
 
-use std::env;
 use std::error::Error;
+use std::{collections::HashSet, env};
 
 use generated::{Api, GetBusServicesResponse};
 use satay_reqwest::{ReqwestActionExt, reqwest};
@@ -14,39 +14,61 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let _service_no = args.next();
 
     let api = Api::new().account_key(account_key);
-    let action = api.get_bus_services();
-    // if let Some(service_no) = service_no {
-    //     action = action.service_no(service_no);
-    // }
 
+    let mut all_services = vec![];
+    let mut skip = 0;
     let client = reqwest::Client::new();
-    let response = action.send_with(&client).await?;
 
-    match response {
-        GetBusServicesResponse::Ok(bus_services_response) => {
-            // print how many services are returned
-            // and print the first 8 services
+    loop {
+        let action = api.get_bus_services().skip(skip);
 
-            println!("{} services returned", bus_services_response.value.len());
+        let response = action.send_with(&client).await?;
 
-            for service in bus_services_response.value.iter().take(8) {
-                println!(
-                    "{}: {} - {} ({} - {})",
-                    service.service_no,
-                    service.operator,
-                    service.loop_desc,
-                    service.am_offpeak_freq,
-                    service.pm_offpeak_freq
+        match response {
+            GetBusServicesResponse::Ok(bus_services_response) => {
+                println!("{} services returned", bus_services_response.value.len());
+                if bus_services_response.value.is_empty() {
+                    break;
+                }
+
+                let sz = bus_services_response.value.len();
+                skip += sz as u64;
+                all_services.extend(bus_services_response.value);
+
+                // the API returns at most 500 items per request
+                if sz < 500 {
+                    break;
+                }
+            }
+            GetBusServicesResponse::UnexpectedStatus(status_code, body) => {
+                eprintln!(
+                    "unexpected status {status_code}: {}",
+                    String::from_utf8_lossy(&body)
                 );
             }
         }
-        GetBusServicesResponse::UnexpectedStatus(status_code, body) => {
-            eprintln!(
-                "unexpected status {status_code}: {}",
-                String::from_utf8_lossy(&body)
-            );
-        }
     }
+
+    println!("Total bus services: {}", all_services.len());
+
+    // get all unique bus service numbers
+    let unique_service_nos = all_services
+        .iter()
+        .map(|service| service.service_no.clone())
+        .collect::<HashSet<_>>();
+
+    println!(
+        "Unique number of bus services: {}",
+        unique_service_nos.len()
+    );
+
+    // figure out longest bus service number
+    let longest_service_no = unique_service_nos
+        .iter()
+        .max_by_key(|service_no| service_no.len())
+        .unwrap();
+
+    println!("Longest bus service number: {}", longest_service_no);
 
     Ok(())
 }
