@@ -696,6 +696,8 @@ components:
         - count
         - monitored
         - seenAt
+        - frequency
+        - tolerance
       properties:
         id:
           type: string
@@ -717,6 +719,17 @@ components:
           type: string
           x-satay:
             parse-as: offset-datetime
+        frequency:
+          type: string
+          minimum: 1
+          maximum: 60
+          x-satay:
+            parse-as: integer-range
+        tolerance:
+          type: string
+          format: double
+          x-satay:
+            parse-as: number-range
 "#,
     )
     .expect("generate parse-as fixture");
@@ -731,6 +744,21 @@ components:
             .contents
             .contains("pub seen_at: satay_runtime::OffsetDateTime")
     );
+    assert!(
+        types_rs
+            .contents
+            .contains("pub frequency: ReadingFrequency")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("pub tolerance: ReadingTolerance")
+    );
+    assert!(types_rs.contents.contains("pub struct ReadingFrequency"));
+    assert!(types_rs.contents.contains("pub min: Option<u8>"));
+    assert!(types_rs.contents.contains("pub max: Option<u8>"));
+    assert!(types_rs.contents.contains("pub struct ReadingTolerance"));
+    assert!(types_rs.contents.contains("pub min: Option<f64>"));
     assert!(
         types_rs
             .contents
@@ -775,7 +803,7 @@ mod tests {
         let response = satay_runtime::ResponseParts {
             status: http::StatusCode::OK,
             headers: http::HeaderMap::new(),
-            body: br#"{"id":"42","value":"1.25","count":"7","monitored":0,"seenAt":"2024-08-14T16:41:48+08:00"}"#
+            body: br#"{"id":"42","value":"1.25","count":"7","monitored":0,"seenAt":"2024-08-14T16:41:48+08:00","frequency":"14-17","tolerance":"1.5-2.75"}"#
                 .to_vec(),
         };
         let decoded = decode_get_reading_response(response).expect("decoded response");
@@ -787,6 +815,10 @@ mod tests {
                 assert_eq!(reading.count, 7);
                 assert!(!reading.monitored);
                 assert_eq!(reading.seen_at.offset().whole_hours(), 8);
+                assert_eq!(reading.frequency.min, Some(14));
+                assert_eq!(reading.frequency.max, Some(17));
+                assert_eq!(reading.tolerance.min, Some(1.5));
+                assert_eq!(reading.tolerance.max, Some(2.75));
 
                 let encoded = serde_json::to_value(&reading).unwrap();
                 assert_eq!(
@@ -796,7 +828,9 @@ mod tests {
                         "value": "1.25",
                         "count": "7",
                         "monitored": 0,
-                        "seenAt": "2024-08-14T16:41:48+08:00"
+                        "seenAt": "2024-08-14T16:41:48+08:00",
+                        "frequency": "14-17",
+                        "tolerance": "1.5-2.75"
                     })
                 );
             }

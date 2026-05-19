@@ -12,7 +12,8 @@ json = ["serde", "dep:serde_json", "satay-runtime/json"]
 
 [dependencies]
 http = "1"
-nutype = { version = "0.7", features = ["serde"] }
+nutype = { version = "0.7", features = ["serde", "regex"] }
+regex = "1"
 reqwest = { version = "0.13.3", features = ["blocking"] }
 satay-runtime = { path = "../../crates/satay-runtime", default-features = false }
 satay-reqwest = { path = "../../crates/satay-reqwest", features = ["blocking"] }

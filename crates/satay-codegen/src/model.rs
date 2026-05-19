@@ -31,8 +31,29 @@ pub(crate) struct Component {
 pub(crate) enum ComponentKind {
     Struct(Vec<Field>),
     Enum(Vec<EnumVariant>),
+    Range(RangeType),
     Alias(TypeRef),
     Nutype(ConstrainedType),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RangeType {
+    pub(crate) rust_name: String,
+    pub(crate) description: Option<String>,
+    pub(crate) scalar: RangeScalar,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RangeTypeRef {
+    pub(crate) rust_name: String,
+    pub(crate) scalar: RangeScalar,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RangeScalar {
+    Integer(IntegerType),
+    F32,
+    F64,
 }
 
 #[derive(Debug, Clone)]
@@ -114,6 +135,7 @@ pub(crate) enum TypeRef {
     F64,
     Bool,
     Array(Box<TypeRef>),
+    Range(RangeTypeRef),
     Named(String),
     Constrained {
         rust_name: String,
@@ -136,6 +158,8 @@ pub(crate) enum ParseAs {
     F64,
     Bool,
     OffsetDateTime,
+    IntegerRange,
+    NumberRange,
 }
 
 #[derive(Debug)]
@@ -232,6 +256,8 @@ impl ParseAs {
             "f64" => Some(Self::F64),
             "bool" => Some(Self::Bool),
             "offset-datetime" => Some(Self::OffsetDateTime),
+            "integer-range" => Some(Self::IntegerRange),
+            "number-range" => Some(Self::NumberRange),
             _ => None,
         }
     }

@@ -4,7 +4,7 @@ use std::env;
 use std::error::Error;
 use std::mem;
 
-use generated::{Api, GetBusArrivalAction, GetBusArrivalResponse};
+use generated::{Api, BusServiceNumber, GetBusArrivalAction, GetBusArrivalResponse};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -16,7 +16,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let api = Api::new().account_key(account_key);
     let mut action = api.get_bus_arrival(bus_stop_code);
     if let Some(service_no) = service_no {
-        action = action.service_no(service_no);
+        action = action.service_no(BusServiceNumber::try_from(service_no)?);
     }
 
     let request: reqwest::Request = action.request()?.try_into()?;

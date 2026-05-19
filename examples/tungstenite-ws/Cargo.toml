@@ -13,7 +13,8 @@ json = ["serde", "dep:serde_json", "satay-runtime/json"]
 [dependencies]
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 http = "1"
-nutype = { version = "0.7", features = ["serde"] }
+nutype = { version = "0.7", features = ["serde", "regex"] }
+regex = "1"
 satay-runtime = { path = "../../crates/satay-runtime", default-features = false }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }

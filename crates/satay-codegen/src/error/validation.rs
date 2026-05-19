@@ -152,9 +152,9 @@ pub enum ValidationError {
 
     /// `x-satay.integer-type` was applied to a non-integer schema.
     ///
-    /// Error message: `{context} uses x-satay.integer-type `{integer_type}` on `{kind}`; supported integer-type wire schemas are integer schemas`
+    /// Error message: `{context} uses x-satay.integer-type `{integer_type}` on `{kind}`; supported integer-type wire schemas are integer schemas and string schemas with x-satay.parse-as integer-range`
     #[error(
-        "{context} uses x-satay.integer-type `{integer_type}` on `{kind}`; supported integer-type wire schemas are integer schemas"
+        "{context} uses x-satay.integer-type `{integer_type}` on `{kind}`; supported integer-type wire schemas are integer schemas and string schemas with x-satay.parse-as integer-range"
     )]
     SatayIntegerTypeRequiresInteger {
         context: String,

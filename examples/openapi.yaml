@@ -272,25 +272,41 @@ components:
           type: string
           description: >
             Frequency of dispatch for AM Peak 0630H - 0830H, as a range in minutes.
+          minimum: 1
+          maximum: 60
           example: "14-17"
+          x-satay:
+            parse-as: integer-range
 
         AM_Offpeak_Freq:
           type: string
           description: >
             Frequency of dispatch for AM Off-Peak 0831H - 1659H, as a range in minutes.
+          minimum: 1
+          maximum: 60
           example: "10-16"
+          x-satay:
+            parse-as: integer-range
 
         PM_Peak_Freq:
           type: string
           description: >
             Frequency of dispatch for PM Peak 1700H - 1900H, as a range in minutes.
+          minimum: 1
+          maximum: 60
           example: "12-15"
+          x-satay:
+            parse-as: integer-range
 
         PM_Offpeak_Freq:
           type: string
           description: >
             Frequency of dispatch for PM Off-Peak after 1900H, as a range in minutes.
+          minimum: 1
+          maximum: 60
           example: "12-15"
+          x-satay:
+            parse-as: integer-range
 
         LoopDesc:
           type: string

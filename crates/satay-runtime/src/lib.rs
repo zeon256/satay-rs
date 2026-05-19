@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+use std::fmt;
+use std::str::FromStr;
+
 use http::header::{self, CONTENT_TYPE, HeaderName, HeaderValue};
 #[cfg(feature = "json")]
 use serde::de;
@@ -43,6 +46,18 @@ pub enum Error {
     #[cfg(feature = "json")]
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ParseRangeError {
+    #[error("range contains more than one `-` separator")]
+    TooManySeparators,
+
+    #[error("invalid range minimum `{value}`: {message}")]
+    InvalidMinimum { value: String, message: String },
+
+    #[error("invalid range maximum `{value}`: {message}")]
+    InvalidMaximum { value: String, message: String },
 }
 
 pub trait Action {
@@ -178,6 +193,82 @@ pub fn format_offset_datetime(value: &OffsetDateTime) -> String {
 
 pub fn format_bool(value: &bool) -> &'static str {
     if *value { "1" } else { "0" }
+}
+
+pub fn parse_range<T>(value: &str) -> Result<(Option<T>, Option<T>), ParseRangeError>
+where
+    T: FromStr,
+    T::Err: fmt::Display,
+{
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok((None, None));
+    }
+
+    let (min, max) = match value.split_once('-') {
+        Some((min, max)) => {
+            if max.contains('-') {
+                return Err(ParseRangeError::TooManySeparators);
+            }
+            (min, max)
+        }
+        None => (value, value),
+    };
+
+    Ok((parse_range_min(min)?, parse_range_max(max)?))
+}
+
+pub fn format_range<T>(min: &Option<T>, max: &Option<T>) -> String
+where
+    T: fmt::Display,
+{
+    match (min, max) {
+        (Some(min), Some(max)) => format!("{min}-{max}"),
+        (Some(min), None) => format!("{min}-"),
+        (None, Some(max)) => format!("-{max}"),
+        (None, None) => String::new(),
+    }
+}
+
+fn parse_range_min<T>(value: &str) -> Result<Option<T>, ParseRangeError>
+where
+    T: FromStr,
+    T::Err: fmt::Display,
+{
+    parse_range_bound(value, |value, message| ParseRangeError::InvalidMinimum {
+        value,
+        message,
+    })
+}
+
+fn parse_range_max<T>(value: &str) -> Result<Option<T>, ParseRangeError>
+where
+    T: FromStr,
+    T::Err: fmt::Display,
+{
+    parse_range_bound(value, |value, message| ParseRangeError::InvalidMaximum {
+        value,
+        message,
+    })
+}
+
+fn parse_range_bound<T>(
+    value: &str,
+    invalid: impl FnOnce(String, String) -> ParseRangeError,
+) -> Result<Option<T>, ParseRangeError>
+where
+    T: FromStr,
+    T::Err: fmt::Display,
+{
+    let value = value.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+
+    value
+        .parse::<T>()
+        .map(Some)
+        .map_err(|err| invalid(value.to_owned(), err.to_string()))
 }
 
 #[cfg(feature = "serde")]
@@ -663,6 +754,26 @@ mod tests {
         append_query_pair(&mut out, &mut first, "tag name", "small/dog");
         append_query_pair(&mut out, &mut first, "limit", "10");
         assert_eq!(out, "/pets?tag%20name=small%2Fdog&limit=10");
+    }
+
+    #[test]
+    fn parses_range_strings() {
+        assert_eq!(parse_range::<u8>("14-17").unwrap(), (Some(14), Some(17)));
+        assert_eq!(parse_range::<u8>("14-").unwrap(), (Some(14), None));
+        assert_eq!(parse_range::<u8>("-17").unwrap(), (None, Some(17)));
+        assert_eq!(parse_range::<u8>("").unwrap(), (None, None));
+        assert!(matches!(
+            parse_range::<u8>("14-17-20"),
+            Err(ParseRangeError::TooManySeparators)
+        ));
+    }
+
+    #[test]
+    fn formats_range_strings() {
+        assert_eq!(format_range(&Some(14), &Some(17)), "14-17");
+        assert_eq!(format_range(&Some(14), &None::<u8>), "14-");
+        assert_eq!(format_range(&None::<u8>, &Some(17)), "-17");
+        assert_eq!(format_range(&None::<u8>, &None::<u8>), "");
     }
 
     #[test]

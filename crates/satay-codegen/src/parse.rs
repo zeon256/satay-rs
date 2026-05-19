@@ -9,8 +9,8 @@ use crate::ident::{
 use crate::model::{
     Api, ApiKeyLocation, ApiKeySecurityScheme, Component, ComponentKind, ConstrainedType,
     EnumVariant, Field, FloatLimit, HttpMethod, IntegerLimit, IntegerType, Operation, Parameter,
-    ParameterLocation, ParseAs, PathSegment, RequestBody, ResponseCase, TypeRef, Validation,
-    is_array_type,
+    ParameterLocation, ParseAs, PathSegment, RangeScalar, RangeType, RangeTypeRef, RequestBody,
+    ResponseCase, TypeRef, Validation, is_array_type,
 };
 
 pub(crate) fn parse_api(document: &Value) -> Result<Api, ValidationError> {
@@ -30,6 +30,7 @@ pub(crate) fn parse_api(document: &Value) -> Result<Api, ValidationError> {
     let mut components = parse_components(document, &mut registry)?;
     let operations = parse_operations(document, &mut registry)?;
     components.extend(registry.inline_enums);
+    components.extend(registry.inline_ranges);
 
     Ok(Api {
         server_url,
@@ -44,6 +45,7 @@ pub(crate) fn parse_api(document: &Value) -> Result<Api, ValidationError> {
 struct TypeRegistry {
     generated: Vec<ConstrainedType>,
     inline_enums: Vec<Component>,
+    inline_ranges: Vec<Component>,
     used_names: BTreeSet<String>,
 }
 
@@ -85,6 +87,25 @@ impl TypeRegistry {
             kind: ComponentKind::Enum(variants),
         });
         TypeRef::Named(rust_name)
+    }
+
+    fn inline_range_ref(
+        &mut self,
+        type_name_hint: &str,
+        description: Option<String>,
+        scalar: RangeScalar,
+    ) -> TypeRef {
+        let rust_name = unique_ident(type_ident(type_name_hint), &mut self.used_names);
+        self.inline_ranges.push(Component {
+            rust_name: rust_name.clone(),
+            description: description.clone(),
+            kind: ComponentKind::Range(RangeType {
+                rust_name: rust_name.clone(),
+                description,
+                scalar,
+            }),
+        });
+        TypeRef::Range(RangeTypeRef { rust_name, scalar })
     }
 }
 
@@ -248,6 +269,36 @@ fn parse_component_alias_or_nutype(
         .get("nullable")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let parse_as = parse_satay_parse_as(schema, &context)?;
+    let integer_type = parse_satay_integer_type(schema, &context)?;
+    validate_satay_integer_type(schema, parse_as, integer_type, &context)?;
+    if let Some(parse_as @ (ParseAs::IntegerRange | ParseAs::NumberRange)) = parse_as {
+        if schema.get("type").and_then(Value::as_str) != Some("string") {
+            return Err(ValidationError::SatayParseAsRequiresString {
+                context,
+                parse_as: satay_parse_as_wire(parse_as).to_owned(),
+                kind: schema
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("missing")
+                    .to_owned(),
+            });
+        }
+
+        let scalar = parse_range_scalar(schema, parse_as, integer_type, &context)?;
+        if nullable {
+            let inner =
+                registry.inline_range_ref(&format!("{schema_name} value"), description, scalar);
+            return Ok(ComponentKind::Alias(TypeRef::Nullable(Box::new(inner))));
+        }
+
+        return Ok(ComponentKind::Range(RangeType {
+            rust_name,
+            description,
+            scalar,
+        }));
+    }
+
     let base = parse_type_ref_base(schema, &context, registry, Some(schema_name))?;
     let validation = parse_validation(schema, &base, &context)?;
 
@@ -495,20 +546,21 @@ fn parse_type_ref_base(
     type_name_hint: Option<&str>,
 ) -> Result<TypeRef, ValidationError> {
     let schema_type = schema.get("type").and_then(Value::as_str);
+    let description = optional_description(schema);
     let parse_as = parse_satay_parse_as(schema, context)?;
     let integer_type = parse_satay_integer_type(schema, context)?;
-    if let Some(integer_type) = integer_type
-        && schema_type != Some("integer")
-    {
-        return Err(ValidationError::SatayIntegerTypeRequiresInteger {
-            context: context.to_owned(),
-            integer_type: satay_integer_type_wire(integer_type).to_owned(),
-            kind: schema_type.unwrap_or("missing").to_owned(),
-        });
-    }
+    validate_satay_integer_type(schema, parse_as, integer_type, context)?;
 
     if let Some(parse_as) = parse_as {
         match (schema_type, parse_as) {
+            (Some("string"), ParseAs::IntegerRange | ParseAs::NumberRange) => {
+                let scalar = parse_range_scalar(schema, parse_as, integer_type, context)?;
+                return Ok(registry.inline_range_ref(
+                    type_name_hint.unwrap_or(context),
+                    description,
+                    scalar,
+                ));
+            }
             (Some("string"), parse_as) => return Ok(TypeRef::ParsedString(parse_as)),
             (Some("integer"), ParseAs::Bool) => return Ok(TypeRef::ParsedInteger(parse_as)),
             _ => {
@@ -592,6 +644,7 @@ fn parse_validation(
         TypeRef::Array(_) => parse_array_validation(schema, context),
         TypeRef::ParsedString(_)
         | TypeRef::ParsedInteger(_)
+        | TypeRef::Range(_)
         | TypeRef::Bool
         | TypeRef::Named(_)
         | TypeRef::Constrained { .. }
@@ -648,6 +701,57 @@ fn parse_satay_integer_type(
     })
 }
 
+fn validate_satay_integer_type(
+    schema: &Map<String, Value>,
+    parse_as: Option<ParseAs>,
+    integer_type: Option<IntegerType>,
+    context: &str,
+) -> Result<(), ValidationError> {
+    let Some(integer_type) = integer_type else {
+        return Ok(());
+    };
+
+    let schema_type = schema.get("type").and_then(Value::as_str);
+    let allowed = schema_type == Some("integer")
+        || matches!(
+            (schema_type, parse_as),
+            (Some("string"), Some(ParseAs::IntegerRange))
+        );
+    if allowed {
+        return Ok(());
+    }
+
+    Err(ValidationError::SatayIntegerTypeRequiresInteger {
+        context: context.to_owned(),
+        integer_type: satay_integer_type_wire(integer_type).to_owned(),
+        kind: schema_type.unwrap_or("missing").to_owned(),
+    })
+}
+
+fn parse_range_scalar(
+    schema: &Map<String, Value>,
+    parse_as: ParseAs,
+    integer_type: Option<IntegerType>,
+    context: &str,
+) -> Result<RangeScalar, ValidationError> {
+    match parse_as {
+        ParseAs::IntegerRange => Ok(RangeScalar::Integer(parse_integer_type(
+            schema,
+            context,
+            integer_type,
+        )?)),
+        ParseAs::NumberRange => match schema.get("format").and_then(Value::as_str) {
+            Some("float") => Ok(RangeScalar::F32),
+            Some("double") | None => Ok(RangeScalar::F64),
+            Some(format) => Err(ValidationError::UnsupportedNumberFormat {
+                context: context.to_owned(),
+                format: format.to_owned(),
+            }),
+        },
+        _ => unreachable!("range scalar requires a range parse-as value"),
+    }
+}
+
 fn parse_satay_treat_error_as_none(schema: &Value, context: &str) -> Result<bool, ValidationError> {
     let Some(obj) = schema.as_object() else {
         return Ok(false);
@@ -680,6 +784,8 @@ fn satay_parse_as_wire(parse_as: ParseAs) -> &'static str {
         ParseAs::F64 => "f64",
         ParseAs::Bool => "bool",
         ParseAs::OffsetDateTime => "offset-datetime",
+        ParseAs::IntegerRange => "integer-range",
+        ParseAs::NumberRange => "number-range",
     }
 }
 
@@ -2140,6 +2246,8 @@ components:
         - monitored
         - numericMonitored
         - estimatedArrival
+        - frequency
+        - ratio
       properties:
         stop:
           type: string
@@ -2166,6 +2274,17 @@ components:
           type: string
           x-satay:
             parse-as: offset-datetime
+        frequency:
+          type: string
+          minimum: 1
+          maximum: 60
+          x-satay:
+            parse-as: integer-range
+        ratio:
+          type: string
+          format: float
+          x-satay:
+            parse-as: number-range
 "#,
         );
 
@@ -2195,6 +2314,20 @@ components:
                 assert_eq!(
                     field(fields, "estimatedArrival").ty,
                     TypeRef::ParsedString(ParseAs::OffsetDateTime)
+                );
+                assert_eq!(
+                    field(fields, "frequency").ty,
+                    TypeRef::Range(RangeTypeRef {
+                        rust_name: "ArrivalFrequency".to_owned(),
+                        scalar: RangeScalar::Integer(IntegerType::U8),
+                    })
+                );
+                assert_eq!(
+                    field(fields, "ratio").ty,
+                    TypeRef::Range(RangeTypeRef {
+                        rust_name: "ArrivalRatio".to_owned(),
+                        scalar: RangeScalar::F32,
+                    })
                 );
             }
             other => panic!("expected Arrival struct, got {other:?}"),

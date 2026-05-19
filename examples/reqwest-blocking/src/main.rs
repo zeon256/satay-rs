@@ -3,7 +3,7 @@ include!(concat!(env!("OUT_DIR"), "/satay_generated.rs"));
 use std::env;
 use std::error::Error;
 
-use generated::{Api, GetBusArrivalResponse};
+use generated::{Api, BusServiceNumber, GetBusArrivalResponse};
 use satay_reqwest::ReqwestBlockingActionExt;
 use satay_reqwest::reqwest::blocking;
 
@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let api = Api::new().account_key(account_key);
     let mut action = api.get_bus_arrival(bus_stop_code);
     if let Some(service_no) = service_no {
-        action = action.service_no(service_no);
+        action = action.service_no(BusServiceNumber::try_from(service_no)?);
     }
 
     let response = action.send_with(&blocking::Client::new())?;

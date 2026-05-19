@@ -1363,6 +1363,7 @@ version = "0.0.0"
 dependencies = [
  "http",
  "nutype",
+ "regex",
  "reqwest",
  "satay-codegen",
  "satay-reqwest",
@@ -1377,6 +1378,7 @@ version = "0.0.0"
 dependencies = [
  "http",
  "nutype",
+ "regex",
  "reqwest",
  "satay-codegen",
  "satay-runtime",
@@ -1392,6 +1394,7 @@ dependencies = [
  "futures-util",
  "http",
  "nutype",
+ "regex",
  "satay-codegen",
  "satay-runtime",
  "serde",
@@ -1407,6 +1410,7 @@ version = "0.0.0"
 dependencies = [
  "http",
  "nutype",
+ "regex",
  "satay-codegen",
  "satay-runtime",
  "satay-ureq",

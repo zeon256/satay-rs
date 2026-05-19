@@ -7,7 +7,8 @@ use crate::ident::type_ident;
 use crate::model::{
     Api, ApiKeyLocation, ApiKeySecurityScheme, Component, ComponentKind, ConstrainedType,
     EnumVariant, Field, FloatLimit, IntegerLimit, IntegerType, Operation, Parameter,
-    ParameterLocation, ParseAs, PathSegment, ResponseCase, TypeRef, Validation, is_array_type,
+    ParameterLocation, ParseAs, PathSegment, RangeScalar, RangeType, ResponseCase, TypeRef,
+    Validation, is_array_type,
 };
 
 const PREAMBLE: &str = "\
@@ -193,11 +194,19 @@ fn render_top_mod(api: &Api) -> syn::File {
 
 fn render_types_file(api: &Api) -> syn::File {
     let mut items = Vec::new();
-    if api
+    let has_enum = api
         .components
         .iter()
-        .any(|component| matches!(component.kind, ComponentKind::Enum(_)))
-    {
+        .any(|component| matches!(component.kind, ComponentKind::Enum(_)));
+    let has_range = api
+        .components
+        .iter()
+        .any(|component| matches!(component.kind, ComponentKind::Range(_)));
+    if has_range {
+        items.push(parse_quote!(
+            use std::{convert, fmt};
+        ));
+    } else if has_enum {
         items.push(parse_quote!(
             use std::fmt;
         ));
@@ -642,6 +651,9 @@ fn collect_type_refs(ty: &TypeRef, names: &mut Vec<Ident>) {
         }
         TypeRef::Array(inner) => collect_type_refs(inner, names),
         TypeRef::Nullable(inner) => collect_type_refs(inner, names),
+        TypeRef::Range(range_type) => {
+            names.push(ident(&range_type.rust_name));
+        }
         TypeRef::String
         | TypeRef::ParsedString(_)
         | TypeRef::ParsedInteger(_)
@@ -667,6 +679,7 @@ fn render_component(component: &Component, items: &mut Vec<syn::Item>) {
             component.description.as_deref(),
             variants,
         )),
+        ComponentKind::Range(range_type) => items.extend(render_range_type(range_type)),
         ComponentKind::Alias(ty) => {
             let name = ident(&component.rust_name);
             let ty = rust_type(ty);
@@ -695,6 +708,56 @@ fn render_constrained_type(constrained_type: &ConstrainedType) -> syn::ItemStruc
         )]
         pub struct #name(#inner);
     )
+}
+
+fn render_range_type(range_type: &RangeType) -> Vec<syn::Item> {
+    let name = ident(&range_type.rust_name);
+    let scalar = range_scalar_rust_type(range_type.scalar);
+    let docs = doc_attrs(range_type.description.as_deref());
+
+    vec![
+        parse_quote!(
+            #(#docs)*
+            #[derive(Debug, Clone, PartialEq)]
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+            #[cfg_attr(feature = "serde", serde(try_from = "String", into = "String"))]
+            pub struct #name {
+                pub min: Option<#scalar>,
+                pub max: Option<#scalar>,
+            }
+        ),
+        parse_quote!(
+            impl #name {
+                pub fn as_wire_string(&self) -> String {
+                    satay_runtime::format_range(&self.min, &self.max)
+                }
+            }
+        ),
+        parse_quote!(
+            impl convert::TryFrom<String> for #name {
+                type Error = satay_runtime::ParseRangeError;
+
+                fn try_from(value: String) -> Result<Self, Self::Error> {
+                    let (min, max) = satay_runtime::parse_range::<#scalar>(&value)?;
+                    Ok(Self { min, max })
+                }
+            }
+        ),
+        parse_quote!(
+            impl From<#name> for String {
+                fn from(value: #name) -> Self {
+                    value.as_wire_string()
+                }
+            }
+        ),
+        parse_quote!(
+            impl fmt::Display for #name {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.write_str(&self.as_wire_string())
+                }
+            }
+        ),
+    ]
 }
 
 fn render_validation(validation: &Validation) -> TokenStream {
@@ -1488,6 +1551,7 @@ fn value_expr(base: syn::Expr, ty: &TypeRef) -> syn::Expr {
             parsed_value_expr(base, *parse_as)
         }
         TypeRef::Named(_) => parse_quote!(#base.as_ref()),
+        TypeRef::Range(_) => parse_quote!(&#base.to_string()),
         TypeRef::Constrained { inner, .. } => constrained_value_expr(base, inner.non_nullable()),
         TypeRef::Integer(_) | TypeRef::F32 | TypeRef::F64 | TypeRef::Bool => {
             parse_quote!(&#base.to_string())
@@ -1498,7 +1562,9 @@ fn value_expr(base: syn::Expr, ty: &TypeRef) -> syn::Expr {
 
 fn constrained_value_expr(base: syn::Expr, inner: &TypeRef) -> syn::Expr {
     match inner {
-        TypeRef::String | TypeRef::Named(_) => parse_quote!(#base.as_ref()),
+        TypeRef::String => parse_quote!(#base.as_ref()),
+        TypeRef::Named(_) => parse_quote!(#base.as_ref()),
+        TypeRef::Range(_) => parse_quote!(&#base.to_string()),
         TypeRef::ParsedString(parse_as) | TypeRef::ParsedInteger(parse_as) => {
             parsed_value_expr(base, *parse_as)
         }
@@ -1525,6 +1591,10 @@ fn rust_type(ty: &TypeRef) -> syn::Type {
             let item = rust_type(item);
             parse_quote!(Vec<#item>)
         }
+        TypeRef::Range(range_type) => {
+            let name = ident(&range_type.rust_name);
+            parse_quote!(#name)
+        }
         TypeRef::Named(name)
         | TypeRef::Constrained {
             rust_name: name, ..
@@ -1536,6 +1606,14 @@ fn rust_type(ty: &TypeRef) -> syn::Type {
             let inner = rust_type(inner);
             parse_quote!(Option<#inner>)
         }
+    }
+}
+
+fn range_scalar_rust_type(scalar: RangeScalar) -> syn::Type {
+    match scalar {
+        RangeScalar::Integer(integer_type) => integer_rust_type(integer_type),
+        RangeScalar::F32 => parse_quote!(f32),
+        RangeScalar::F64 => parse_quote!(f64),
     }
 }
 
@@ -1566,6 +1644,9 @@ fn parsed_value_expr(base: syn::Expr, parse_as: ParseAs) -> syn::Expr {
         | ParseAs::F32
         | ParseAs::F64 => parse_quote!(&#base.to_string()),
         ParseAs::Bool => parse_quote!(satay_runtime::format_bool(&#base)),
+        ParseAs::IntegerRange | ParseAs::NumberRange => {
+            unreachable!("range parse-as uses generated range types")
+        }
     }
 }
 
@@ -1583,6 +1664,9 @@ fn parse_as_rust_type(parse_as: ParseAs) -> syn::Type {
         ParseAs::F64 => parse_quote!(f64),
         ParseAs::Bool => parse_quote!(bool),
         ParseAs::OffsetDateTime => parse_quote!(satay_runtime::OffsetDateTime),
+        ParseAs::IntegerRange | ParseAs::NumberRange => {
+            unreachable!("range parse-as uses generated range types")
+        }
     }
 }
 
@@ -1600,6 +1684,9 @@ fn parse_as_string_serde_module(parse_as: ParseAs) -> &'static str {
         ParseAs::F64 => "satay_runtime::serde_string::as_f64",
         ParseAs::Bool => "satay_runtime::serde_string::as_bool",
         ParseAs::OffsetDateTime => "satay_runtime::serde_string::as_offset_datetime",
+        ParseAs::IntegerRange | ParseAs::NumberRange => {
+            unreachable!("range parse-as uses generated range types")
+        }
     }
 }
 
@@ -1616,7 +1703,9 @@ fn parse_as_integer_serde_module(parse_as: ParseAs) -> &'static str {
         | ParseAs::I64
         | ParseAs::F32
         | ParseAs::F64
-        | ParseAs::OffsetDateTime => unreachable!("only bool can parse from integer"),
+        | ParseAs::OffsetDateTime
+        | ParseAs::IntegerRange
+        | ParseAs::NumberRange => unreachable!("only bool can parse from integer"),
     }
 }
 
