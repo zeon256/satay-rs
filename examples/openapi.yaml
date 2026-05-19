@@ -33,7 +33,7 @@ paths:
           required: true
           description: Bus stop reference code.
           schema:
-            type: string
+            $ref: "#/components/schemas/BusStopCode"
           example: "83139"
 
         - name: ServiceNo
@@ -254,19 +254,15 @@ components:
               "FLAT FARE $2.00": FlatFareTwoDollar
 
         OriginCode:
-          type: string
+          $ref: "#/components/schemas/BusStopCode"
           description: Bus stop code for first bus stop.
           example: "64009"
-          x-satay:
-            parse-as: u32
 
         DestinationCode:
-          type: string
+          $ref: "#/components/schemas/BusStopCode"
           description: >
             Bus stop code for last bus stop. Similar as first stop for loop services.
           example: "64009"
-          x-satay:
-            parse-as: u32
 
         AM_Peak_Freq:
           type: string
@@ -338,11 +334,9 @@ components:
           example: "https://datamall2.mytransport.sg/ltaodataservice/v3/BusArrival"
 
         BusStopCode:
-          type: string
+          $ref: "#/components/schemas/BusStopCode"
           description: Queried bus stop reference code.
           example: "83139"
-          x-satay:
-            parse-as: u32
 
         Services:
           type: array
@@ -398,6 +392,12 @@ components:
       pattern: '^[a-zA-Z0-9]+$'
       example: "107M"
 
+    BusStopCode:
+      type: string
+      description: Unique 5-digit bus stop reference code.
+      pattern: '^\d{5}$'
+      example: "83139"
+
     BusArrivalTiming:
       type: object
       additionalProperties: false
@@ -414,22 +414,18 @@ components:
         - Monitored
       properties:
         OriginCode:
-          type: string
+          $ref: "#/components/schemas/BusStopCode"
           description: >
             Reference code of the first bus stop where this bus started its service.
             May be an empty string when no subsequent bus data is available.
           example: "77009"
-          x-satay:
-            parse-as: u32
 
         DestinationCode:
-          type: string
+          $ref: "#/components/schemas/BusStopCode"
           description: >
             Reference code of the last bus stop where this bus will terminate its service.
             May be an empty string when no subsequent bus data is available.
           example: "77131"
-          x-satay:
-            parse-as: u32
 
         EstimatedArrival:
           type: string

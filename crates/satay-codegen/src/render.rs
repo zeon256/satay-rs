@@ -1126,8 +1126,12 @@ fn render_input_impl(operation: &Operation) -> syn::ItemImpl {
     let initializers = fields.iter().map(|field| {
         let name = ident(&field.rust_name);
         if field.required {
-            let value = input_builder_value(quote!(#name), &field.ty);
-            quote!(#name: #value)
+            if field.ty == TypeRef::String {
+                let value = input_builder_value(quote!(#name), &field.ty);
+                quote!(#name: #value)
+            } else {
+                quote!(#name)
+            }
         } else {
             quote!(#name: None)
         }

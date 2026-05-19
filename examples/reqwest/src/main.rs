@@ -4,7 +4,7 @@ use generated::{Api, GetBusArrivalResponse};
 use satay_reqwest::{ReqwestActionExt, reqwest};
 use std::env;
 
-use crate::generated::BusServiceNumber;
+use crate::generated::{BusServiceNumber, BusStopCode};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -12,7 +12,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let client = reqwest::Client::new();
     let response = api
-        .get_bus_arrival("83139")
+        .get_bus_arrival(BusStopCode::try_new("83139")?)
         .service_no(BusServiceNumber::try_new("15")?)
         .send_with(&client)
         .await?;
