@@ -46,11 +46,10 @@ pub(super) fn validate_type_schema(
         return Ok(());
     }
 
-    if parse_as.is_none() && schema_type == Some(OasSchemaType::Array) {
-        if let Some(items) = schema.items.as_deref() {
+    if parse_as.is_none() && schema_type == Some(OasSchemaType::Array)
+        && let Some(items) = schema.items.as_deref() {
             validate_type_schema(items, &format!("{context} items"), false)?;
         }
-    }
 
     Ok(())
 }
@@ -101,11 +100,10 @@ fn validate_component_alias_satay(
 ) -> Result<(), ValidationError> {
     let parse_as = validate_type_satay(schema, schema_type, context, false)?;
 
-    if parse_as.is_none() && schema_type == Some(OasSchemaType::Array) {
-        if let Some(items) = schema.items.as_deref() {
+    if parse_as.is_none() && schema_type == Some(OasSchemaType::Array)
+        && let Some(items) = schema.items.as_deref() {
             validate_type_schema(items, &format!("{context} items"), false)?;
         }
-    }
 
     Ok(())
 }
