@@ -764,6 +764,152 @@ components:
     }
 
     #[test]
+    fn validates_x_satay_parse_as_on_reachable_operation_schemas() {
+        let err = parse_invalid(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /arrival:
+    get:
+      operationId: getArrival
+      parameters:
+        - name: includeDetails
+          in: query
+          schema:
+            type: boolean
+            x-satay:
+              parse-as: u8
+      responses:
+        '204':
+          description: No content
+"#,
+        );
+
+        match err {
+            ValidationError::SatayParseAsRequiresString {
+                context,
+                parse_as,
+                kind,
+            } => {
+                assert_eq!(context, "parameter `includeDetails`");
+                assert_eq!(parse_as, "u8");
+                assert_eq!(kind, "boolean");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn validates_x_satay_integer_type_on_reachable_request_body_schema() {
+        let err = parse_invalid(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /arrival:
+    post:
+      operationId: createArrival
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: string
+              x-satay:
+                integer-type: u8
+      responses:
+        '204':
+          description: No content
+"#,
+        );
+
+        match err {
+            ValidationError::SatayIntegerTypeRequiresInteger {
+                context,
+                integer_type,
+                kind,
+            } => {
+                assert_eq!(context, "operation `createArrival` requestBody");
+                assert_eq!(integer_type, "u8");
+                assert_eq!(kind, "string");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn validates_x_satay_treat_error_as_none_on_struct_properties() {
+        let err = parse_invalid(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /arrival:
+    get:
+      operationId: getArrival
+      responses:
+        '200':
+          description: Arrival
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Arrival'
+components:
+  schemas:
+    Arrival:
+      type: object
+      properties:
+        timing:
+          type: string
+          x-satay:
+            treat-error-as-none: yes
+"#,
+        );
+
+        match err {
+            ValidationError::InvalidBooleanKeyword { context, keyword } => {
+                assert_eq!(context, "property `Arrival.timing`");
+                assert_eq!(keyword, "treat-error-as-none");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
+    fn skips_x_satay_validation_for_unreachable_component_parameters() {
+        parse_valid(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  parameters:
+    BrokenButUnused:
+      name: includeDetails
+      in: query
+      schema:
+        type: boolean
+        x-satay:
+          parse-as: u8
+"#,
+        );
+    }
+
+    #[test]
     fn rejects_invalid_validation_bounds_before_rendering() {
         let err = parse_invalid(
             r#"
