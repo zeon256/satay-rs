@@ -25,7 +25,7 @@
 
 ## Features
 
-- Generates from OpenAPI 3.0 documents
+- Generates from OpenAPI 3.1 documents
 - Sans-IO design from the ground up, with optional transport adapters for `reqwest` and `ureq`
 - Validation newtypes for OpenAPI string, number, integer, and array constraints
 - Automatic number type deduction from specified bounds (i.e. if `maximum` is less than `u8::MAX`, the generated type will be a `u8` newtype instead of `u64`)

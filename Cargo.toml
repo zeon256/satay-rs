@@ -23,6 +23,7 @@ argh = "0.1"
 fast-float2 = "0.2"
 http = "1"
 indexmap = "2"
+oas3 = { version = "0.22", features = ["yaml-spec"] }
 prettyplease = "0.2"
 proc-macro2 = "1"
 quote = "1"
