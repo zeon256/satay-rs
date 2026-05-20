@@ -23,8 +23,7 @@ EstimatedArrival:
     parse-as: offset-datetime
 
 FirstBus:
-  type: string
-  nullable: true
+  type: [string, "null"]
   x-satay:
     parse-as: time
 
