@@ -1,3 +1,5 @@
+use std::error;
+
 /// Errors that can occur while parsing an OpenAPI document.
 ///
 /// This enum is [`non_exhaustive`](https://doc.rust-lang.org/reference/attributes/type_system.html)
@@ -10,6 +12,12 @@ pub enum ParseError {
     /// Error message: `failed to parse OpenAPI YAML/JSON: {0}`
     #[error("failed to parse OpenAPI YAML/JSON: {0}")]
     Document(#[source] serde_yaml::Error),
+
+    /// Failed to parse the OpenAPI 3.1 document model.
+    ///
+    /// Error message: `failed to parse OpenAPI 3.1 document: {0}`
+    #[error("failed to parse OpenAPI 3.1 document: {0}")]
+    OpenApi31Document(#[source] Box<dyn error::Error + Send + Sync + 'static>),
 
     /// Failed to normalize the parsed OpenAPI document (e.g. during internal JSON conversion).
     ///

@@ -8,8 +8,8 @@ pub enum ValidationError {
     // -- Document and component shape validation --
     /// The OpenAPI version is not supported.
     ///
-    /// Error message: `unsupported OpenAPI version `{version}`; Satay MVP supports OpenAPI 3.0`
-    #[error("unsupported OpenAPI version `{version}`; Satay MVP supports OpenAPI 3.0")]
+    /// Error message: `unsupported OpenAPI version `{version}`; Satay supports OpenAPI 3.1`
+    #[error("unsupported OpenAPI version `{version}`; Satay supports OpenAPI 3.1")]
     UnsupportedOpenApiVersion { version: String },
 
     /// A schema component uses a type that is not supported.
@@ -191,6 +191,28 @@ pub enum ValidationError {
     /// Error message: `{context} must declare `type`, `$ref`, or `enum``
     #[error("{context} must declare `type`, `$ref`, or `enum`")]
     MissingSchemaType { context: String },
+
+    /// A JSON Schema boolean schema was used; Satay has no IR equivalent yet.
+    ///
+    /// Error message: `{context} is a boolean schema; boolean JSON Schemas are not supported yet`
+    #[error("{context} is a boolean schema; boolean JSON Schemas are not supported yet")]
+    UnsupportedBooleanSchema { context: String },
+
+    /// A schema type array contains more than one non-null type.
+    ///
+    /// Error message: `{context} declares multiple non-null schema types; Satay supports at most one plus null`
+    #[error(
+        "{context} declares multiple non-null schema types; Satay supports at most one plus null"
+    )]
+    MultipleNonNullSchemaTypesUnsupported { context: String },
+
+    /// A schema uses the OpenAPI 3.0 `nullable` keyword.
+    ///
+    /// Error message: `{context} uses `nullable`; OpenAPI 3.1 represents nullability as `type: [T, "null"]``
+    #[error(
+        "{context} uses `nullable`; OpenAPI 3.1 represents nullability as `type: [T, \"null\"]`"
+    )]
+    UnsupportedNullableKeyword { context: String },
 
     /// A schema uses a composition keyword (`allOf`, `anyOf`, `oneOf`) that is outside MVP scope.
     ///
@@ -440,6 +462,16 @@ pub enum ValidationError {
     UnusedPathParameter { path: String, name: String },
 
     // -- Reference resolution and JSON shape validation --
+    /// A `$ref` object contains a sibling field whose semantics Satay does not implement.
+    ///
+    /// Error message: `{context} reference `{reference}` has unsupported sibling `{sibling}``
+    #[error("{context} reference `{reference}` has unsupported sibling `{sibling}`")]
+    RefSiblingUnsupported {
+        context: String,
+        reference: String,
+        sibling: String,
+    },
+
     /// A `$ref` could not be resolved because the referenced component failed validation.
     ///
     /// Error message: `failed to resolve reference `{reference}` in {context}: {source}`

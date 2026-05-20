@@ -314,20 +314,6 @@ pub(crate) fn is_array_type(ty: &TypeRef) -> bool {
 }
 
 impl HttpMethod {
-    pub(crate) fn from_key(key: &str) -> Option<Self> {
-        match key {
-            "delete" => Some(Self::Delete),
-            "get" => Some(Self::Get),
-            "head" => Some(Self::Head),
-            "options" => Some(Self::Options),
-            "patch" => Some(Self::Patch),
-            "post" => Some(Self::Post),
-            "put" => Some(Self::Put),
-            "trace" => Some(Self::Trace),
-            _ => None,
-        }
-    }
-
     pub(crate) fn rust_const(self) -> &'static str {
         match self {
             Self::Delete => "DELETE",

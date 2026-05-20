@@ -80,7 +80,10 @@ fn simple_fixture_generates_expected_file_structure() {
 fn descriptions_generate_rustdoc_comments() {
     let files = satay_codegen::generate(
         r#"
-openapi: 3.0.3
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
 paths:
   /users/{userId}:
     get:
@@ -154,7 +157,10 @@ components:
 fn server_security_and_api_action_helpers_are_generated() {
     let files = satay_codegen::generate(
         r#"
-openapi: 3.0.3
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
 servers:
   - url: https://api.example.test/v1
 paths:
@@ -459,6 +465,21 @@ fn generated_constrained_fixture_enforces_openapi_bounds() {
             .contents
             .contains("validate(len_char_min = 1, len_char_max = 80)")
     );
+    assert!(
+        types_rs
+            .contents
+            .contains("validate(len_char_min = 1, len_char_max = 40)")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("validate(finite, greater = 0.0, less = 1.0)")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("pub nickname: Option<UserNickname>,")
+    );
     assert!(types_rs.contents.contains("regex = \"^[a-zA-Z0-9-]+$\""));
 
     let temp = tempfile::tempdir().expect("create temp crate");
@@ -485,6 +506,11 @@ mod tests {
         assert!(GetUserLimitParameter::try_new(0).is_err());
         assert!(UserName::try_new(String::new()).is_err());
         assert!(UserName::try_new("a".repeat(81)).is_err());
+        assert!(UserNickname::try_new(String::new()).is_err());
+        assert!(UserNickname::try_new("a".repeat(41)).is_err());
+        assert!(UserScore::try_new(0.0).is_err());
+        assert!(UserScore::try_new(1.0).is_err());
+        assert!(UserScore::try_new(0.5).is_ok());
         assert!(GetUserTagsParameter::try_new(Vec::new()).is_err());
     }
 
@@ -513,12 +539,27 @@ mod tests {
         assert_eq!(parts.uri, "/users/user-42?limit=10&tags=rs");
     }
 
+
+    #[test]
+    fn response_deserialization_accepts_31_nullable_type_arrays() {
+        let response = satay_runtime::ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: br#"{"id":"42","name":"Ada","nickname":null,"age":36,"score":0.5}"#.to_vec(),
+        };
+
+        let decoded = decode_get_user_response(response).expect("nullable nickname accepted");
+        match decoded {
+            GetUserResponse::Ok(user) => assert!(user.nickname.is_none()),
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
     #[test]
     fn response_deserialization_enforces_bounds() {
         let response = satay_runtime::ResponseParts {
             status: http::StatusCode::OK,
             headers: http::HeaderMap::new(),
-            body: br#"{"id":"42","name":"Ada","age":131,"score":0.5}"#.to_vec(),
+            body: br#"{"id":"42","name":"Ada","nickname":null,"age":131,"score":0.5}"#.to_vec(),
         };
 
         let err = decode_get_user_response(response).expect_err("invalid age rejected");
@@ -567,7 +608,10 @@ mod tests {
 fn integer_bounds_infer_smallest_rust_type_and_can_be_overridden() {
     let files = satay_codegen::generate(
         r#"
-openapi: 3.0.3
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
 paths:
   /buses:
     get:
@@ -628,7 +672,10 @@ components:
 fn open_ended_non_negative_unformatted_integer_parameters_use_unsigned() {
     let files = satay_codegen::generate(
         r#"
-openapi: 3.0.3
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
 paths:
   /buses:
     get:
@@ -674,7 +721,10 @@ paths:
 fn x_satay_parse_as_generates_wire_backed_deserializers() {
     let files = satay_codegen::generate(
         r#"
-openapi: 3.0.3
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
 paths:
   /readings:
     get:
@@ -729,13 +779,11 @@ components:
           x-satay:
             parse-as: offset-datetime
         startsAt:
-          type: string
-          nullable: true
+          type: [string, "null"]
           x-satay:
             parse-as: time
         noServiceAt:
-          type: string
-          nullable: true
+          type: [string, "null"]
           x-satay:
             parse-as: time
         aliasId:
@@ -922,10 +970,31 @@ mod tests {
 }
 
 #[test]
-fn nullable_parameters_are_rejected_instead_of_generating_invalid_rust() {
+fn openapi_30_documents_are_rejected() {
     let err = satay_codegen::generate(
         r#"
 openapi: 3.0.3
+info:
+  title: OpenAPI 3.0 API
+  version: 1.0.0
+paths: {}
+"#,
+    )
+    .expect_err("OpenAPI 3.0 documents are unsupported");
+
+    match err {
+        Error::Validation(ValidationError::UnsupportedOpenApiVersion { version }) => {
+            assert_eq!(version, "3.0.3");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn nullable_parameters_are_rejected_instead_of_generating_invalid_rust() {
+    let err = satay_codegen::generate(
+        r#"
+openapi: 3.1.0
 info:
   title: Nullable parameter
   version: 1.0.0
@@ -938,8 +1007,7 @@ paths:
           in: path
           required: true
           schema:
-            type: string
-            nullable: true
+            type: [string, "null"]
       responses:
         '204':
           description: No content
@@ -959,7 +1027,7 @@ paths:
 fn default_response_bodies_are_rejected_instead_of_silently_dropped() {
     let err = satay_codegen::generate(
         r#"
-openapi: 3.0.3
+openapi: 3.1.0
 info:
   title: Default response
   version: 1.0.0
@@ -1031,7 +1099,7 @@ fn inline_enum_generates_proper_enum_types() {
 fn x_satay_enum_variants_generate_named_variants() {
     let files = satay_codegen::generate(
         r#"
-openapi: 3.0.3
+openapi: 3.1.0
 info:
   title: Enum Variants API
   version: 1.0.0
