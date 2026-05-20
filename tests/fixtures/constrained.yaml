@@ -1,4 +1,4 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
   title: Constrained API
   version: 1.0.0
@@ -58,6 +58,7 @@ components:
       required:
         - id
         - name
+        - nickname
         - age
         - score
       properties:
@@ -68,6 +69,10 @@ components:
           type: string
           minLength: 1
           maxLength: 80
+        nickname:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 40
         age:
           $ref: '#/components/schemas/Age'
         email:
@@ -75,5 +80,5 @@ components:
         score:
           type: number
           format: float
-          minimum: 0
-          maximum: 1
+          exclusiveMinimum: 0
+          exclusiveMaximum: 1
