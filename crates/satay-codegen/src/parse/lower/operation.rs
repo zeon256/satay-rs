@@ -9,14 +9,13 @@ use oas3::{
     },
 };
 
-use super::TypeRegistry;
-use super::helpers::{
-    json_media_type, optional_description,
-};
-use super::reference::{
+use super::super::helpers::{json_media_type, optional_description};
+use super::super::reference::{
     resolve_parameter, resolve_path_item, resolve_request_body, resolve_response,
     resolve_security_scheme,
 };
+use super::super::registry::TypeRegistry;
+use super::super::resolve::ResolvedDocument;
 use super::schema::parse_type_ref;
 use crate::error::ValidationError;
 use crate::ident::{field_ident, function_ident, response_variant_ident, type_ident, unique_ident};
@@ -26,7 +25,7 @@ use crate::model::{
 };
 
 pub(super) fn parse_api_key_security_schemes(
-    document: &super::Document,
+    document: &ResolvedDocument<'_>,
 ) -> Result<Vec<ApiKeySecurityScheme>, ValidationError> {
     let Some(components) = document.spec.components.as_ref() else {
         return Ok(vec![]);
@@ -66,7 +65,7 @@ pub(super) fn parse_api_key_security_schemes(
 }
 
 pub(super) fn parse_operations(
-    document: &super::Document,
+    document: &ResolvedDocument<'_>,
     registry: &mut TypeRegistry,
 ) -> Result<Vec<SatayOperation>, ValidationError> {
     let spec = &document.spec;
@@ -75,11 +74,7 @@ pub(super) fn parse_operations(
     let mut operations = vec![];
 
     for (path, path_item) in paths {
-        let path_item = resolve_path_item(
-            document,
-            path_item,
-            &format!("path item `{path}`"),
-        )?;
+        let path_item = resolve_path_item(document, path_item, &format!("path item `{path}`"))?;
 
         let path_parameter_prefix = type_ident(&format!("{path} parameter"));
         let path_parameters = parse_parameter_list(
@@ -176,7 +171,7 @@ pub(super) fn parse_operations(
 
 #[allow(clippy::too_many_arguments)]
 fn parse_path_operation(
-    document: &super::Document,
+    document: &ResolvedDocument<'_>,
     operations: &mut Vec<SatayOperation>,
     method: HttpMethod,
     path: &str,
@@ -201,7 +196,7 @@ fn parse_path_operation(
 }
 
 fn parse_operation(
-    document: &super::Document,
+    document: &ResolvedDocument<'_>,
     method: HttpMethod,
     path: &str,
     path_parameters: &[Parameter],
@@ -270,7 +265,7 @@ fn parse_operation(
 }
 
 fn parse_parameter_list(
-    document: &super::Document,
+    document: &ResolvedDocument<'_>,
     parameters: &[ObjectOrReference<OasParameter>],
     context: &str,
     registry: &mut TypeRegistry,
@@ -291,7 +286,7 @@ fn parse_parameter_list(
 }
 
 fn parse_parameter(
-    document: &super::Document,
+    document: &ResolvedDocument<'_>,
     parameter: &ObjectOrReference<OasParameter>,
     context: &str,
     registry: &mut TypeRegistry,
@@ -395,7 +390,7 @@ fn deduplicate_parameter_fields(parameters: &mut [Parameter]) {
 }
 
 fn parse_request_body(
-    document: &super::Document,
+    document: &ResolvedDocument<'_>,
     request_body: Option<&ObjectOrReference<OasRequestBody>>,
     context: &str,
     parameters: &[Parameter],
@@ -447,7 +442,7 @@ fn parse_request_body(
 }
 
 fn parse_responses(
-    document: &super::Document,
+    document: &ResolvedDocument<'_>,
     responses: &OasMap<String, ObjectOrReference<OasResponse>>,
     context: &str,
     registry: &mut TypeRegistry,
@@ -457,11 +452,7 @@ fn parse_responses(
 
     for (status, response) in responses {
         if status == "default" {
-            let response = resolve_response(
-                document,
-                response,
-                &format!("{context} default"),
-            )?;
+            let response = resolve_response(document, response, &format!("{context} default"))?;
             if !response.content.is_empty() {
                 return Err(ValidationError::DefaultResponseBodyUnsupported {
                     context: context.to_owned(),
@@ -484,11 +475,7 @@ fn parse_responses(
             });
         }
 
-        let response = resolve_response(
-            document,
-            response,
-            &format!("{context} {status}"),
-        )?;
+        let response = resolve_response(document, response, &format!("{context} {status}"))?;
 
         let body = if response.content.is_empty() {
             None
@@ -543,7 +530,9 @@ fn parse_path_segments(path: &str) -> Result<Vec<PathSegment>, ValidationError> 
             segments.push(PathSegment::Literal(rest[..open].to_owned()));
         }
 
-        segments.push(PathSegment::Parameter(rest[open + 1..open + 1 + close].to_owned()));
+        segments.push(PathSegment::Parameter(
+            rest[open + 1..open + 1 + close].to_owned(),
+        ));
 
         rest = &rest[open + 1 + close + 1..];
     }

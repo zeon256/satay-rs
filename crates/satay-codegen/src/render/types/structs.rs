@@ -2,8 +2,8 @@ use crate::model::{Api, ComponentKind, Field, TypeRef};
 use syn::parse_quote;
 
 use super::super::{
-    component_kind, doc_attrs, ident, is_nullable_type, lit_str,
-    parse_as_integer_serde_module, parse_as_string_serde_module, rust_field_type,
+    component_kind, doc_attrs, ident, is_nullable_type, lit_str, parse_as_integer_serde_module,
+    parse_as_string_serde_module, rust_field_type,
 };
 
 pub fn render_struct(

@@ -2,9 +2,7 @@ use proc_macro2::{Literal, TokenStream};
 use quote::quote;
 use syn::parse_quote;
 
-use crate::model::{
-    ConstrainedType, FloatLimit, IntegerLimit, Validation,
-};
+use crate::model::{ConstrainedType, FloatLimit, IntegerLimit, Validation};
 
 use super::super::{doc_attrs, ident, lit_str, rust_type};
 

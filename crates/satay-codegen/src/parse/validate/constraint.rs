@@ -4,7 +4,7 @@ use serde_json::Number;
 use crate::error::ValidationError;
 use crate::model::{FloatLimit, IntegerLimit, IntegerType, TypeRef, Validation};
 
-pub(super) fn parse_validation(
+pub(crate) fn parse_validation(
     schema: &OasObjectSchema,
     base: &TypeRef,
     context: &str,
@@ -53,7 +53,7 @@ fn parse_string_validation(
     }
 }
 
-pub(super) fn parse_integer_type(
+pub(crate) fn parse_integer_type(
     schema: &OasObjectSchema,
     context: &str,
     explicit: Option<IntegerType>,
@@ -205,7 +205,7 @@ fn parse_array_validation(
     }
 }
 
-pub(super) fn reject_keyword(
+pub(crate) fn reject_keyword(
     present: bool,
     keyword: &'static str,
     context: &str,

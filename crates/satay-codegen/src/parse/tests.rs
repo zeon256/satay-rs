@@ -1,14 +1,13 @@
 #[cfg(test)]
 #[allow(clippy::module_inception)]
 mod tests {
-    use crate::parse::{parse_api, parse_document};
-    use crate::model::{
-        Api, ApiKeyLocation, Component, ComponentKind,
-        Field, HttpMethod, IntegerLimit, IntegerType, Operation, Parameter,
-        ParameterLocation, ParseAs, PathSegment, RangeScalar, RangeTypeRef,
-        TypeRef, Validation,
-    };
     use crate::error::ValidationError;
+    use crate::model::{
+        Api, ApiKeyLocation, Component, ComponentKind, Field, HttpMethod, IntegerLimit,
+        IntegerType, Operation, Parameter, ParameterLocation, ParseAs, PathSegment, RangeScalar,
+        RangeTypeRef, TypeRef, Validation,
+    };
+    use crate::parse::{parse_api, parse_document};
 
     fn parse_valid(spec: &str) -> Api {
         let document = parse_document(spec).expect("document parses");
@@ -933,6 +932,49 @@ components:
     }
 
     #[test]
+    fn rejects_circular_component_references_during_resolution() {
+        let err = parse_invalid(
+            r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  parameters:
+    A:
+      $ref: '#/components/parameters/B'
+    B:
+      $ref: '#/components/parameters/A'
+"##,
+        );
+
+        match err {
+            ValidationError::ResolveReference {
+                reference,
+                context,
+                source,
+            } => {
+                assert_eq!(reference, "#/components/parameters/B");
+                assert_eq!(context, "parameter `A`");
+                match *source {
+                    ValidationError::CircularReference { reference } => {
+                        assert_eq!(reference, "#/components/parameters/B");
+                    }
+                    other => panic!("unexpected reference source: {other}"),
+                }
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+
+    #[test]
     fn rejects_openapi_30_documents() {
         let err = parse_invalid(
             r#"
@@ -1069,6 +1111,5 @@ components:
             }
             other => panic!("unexpected error: {other}"),
         }
-
     }
 }

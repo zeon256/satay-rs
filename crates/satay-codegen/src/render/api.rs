@@ -3,9 +3,7 @@ use quote::quote;
 use syn::{Ident, Item, parse_quote};
 
 use crate::ident::type_ident;
-use crate::model::{
-    Api, ApiKeyLocation, ApiKeySecurityScheme, Field, Operation, TypeRef,
-};
+use crate::model::{Api, ApiKeyLocation, ApiKeySecurityScheme, Field, Operation, TypeRef};
 
 pub(super) fn render_api_file(api: &Api) -> syn::File {
     let mut items = Vec::new();
@@ -39,7 +37,10 @@ fn build_api_operation_use(api: &Api) -> Option<syn::ItemUse> {
         names.push(super::ident(&operation.input_name));
         names.push(super::ident(&operation.response_name));
         names.push(super::ident(&format!("{}_parts", operation.fn_name)));
-        names.push(super::ident(&format!("decode_{}_response", operation.fn_name)));
+        names.push(super::ident(&format!(
+            "decode_{}_response",
+            operation.fn_name
+        )));
         for field in super::input_fields(operation) {
             collect_type_refs(&field.ty, &mut names);
         }
@@ -155,7 +156,9 @@ fn render_api_operation_method(operation: &Operation) -> TokenStream {
         let ty = super::input_builder_arg_type(&field.ty);
         quote!(#name: #ty)
     });
-    let new_arg_names = required_fields.iter().map(|field| super::ident(&field.rust_name));
+    let new_arg_names = required_fields
+        .iter()
+        .map(|field| super::ident(&field.rust_name));
 
     quote!(
         #(#docs)*

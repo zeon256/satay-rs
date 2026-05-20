@@ -4,10 +4,10 @@ use syn::parse_quote;
 
 use crate::model::{Field, Operation, TypeRef};
 
+use super::super::types::structs;
 use super::super::{
     ident, input_builder_arg_type, input_builder_value, input_fields, input_setter_name,
 };
-use super::super::types::structs;
 
 pub(super) fn render_input(operation: &Operation) -> syn::ItemStruct {
     let input_fields = input_fields(operation);
@@ -66,10 +66,7 @@ pub(super) fn render_input_impl(operation: &Operation) -> syn::ItemImpl {
 }
 
 pub(super) fn render_input_default_impl(operation: &Operation) -> Option<syn::ItemImpl> {
-    if input_fields(operation)
-        .iter()
-        .any(|field| field.required)
-    {
+    if input_fields(operation).iter().any(|field| field.required) {
         return None;
     }
 

@@ -429,9 +429,9 @@ mod types;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::PathSegment;
     use crate::model::{Component, ComponentKind, HttpMethod, RequestBody, ResponseCase};
     use syn::{Fields, GenericArgument, Item, PathArguments, Type};
-    use crate::model::PathSegment;
 
     #[test]
     fn add_blank_lines_between_items_inserts_line_after_closing_brace() {
@@ -455,8 +455,7 @@ mod tests {
 
     #[test]
     fn add_blank_lines_between_items_inserts_line_before_attribute() {
-        let input =
-            "pub struct Foo {\n    x: i32,\n}\n#[derive(Clone)]\npub struct Bar {\n    y: i32,\n}\n";
+        let input = "pub struct Foo {\n    x: i32,\n}\n#[derive(Clone)]\npub struct Bar {\n    y: i32,\n}\n";
         let result = add_blank_lines_between_items(input);
         assert_eq!(
             result,
