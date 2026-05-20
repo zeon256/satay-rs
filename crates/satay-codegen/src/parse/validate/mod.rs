@@ -1,4 +1,7 @@
 pub(crate) mod constraint;
+mod operation;
+mod satay;
+mod schema;
 
 use super::resolve::ResolvedDocument;
 use crate::error::ValidationError;
@@ -11,6 +14,9 @@ pub(crate) fn validate_document(document: &ResolvedDocument<'_>) -> Result<(), V
             version: openapi.to_owned(),
         });
     }
+
+    schema::validate_components(document)?;
+    operation::validate_operations(document)?;
 
     Ok(())
 }
