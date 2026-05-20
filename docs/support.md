@@ -1,12 +1,12 @@
 # Supported OpenAPI Subset
 
-Satay targets OpenAPI 3.0.x and a small, typed subset.
+Satay targets OpenAPI 3.1.x and a small, typed subset.
 
 ## Current Support
 
 - YAML or JSON OpenAPI documents.
 - `components.schemas` as Rust structs, string enums, primitive aliases, and constrained newtypes.
-- Schema types: `string`, `integer` (`int32`, `int64`, or no format, with Rust integer inference from bounds), `number` (`float`, `double`, or no format), `boolean`, arrays, nullable values, and local `#/components/schemas/...` references. Unformatted non-negative open-ended integers infer `u64`.
+- Schema types: `string`, `integer` (`int32`, `int64`, or no format, with Rust integer inference from bounds), `number` (`float`, `double`, or no format), `boolean`, arrays, nullable values expressed as `type: [T, "null"]`, and local `#/components/schemas/...` references. Unformatted non-negative open-ended integers infer `u64`.
 - Operations for standard HTTP methods with explicit `operationId`, or inferred names from method + path.
 - Path, query, and header parameters declared with `schema`.
 - Path-level parameters with operation-level overrides.
@@ -36,7 +36,7 @@ Satay targets OpenAPI 3.0.x and a small, typed subset.
 
 These are known gaps rather than silent compatibility promises:
 
-- OpenAPI 3.1.
+- OpenAPI 3.0.x documents.
 - Remote or file `$ref`s.
 - Retries, non-API-key authentication, server variables, or automatic server selection beyond the first `servers` entry.
 - Cookie parameters.
@@ -48,6 +48,8 @@ These are known gaps rather than silent compatibility promises:
 - Inline object schemas outside `components.schemas`.
 - Map schemas / `additionalProperties`.
 - `oneOf`, `anyOf`, `allOf`, and discriminator-based polymorphism.
+- JSON Schema boolean schemas (`true` / `false`).
+- `$ref` siblings other than Satay-owned `x-satay` extensions.
 - Non-string enums.
 - Numeric `multipleOf`.
 - Array `uniqueItems`.
@@ -59,5 +61,4 @@ These are known gaps rather than silent compatibility promises:
 - Parameter support: header/cookie parameters and OpenAPI style/explode encoding.
 - Body support beyond JSON: form data, multipart, and bytes.
 - Validated schema references and remote reference loading.
-- OpenAPI 3.1 support once the schema subset is explicit and tested.
 - First-class examples for common transports, keeping generated clients Sans-IO.
