@@ -2,10 +2,10 @@ use std::collections::BTreeSet;
 
 use oas3::Map as OasMap;
 use oas3::spec::{
-    ObjectOrReference, ObjectSchema as OasObjectSchema, Operation as OasOperation,
-    Parameter as OasParameter, PathItem as OasPathItem, RequestBody as OasRequestBody,
-    Response as OasResponse, Schema as OasSchema, SecurityScheme as OasSecurityScheme,
-    Spec as OasSpec,
+    Components as OasComponents, MediaType as OasMediaType, ObjectOrReference,
+    ObjectSchema as OasObjectSchema, Operation as OasOperation, Parameter as OasParameter,
+    PathItem as OasPathItem, RequestBody as OasRequestBody, Response as OasResponse,
+    Schema as OasSchema, SecurityScheme as OasSecurityScheme, Spec as OasSpec,
 };
 
 use super::Document;
@@ -421,7 +421,7 @@ fn validate_operation_refs(
 
 fn validate_content_schema_refs(
     document: &ResolvedDocument<'_>,
-    content: &OasMap<String, oas3::spec::MediaType>,
+    content: &OasMap<String, OasMediaType>,
     context: &str,
 ) -> Result<(), ValidationError> {
     for (media_type, media) in content {
@@ -443,7 +443,7 @@ fn validate_component_object_ref<'a, T: 'a, Get, Validate>(
     validate: Validate,
 ) -> Result<(), ValidationError>
 where
-    Get: Fn(&'a oas3::spec::Components, &str) -> Option<&'a ObjectOrReference<T>>,
+    Get: Fn(&'a OasComponents, &str) -> Option<&'a ObjectOrReference<T>>,
     Validate: Fn(
         &'a ResolvedDocument<'a>,
         &'a ObjectOrReference<T>,
