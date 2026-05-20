@@ -492,6 +492,12 @@ pub enum ValidationError {
         section: &'static str,
     },
 
+    /// A local `$ref` chain references itself.
+    ///
+    /// Error message: `circular reference `{reference}``
+    #[error("circular reference `{reference}`")]
+    CircularReference { reference: String },
+
     /// A value expected to be an object is not.
     ///
     /// Error message: `{context} must be an object`

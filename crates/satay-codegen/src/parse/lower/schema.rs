@@ -4,17 +4,18 @@ use oas3::spec::{
     ObjectSchema as OasObjectSchema, Schema as OasSchema, SchemaType as OasSchemaType,
 };
 
-use super::TypeRegistry;
-use super::constraint::{parse_integer_type, parse_validation, reject_keyword};
-use super::helpers::{optional_description, schema_description};
-use super::reference::{
+use super::super::helpers::{optional_description, schema_description};
+use super::super::reference::{
     object_schema, reject_composition, schema_ref, schema_ref_type_name, schema_type_and_nullable,
     schema_type_wire,
 };
-use super::satay::{
+use super::super::registry::TypeRegistry;
+use super::super::resolve::ResolvedDocument;
+use super::super::satay::{
     parse_range_scalar, parse_satay_enum_variants, parse_satay_integer_type, parse_satay_parse_as,
     parse_satay_treat_error_as_none, satay_parse_as_wire, validate_satay_integer_type,
 };
+use super::super::validate::constraint::{parse_integer_type, parse_validation, reject_keyword};
 use crate::error::ValidationError;
 use crate::ident::{field_ident, type_ident, unique_ident, variant_ident};
 use crate::model::{
@@ -22,7 +23,7 @@ use crate::model::{
 };
 
 pub(super) fn parse_components(
-    document: &super::Document,
+    document: &ResolvedDocument<'_>,
     registry: &mut TypeRegistry,
 ) -> Result<Vec<Component>, ValidationError> {
     let Some(components) = document.spec.components.as_ref() else {
@@ -78,26 +79,16 @@ fn parse_component_kind(
     }
 
     match schema_type {
-        Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => {
-            Ok(ComponentKind::Struct(parse_struct_fields(
-                schema_name,
-                schema,
-                registry,
-            )?))
-        }
+        Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => Ok(
+            ComponentKind::Struct(parse_struct_fields(schema_name, schema, registry)?),
+        ),
         Some(
             OasSchemaType::Array
             | OasSchemaType::String
             | OasSchemaType::Integer
             | OasSchemaType::Number
             | OasSchemaType::Boolean,
-        ) => parse_component_alias_or_nutype(
-            schema_name,
-            schema,
-            schema_type,
-            nullable,
-            registry,
-        ),
+        ) => parse_component_alias_or_nutype(schema_name, schema, schema_type, nullable, registry),
         Some(kind) => Err(ValidationError::UnsupportedComponentType {
             schema: schema_name.to_owned(),
             kind: schema_type_wire(kind).to_owned(),
@@ -150,13 +141,7 @@ fn parse_component_alias_or_nutype(
         }));
     }
 
-    let base = parse_type_ref_base(
-        schema,
-        schema_type,
-        &context,
-        registry,
-        Some(schema_name),
-    )?;
+    let base = parse_type_ref_base(schema, schema_type, &context, registry, Some(schema_name))?;
 
     let validation = parse_validation(schema, &base, &context)?;
 
@@ -310,13 +295,7 @@ pub(super) fn parse_type_ref(
 
     let description = optional_description(&schema.description);
     let (schema_type, nullable) = schema_type_and_nullable(schema, context)?;
-    let base = parse_type_ref_base(
-        schema,
-        schema_type,
-        context,
-        registry,
-        type_name_hint,
-    )?;
+    let base = parse_type_ref_base(schema, schema_type, context, registry, type_name_hint)?;
 
     let validation = parse_validation(schema, &base, context)?;
     let ty = if let Some(validation) = validation {
@@ -409,12 +388,13 @@ fn parse_type_ref_base(
         },
         Some(OasSchemaType::Boolean) => Ok(TypeRef::Bool),
         Some(OasSchemaType::Array) => {
-            let items = schema
-                .items
-                .as_deref()
-                .ok_or_else(|| ValidationError::MissingArrayItems {
-                    context: context.to_owned(),
-                })?;
+            let items =
+                schema
+                    .items
+                    .as_deref()
+                    .ok_or_else(|| ValidationError::MissingArrayItems {
+                        context: context.to_owned(),
+                    })?;
             let item_name_hint = type_name_hint.map(|name| format!("{name} item"));
             Ok(TypeRef::Array(Box::new(parse_type_ref(
                 items,

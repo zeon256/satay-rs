@@ -5,9 +5,9 @@ use oas3::spec::{
     SchemaType as OasSchemaType,
 };
 
-use super::constraint::parse_integer_type;
 use super::helpers::satay_object;
 use super::reference::schema_type_wire;
+use super::validate::constraint::parse_integer_type;
 use crate::error::ValidationError;
 use crate::ident::variant_ident;
 use crate::model::{IntegerType, ParseAs, RangeScalar};

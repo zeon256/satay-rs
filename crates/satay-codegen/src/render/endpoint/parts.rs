@@ -6,9 +6,7 @@ use crate::model::{
     is_array_type,
 };
 
-use super::super::{
-    component_kind, doc_attrs, ident, input_field, lit_str, rust_field_type,
-};
+use super::super::{component_kind, doc_attrs, ident, input_field, lit_str, rust_field_type};
 
 pub(super) fn render_parts_function(api: &Api, operation: &Operation) -> syn::ItemFn {
     let docs = doc_attrs(operation.description.as_deref());
@@ -135,11 +133,7 @@ fn render_path(api: &Api, operation: &Operation) -> Vec<syn::Stmt> {
                             && parameter.wire_name == *name
                     })
                     .expect("path parameters validated before render");
-                let expr = value_expr(
-                    input_field(&parameter.rust_name),
-                    &parameter.ty,
-                    api,
-                );
+                let expr = value_expr(input_field(&parameter.rust_name), &parameter.ty, api);
                 statements.push(parse_quote!(
                     satay_runtime::append_path_segment(&mut uri, #expr);
                 ));
@@ -173,11 +167,7 @@ fn render_query_parameter(api: &Api, parameter: &Parameter) -> Vec<syn::Stmt> {
 
     let wire_name = lit_str(&parameter.wire_name);
     if parameter.required {
-        let expr = value_expr(
-            input_field(&parameter.rust_name),
-            &parameter.ty,
-            api,
-        );
+        let expr = value_expr(input_field(&parameter.rust_name), &parameter.ty, api);
         vec![parse_quote!(
             satay_runtime::append_query_pair(&mut uri, &mut first_query, #wire_name, #expr);
         )]

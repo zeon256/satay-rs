@@ -5,7 +5,7 @@ use oas3::spec::{
     SecurityScheme as OasSecurityScheme,
 };
 
-use super::Document;
+use super::resolve::{ResolvedDocument, refs::local_ref_name};
 use crate::error::ValidationError;
 use crate::ident::type_ident;
 
@@ -121,7 +121,7 @@ pub(super) fn reject_composition(
 }
 
 pub(super) fn resolve_security_scheme<'a>(
-    document: &'a Document,
+    document: &ResolvedDocument<'a>,
     scheme: &'a ObjectOrReference<OasSecurityScheme>,
     context: &str,
 ) -> Result<&'a OasSecurityScheme, ValidationError> {
@@ -141,7 +141,7 @@ pub(super) fn resolve_security_scheme<'a>(
 }
 
 fn resolve_security_scheme_ref<'a>(
-    document: &'a Document,
+    document: &ResolvedDocument<'a>,
     reference: &str,
     context: &str,
 ) -> Result<&'a OasSecurityScheme, ValidationError> {
@@ -160,7 +160,7 @@ fn resolve_security_scheme_ref<'a>(
 }
 
 pub(super) fn resolve_parameter<'a>(
-    document: &'a Document,
+    document: &ResolvedDocument<'a>,
     parameter: &'a ObjectOrReference<OasParameter>,
     context: &str,
 ) -> Result<&'a OasParameter, ValidationError> {
@@ -180,7 +180,7 @@ pub(super) fn resolve_parameter<'a>(
 }
 
 fn resolve_parameter_ref<'a>(
-    document: &'a Document,
+    document: &ResolvedDocument<'a>,
     reference: &str,
     context: &str,
 ) -> Result<&'a OasParameter, ValidationError> {
@@ -199,7 +199,7 @@ fn resolve_parameter_ref<'a>(
 }
 
 pub(super) fn resolve_request_body<'a>(
-    document: &'a Document,
+    document: &ResolvedDocument<'a>,
     request_body: &'a ObjectOrReference<OasRequestBody>,
     context: &str,
 ) -> Result<&'a OasRequestBody, ValidationError> {
@@ -219,7 +219,7 @@ pub(super) fn resolve_request_body<'a>(
 }
 
 fn resolve_request_body_ref<'a>(
-    document: &'a Document,
+    document: &ResolvedDocument<'a>,
     reference: &str,
     context: &str,
 ) -> Result<&'a OasRequestBody, ValidationError> {
@@ -238,7 +238,7 @@ fn resolve_request_body_ref<'a>(
 }
 
 pub(super) fn resolve_response<'a>(
-    document: &'a Document,
+    document: &ResolvedDocument<'a>,
     response: &'a ObjectOrReference<OasResponse>,
     context: &str,
 ) -> Result<&'a OasResponse, ValidationError> {
@@ -258,7 +258,7 @@ pub(super) fn resolve_response<'a>(
 }
 
 fn resolve_response_ref<'a>(
-    document: &'a Document,
+    document: &ResolvedDocument<'a>,
     reference: &str,
     context: &str,
 ) -> Result<&'a OasResponse, ValidationError> {
@@ -277,7 +277,7 @@ fn resolve_response_ref<'a>(
 }
 
 pub(super) fn resolve_path_item<'a>(
-    document: &'a Document,
+    document: &ResolvedDocument<'a>,
     path_item: &'a OasPathItem,
     context: &str,
 ) -> Result<&'a OasPathItem, ValidationError> {
@@ -310,15 +310,13 @@ pub(super) fn resolve_path_item<'a>(
 }
 
 fn resolve_path_item_reference<'a>(
-    document: &'a Document,
+    document: &ResolvedDocument<'a>,
     path_item: &'a ObjectOrReference<OasPathItem>,
     context: &str,
     reference: &str,
 ) -> Result<&'a OasPathItem, ValidationError> {
     match path_item {
-        ObjectOrReference::Object(path_item) => {
-            resolve_path_item(document, path_item, context)
-        }
+        ObjectOrReference::Object(path_item) => resolve_path_item(document, path_item, context),
         ObjectOrReference::Ref { ref_path, .. } => {
             let name = local_ref_name(ref_path, "pathItems").map_err(|source| {
                 ValidationError::ResolveReference {
@@ -340,19 +338,4 @@ fn resolve_path_item_reference<'a>(
             resolve_path_item_reference(document, target, context, reference)
         }
     }
-}
-
-fn local_ref_name(reference: &str, section: &'static str) -> Result<String, ValidationError> {
-    let prefix = format!("#/components/{section}/");
-    let Some(name) = reference.strip_prefix(&prefix) else {
-        return Err(ValidationError::InvalidComponentReference {
-            reference: reference.to_owned(),
-            section,
-        });
-    };
-    Ok(json_pointer_unescape(name))
-}
-
-fn json_pointer_unescape(token: &str) -> String {
-    token.replace("~1", "/").replace("~0", "~")
 }

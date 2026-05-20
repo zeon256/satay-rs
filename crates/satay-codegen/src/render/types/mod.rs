@@ -29,7 +29,9 @@ pub(super) fn render_types_file(api: &Api) -> syn::File {
         render_component(api, component, &mut items);
     }
     for constrained_type in &api.constrained_types {
-        items.push(Item::Struct(constrained::render_constrained_type(constrained_type)));
+        items.push(Item::Struct(constrained::render_constrained_type(
+            constrained_type,
+        )));
     }
 
     syn::File {
@@ -63,7 +65,9 @@ fn render_component(api: &Api, component: &Component, items: &mut Vec<syn::Item>
             items.push(syn::parse_quote!(#(#docs)* pub type #name = #ty;));
         }
         ComponentKind::Nutype(constrained_type) => {
-            items.push(Item::Struct(constrained::render_constrained_type(constrained_type)));
+            items.push(Item::Struct(constrained::render_constrained_type(
+                constrained_type,
+            )));
         }
     }
 }
