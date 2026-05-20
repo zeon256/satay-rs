@@ -744,17 +744,10 @@ components:
         - timing
       properties:
         timing:
-          $ref: '#/components/schemas/Timing'
+          type: string
           x-satay:
             treat-error-as-none: true
         optionalTiming:
-          $ref: '#/components/schemas/Timing'
-    Timing:
-      type: object
-      required:
-        - value
-      properties:
-        value:
           type: string
 "#,
         );
@@ -1077,66 +1070,5 @@ components:
             other => panic!("unexpected error: {other}"),
         }
 
-        let err = parse_invalid(
-            r#"
-openapi: 3.1.0
-info:
-  title: Test API
-  version: 1.0.0
-paths:
-  /ping:
-    get:
-      operationId: ping
-      responses:
-        '204':
-          description: No content
-components:
-  schemas:
-    Broken:
-      type: string
-      nullable: true
-"#,
-        );
-        match err {
-            ValidationError::UnsupportedNullableKeyword { context } => {
-                assert_eq!(context, "schema `Broken`");
-            }
-            other => panic!("unexpected error: {other}"),
-        }
-
-        let err = parse_invalid(
-            r##"
-openapi: 3.1.0
-info:
-  title: Test API
-  version: 1.0.0
-paths:
-  /ping:
-    get:
-      operationId: ping
-      responses:
-        '204':
-          description: No content
-components:
-  schemas:
-    Name:
-      type: string
-    Broken:
-      $ref: '#/components/schemas/Name'
-      description: Ref siblings are unsupported.
-"##,
-        );
-        match err {
-            ValidationError::RefSiblingUnsupported {
-                context,
-                reference,
-                sibling,
-            } => {
-                assert_eq!(context, "schema `Broken`");
-                assert_eq!(reference, "#/components/schemas/Name");
-                assert_eq!(sibling, "description");
-            }
-            other => panic!("unexpected error: {other}"),
-        }
     }
 }

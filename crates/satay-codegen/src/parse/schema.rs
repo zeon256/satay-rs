@@ -3,11 +3,10 @@ use std::collections::BTreeSet;
 use oas3::spec::{
     ObjectSchema as OasObjectSchema, Schema as OasSchema, SchemaType as OasSchemaType,
 };
-use serde_json::Value;
 
 use super::TypeRegistry;
 use super::constraint::{parse_integer_type, parse_validation, reject_keyword};
-use super::helpers::{optional_description, raw_components_map, raw_field, schema_description};
+use super::helpers::{optional_description, schema_description};
 use super::reference::{
     object_schema, reject_composition, schema_ref, schema_ref_type_name, schema_type_and_nullable,
     schema_type_wire,
@@ -26,23 +25,16 @@ pub(super) fn parse_components(
     document: &super::Document,
     registry: &mut TypeRegistry,
 ) -> Result<Vec<Component>, ValidationError> {
-    let Some(components) = document
-        .spec
-        .as_ref()
-        .and_then(|spec| spec.components.as_ref())
-    else {
+    let Some(components) = document.spec.components.as_ref() else {
         return Ok(vec![]);
     };
-
-    let raw_schemas = raw_components_map(document, "schemas");
 
     let mut parsed = Vec::with_capacity(components.schemas.len());
 
     for (schema_name, schema) in &components.schemas {
-        let raw_schema = raw_schemas.and_then(|schemas| schemas.get(schema_name));
         let rust_name = type_ident(schema_name);
         let description = schema_description(schema);
-        let kind = parse_component_kind(schema_name, schema, raw_schema, registry)?;
+        let kind = parse_component_kind(schema_name, schema, registry)?;
         parsed.push(Component {
             rust_name,
             description,
@@ -56,12 +48,11 @@ pub(super) fn parse_components(
 fn parse_component_kind(
     schema_name: &str,
     schema: &OasSchema,
-    raw_schema: Option<&Value>,
     registry: &mut TypeRegistry,
 ) -> Result<ComponentKind, ValidationError> {
     let context = format!("schema `{schema_name}`");
 
-    if let Some(reference) = schema_ref(schema, raw_schema, &context)? {
+    if let Some(reference) = schema_ref(schema, &context)? {
         return Ok(ComponentKind::Alias(TypeRef::Named(schema_ref_type_name(
             reference,
         )?)));
@@ -71,10 +62,10 @@ fn parse_component_kind(
 
     reject_composition(schema, &context)?;
 
-    let (schema_type, nullable) = schema_type_and_nullable(schema, raw_schema, &context)?;
+    let (schema_type, nullable) = schema_type_and_nullable(schema, &context)?;
 
     if !schema.enum_values.is_empty() {
-        let variants = parse_string_enum(schema, raw_schema, &context)?;
+        let variants = parse_string_enum(schema, &context)?;
         if nullable {
             let inner = registry.inline_enum_ref(
                 &format!("{schema_name} value"),
@@ -91,7 +82,6 @@ fn parse_component_kind(
             Ok(ComponentKind::Struct(parse_struct_fields(
                 schema_name,
                 schema,
-                raw_schema,
                 registry,
             )?))
         }
@@ -104,7 +94,6 @@ fn parse_component_kind(
         ) => parse_component_alias_or_nutype(
             schema_name,
             schema,
-            raw_schema,
             schema_type,
             nullable,
             registry,
@@ -122,7 +111,6 @@ fn parse_component_kind(
 fn parse_component_alias_or_nutype(
     schema_name: &str,
     schema: &OasObjectSchema,
-    raw_schema: Option<&Value>,
     schema_type: Option<OasSchemaType>,
     nullable: bool,
     registry: &mut TypeRegistry,
@@ -164,7 +152,6 @@ fn parse_component_alias_or_nutype(
 
     let base = parse_type_ref_base(
         schema,
-        raw_schema,
         schema_type,
         &context,
         registry,
@@ -196,10 +183,9 @@ fn parse_component_alias_or_nutype(
 
 fn parse_string_enum(
     schema: &OasObjectSchema,
-    raw_schema: Option<&Value>,
     context: &str,
 ) -> Result<Vec<EnumVariant>, ValidationError> {
-    let (schema_type, _) = schema_type_and_nullable(schema, raw_schema, context)?;
+    let (schema_type, _) = schema_type_and_nullable(schema, context)?;
 
     if let Some(kind) = schema_type
         && kind != OasSchemaType::String
@@ -261,7 +247,6 @@ fn parse_string_enum(
 fn parse_struct_fields(
     schema_name: &str,
     schema: &OasObjectSchema,
-    raw_schema: Option<&Value>,
     registry: &mut TypeRegistry,
 ) -> Result<Vec<Field>, ValidationError> {
     let context = format!("schema `{schema_name}`");
@@ -276,23 +261,20 @@ fn parse_struct_fields(
         });
     }
 
-    let raw_properties = raw_field(raw_schema, "properties").and_then(Value::as_object);
     let mut used = BTreeSet::new();
     let mut fields = Vec::with_capacity(schema.properties.len());
 
     for (wire_name, property_schema) in &schema.properties {
         let rust_name = unique_ident(field_ident(wire_name), &mut used);
-        let raw_property_schema = raw_properties.and_then(|properties| properties.get(wire_name));
         let description = schema_description(property_schema);
         let ty = parse_type_ref(
             property_schema,
-            raw_property_schema,
             &format!("property `{schema_name}.{wire_name}`"),
             registry,
             Some(&format!("{schema_name} {wire_name}")),
         )?;
         let treat_error_as_none = parse_satay_treat_error_as_none(
-            raw_property_schema,
+            property_schema,
             &format!("property `{schema_name}.{wire_name}`"),
         )?;
         fields.push(Field {
@@ -314,12 +296,11 @@ fn parse_required_set(schema: &OasObjectSchema) -> BTreeSet<String> {
 
 pub(super) fn parse_type_ref(
     schema: &OasSchema,
-    raw_schema: Option<&Value>,
     context: &str,
     registry: &mut TypeRegistry,
     type_name_hint: Option<&str>,
 ) -> Result<TypeRef, ValidationError> {
-    if let Some(reference) = schema_ref(schema, raw_schema, context)? {
+    if let Some(reference) = schema_ref(schema, context)? {
         return Ok(TypeRef::Named(schema_ref_type_name(reference)?));
     }
 
@@ -328,10 +309,9 @@ pub(super) fn parse_type_ref(
     reject_composition(schema, context)?;
 
     let description = optional_description(&schema.description);
-    let (schema_type, nullable) = schema_type_and_nullable(schema, raw_schema, context)?;
+    let (schema_type, nullable) = schema_type_and_nullable(schema, context)?;
     let base = parse_type_ref_base(
         schema,
-        raw_schema,
         schema_type,
         context,
         registry,
@@ -359,7 +339,6 @@ pub(super) fn parse_type_ref(
 
 fn parse_type_ref_base(
     schema: &OasObjectSchema,
-    raw_schema: Option<&Value>,
     schema_type: Option<OasSchemaType>,
     context: &str,
     registry: &mut TypeRegistry,
@@ -399,7 +378,7 @@ fn parse_type_ref_base(
     }
 
     if !schema.enum_values.is_empty() {
-        let mut variants = parse_string_enum(schema, raw_schema, context)?;
+        let mut variants = parse_string_enum(schema, context)?;
         let default_empty_variant = variant_ident("");
         variants.retain(|v| !v.wire_name.is_empty() || v.rust_name != default_empty_variant);
         if variants.is_empty() {
@@ -430,18 +409,15 @@ fn parse_type_ref_base(
         },
         Some(OasSchemaType::Boolean) => Ok(TypeRef::Bool),
         Some(OasSchemaType::Array) => {
-            let items =
-                schema
-                    .items
-                    .as_deref()
-                    .ok_or_else(|| ValidationError::MissingArrayItems {
-                        context: context.to_owned(),
-                    })?;
-            let raw_items = raw_field(raw_schema, "items");
+            let items = schema
+                .items
+                .as_deref()
+                .ok_or_else(|| ValidationError::MissingArrayItems {
+                    context: context.to_owned(),
+                })?;
             let item_name_hint = type_name_hint.map(|name| format!("{name} item"));
             Ok(TypeRef::Array(Box::new(parse_type_ref(
                 items,
-                raw_items,
                 &format!("{context} items"),
                 registry,
                 item_name_hint.as_deref(),

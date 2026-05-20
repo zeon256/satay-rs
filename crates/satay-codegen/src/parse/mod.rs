@@ -1,7 +1,6 @@
 use std::collections::BTreeSet;
 
 use oas3::spec::Spec as OasSpec;
-use serde_json::Value;
 
 use crate::error::{ParseError, ValidationError};
 use crate::ident::{type_ident, unique_ident};
@@ -21,8 +20,7 @@ mod tests;
 
 #[derive(Debug)]
 pub(crate) struct Document {
-    spec: Option<OasSpec>,
-    raw: Value,
+    spec: OasSpec,
 }
 
 #[derive(Debug, Default)]
@@ -102,21 +100,10 @@ impl TypeRegistry {
 pub(crate) fn parse_api(document: &Document) -> Result<Api, ValidationError> {
     tracing::debug!("parsing API from document");
 
-    let root = helpers::object(&document.raw, "OpenAPI document")?;
-    let openapi = helpers::required_str(root, "openapi", "OpenAPI document")?;
+    let spec = &document.spec;
+    let openapi = spec.openapi.as_str();
 
     if !is_supported_openapi_version(openapi) {
-        return Err(ValidationError::UnsupportedOpenApiVersion {
-            version: openapi.to_owned(),
-        });
-    }
-
-    let spec = document
-        .spec
-        .as_ref()
-        .expect("OpenAPI 3.1 documents are parsed into an oas3::Spec");
-
-    if spec.validate_version().is_err() {
         return Err(ValidationError::UnsupportedOpenApiVersion {
             version: openapi.to_owned(),
         });
@@ -144,22 +131,9 @@ pub(crate) fn parse_api(document: &Document) -> Result<Api, ValidationError> {
 }
 
 pub(crate) fn parse_document(spec: &str) -> Result<Document, ParseError> {
-    let yaml = serde_yaml::from_str::<serde_yaml::Value>(spec).map_err(ParseError::Document)?;
-    let raw = serde_json::to_value(yaml).map_err(ParseError::NormalizeDocument)?;
+    let spec = oas3::from_yaml(spec)?;
 
-    let typed = match raw_openapi_version(&raw) {
-        Some(version) if is_supported_openapi_version(version) => Some(
-            oas3::from_yaml(spec)
-                .map_err(|source| ParseError::OpenApi31Document(Box::new(source)))?,
-        ),
-        _ => None,
-    };
-
-    Ok(Document { spec: typed, raw })
-}
-
-fn raw_openapi_version(raw: &Value) -> Option<&str> {
-    raw.as_object()?.get("openapi")?.as_str()
+    Ok(Document { spec })
 }
 
 fn is_supported_openapi_version(version: &str) -> bool {

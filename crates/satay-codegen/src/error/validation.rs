@@ -206,14 +206,6 @@ pub enum ValidationError {
     )]
     MultipleNonNullSchemaTypesUnsupported { context: String },
 
-    /// A schema uses the OpenAPI 3.0 `nullable` keyword.
-    ///
-    /// Error message: `{context} uses `nullable`; OpenAPI 3.1 represents nullability as `type: [T, "null"]``
-    #[error(
-        "{context} uses `nullable`; OpenAPI 3.1 represents nullability as `type: [T, \"null\"]`"
-    )]
-    UnsupportedNullableKeyword { context: String },
-
     /// A schema uses a composition keyword (`allOf`, `anyOf`, `oneOf`) that is outside MVP scope.
     ///
     /// Error message: `{context} uses `{keyword}`, which is not in the MVP scope`
@@ -462,16 +454,6 @@ pub enum ValidationError {
     UnusedPathParameter { path: String, name: String },
 
     // -- Reference resolution and JSON shape validation --
-    /// A `$ref` object contains a sibling field whose semantics Satay does not implement.
-    ///
-    /// Error message: `{context} reference `{reference}` has unsupported sibling `{sibling}``
-    #[error("{context} reference `{reference}` has unsupported sibling `{sibling}`")]
-    RefSiblingUnsupported {
-        context: String,
-        reference: String,
-        sibling: String,
-    },
-
     /// A `$ref` could not be resolved because the referenced component failed validation.
     ///
     /// Error message: `failed to resolve reference `{reference}` in {context}: {source}`
@@ -521,15 +503,6 @@ pub enum ValidationError {
     /// Error message: `{context}.{field} must be an object`
     #[error("{context}.{field} must be an object")]
     ExpectedObjectField {
-        context: String,
-        field: &'static str,
-    },
-
-    /// A required string field is missing from an object.
-    ///
-    /// Error message: `{context} must declare string field `{field}``
-    #[error("{context} must declare string field `{field}`")]
-    MissingStringField {
         context: String,
         field: &'static str,
     },
