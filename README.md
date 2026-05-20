@@ -54,29 +54,30 @@ include!(concat!(env!("OUT_DIR"), "/satay_generated.rs"));
 
 use generated::{Api, GetBusArrivalResponse};
 use satay_reqwest::{ReqwestActionExt, reqwest};
+use std::{env, error::Error};
+
+use crate::generated::BusServiceNumber;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let api = Api::new()
-        .account_key(std::env::var("LTA_ACCOUNT_KEY")?);
+async fn main() -> Result<(), Box<dyn Error>> {
+    let api = Api::new().account_key(env::var("LTA_ACCOUNT_KEY")?);
 
     let client = reqwest::Client::new();
     let response = api
-        .get_bus_arrival("83139")
-        .service_no("15")
+        .get_bus_arrival(83139)
+        .service_no(BusServiceNumber::try_new("15")?)
         .send_with(&client)
         .await?;
 
     match response {
         GetBusArrivalResponse::Ok(arrival) => {
-            println!(
-                "{} services for bus stop {}",
-                arrival.services.len(),
-                arrival.bus_stop_code
-            );
+            println!("{:?}", arrival);
         }
         GetBusArrivalResponse::UnexpectedStatus(status, body) => {
-            eprintln!("unexpected status {status}: {}", String::from_utf8_lossy(&body));
+            eprintln!(
+                "unexpected status {status}: {}",
+                String::from_utf8_lossy(&body)
+            );
         }
     }
 
