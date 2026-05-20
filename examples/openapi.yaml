@@ -1,4 +1,4 @@
-openapi: 3.0.3
+openapi: 3.1.0
 
 info:
   title: LTA DataMall Bus API
@@ -311,14 +311,9 @@ components:
 
         OriginCode:
           $ref: "#/components/schemas/BusStopCode"
-          description: Bus stop code for first bus stop.
-          example: "64009"
 
         DestinationCode:
           $ref: "#/components/schemas/BusStopCode"
-          description: >
-            Bus stop code for last bus stop. Similar as first stop for loop services.
-          example: "64009"
 
         AM_Peak_Freq:
           type: string
@@ -436,8 +431,6 @@ components:
 
         BusStopCode:
           $ref: "#/components/schemas/BusStopCode"
-          description: Unique 5-digit identifier for the physical bus stop.
-          example: "01219"
 
         Distance:
           type: number
@@ -447,49 +440,43 @@ components:
           minimum: 0
 
         WD_FirstBus:
-          type: string
+          type: [string, "null"]
           description: Scheduled arrival of first bus on weekdays.
-          nullable: true
           example: "2025"
           x-satay:
             parse-as: time
 
         WD_LastBus:
-          type: string
+          type: [string, "null"]
           description: Scheduled arrival of last bus on weekdays.
-          nullable: true
           example: "2352"
           x-satay:
             parse-as: time
 
         SAT_FirstBus:
-          type: string
+          type: [string, "null"]
           description: Scheduled arrival of first bus on Saturdays.
-          nullable: true
           example: "1427"
           x-satay:
             parse-as: time
 
         SAT_LastBus:
-          type: string
+          type: [string, "null"]
           description: Scheduled arrival of last bus on Saturdays.
-          nullable: true
           example: "2349"
           x-satay:
             parse-as: time
 
         SUN_FirstBus:
-          type: string
+          type: [string, "null"]
           description: Scheduled arrival of first bus on Sundays.
-          nullable: true
           example: "0620"
           x-satay:
             parse-as: time
 
         SUN_LastBus:
-          type: string
+          type: [string, "null"]
           description: Scheduled arrival of last bus on Sundays.
-          nullable: true
           example: "2349"
           x-satay:
             parse-as: time
@@ -510,8 +497,6 @@ components:
 
         BusStopCode:
           $ref: "#/components/schemas/BusStopCode"
-          description: Queried bus stop reference code.
-          example: "83139"
 
         Services:
           type: array
@@ -592,17 +577,9 @@ components:
       properties:
         OriginCode:
           $ref: "#/components/schemas/BusStopCode"
-          description: >
-            Reference code of the first bus stop where this bus started its service.
-            May be an empty string when no subsequent bus data is available.
-          example: "77009"
 
         DestinationCode:
           $ref: "#/components/schemas/BusStopCode"
-          description: >
-            Reference code of the last bus stop where this bus will terminate its service.
-            May be an empty string when no subsequent bus data is available.
-          example: "77131"
 
         EstimatedArrival:
           type: string
