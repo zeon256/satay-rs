@@ -1,10 +1,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use oas3::spec::{ObjectSchema as OasObjectSchema, SchemaType as OasSchemaType};
-use serde_json::Value;
+use oas3::spec::{
+    ObjectOrReference, ObjectSchema as OasObjectSchema, Schema as OasSchema,
+    SchemaType as OasSchemaType,
+};
 
 use super::constraint::parse_integer_type;
-use super::helpers::{optional_object, satay_object};
+use super::helpers::satay_object;
 use super::reference::schema_type_wire;
 use crate::error::ValidationError;
 use crate::ident::variant_ident;
@@ -170,15 +172,26 @@ pub(super) fn parse_range_scalar(
 }
 
 pub(super) fn parse_satay_treat_error_as_none(
-    raw_schema: Option<&Value>,
+    schema: &OasSchema,
     context: &str,
 ) -> Result<bool, ValidationError> {
-    let Some(raw_schema) = raw_schema.and_then(Value::as_object) else {
+    let satay = match schema {
+        OasSchema::Boolean(_) => return Ok(false),
+        OasSchema::Object(object) => match object.as_ref() {
+            ObjectOrReference::Object(schema) => schema.extensions.get("satay"),
+            ObjectOrReference::Ref { .. } => return Ok(false),
+        },
+    };
+
+    let Some(satay) = satay else {
         return Ok(false);
     };
 
-    let Some(satay) = optional_object(raw_schema, "x-satay", context)? else {
-        return Ok(false);
+    let Some(satay) = satay.as_object() else {
+        return Err(ValidationError::ExpectedObjectField {
+            context: context.to_owned(),
+            field: "x-satay",
+        });
     };
 
     let Some(value) = satay.get("treat-error-as-none") else {

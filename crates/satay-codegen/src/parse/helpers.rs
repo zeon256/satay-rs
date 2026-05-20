@@ -5,57 +5,8 @@ use oas3::{
         Schema as OasSchema,
     },
 };
-use serde_json::{Map, Value};
 
-use super::Document;
 use crate::error::ValidationError;
-
-pub(super) fn object<'a>(
-    value: &'a Value,
-    context: &str,
-) -> Result<&'a Map<String, Value>, ValidationError> {
-    value
-        .as_object()
-        .ok_or_else(|| ValidationError::ExpectedObject {
-            context: context.to_owned(),
-        })
-}
-
-pub(super) fn optional_object<'a>(
-    object: &'a Map<String, Value>,
-    field: &'static str,
-    context: &str,
-) -> Result<Option<&'a Map<String, Value>>, ValidationError> {
-    match object.get(field) {
-        Some(value) => {
-            value
-                .as_object()
-                .map(Some)
-                .ok_or_else(|| ValidationError::ExpectedObjectField {
-                    context: context.to_owned(),
-                    field,
-                })
-        }
-        None => Ok(None),
-    }
-}
-
-pub(super) fn raw_components_map<'a>(
-    document: &'a Document,
-    field: &'static str,
-) -> Option<&'a Map<String, Value>> {
-    object(&document.raw, "OpenAPI document")
-        .ok()
-        .and_then(|root| root.get("components"))
-        .and_then(Value::as_object)
-        .and_then(|components| components.get(field))
-        .and_then(Value::as_object)
-}
-
-pub(super) fn raw_field<'a>(raw: Option<&'a Value>, field: &str) -> Option<&'a Value> {
-    raw.and_then(Value::as_object)
-        .and_then(|object| object.get(field))
-}
 
 pub(super) fn optional_description(description: &Option<String>) -> Option<String> {
     description
@@ -77,7 +28,7 @@ pub(super) fn schema_description(schema: &OasSchema) -> Option<String> {
 pub(super) fn satay_object<'a>(
     schema: &'a OasObjectSchema,
     context: &str,
-) -> Result<Option<&'a Map<String, Value>>, ValidationError> {
+) -> Result<Option<&'a serde_json::Map<String, serde_json::Value>>, ValidationError> {
     let Some(value) = schema.extensions.get("satay") else {
         return Ok(None);
     };
@@ -87,20 +38,6 @@ pub(super) fn satay_object<'a>(
         .ok_or_else(|| ValidationError::ExpectedObjectField {
             context: context.to_owned(),
             field: "x-satay",
-        })
-}
-
-pub(super) fn required_str<'a>(
-    object: &'a Map<String, Value>,
-    field: &'static str,
-    context: &str,
-) -> Result<&'a str, ValidationError> {
-    object
-        .get(field)
-        .and_then(Value::as_str)
-        .ok_or_else(|| ValidationError::MissingStringField {
-            context: context.to_owned(),
-            field,
         })
 }
 
