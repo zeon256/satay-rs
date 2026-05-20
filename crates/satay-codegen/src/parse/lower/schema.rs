@@ -12,8 +12,8 @@ use super::super::reference::{
 use super::super::registry::TypeRegistry;
 use super::super::resolve::ResolvedDocument;
 use super::super::satay::{
-    parse_range_scalar, parse_satay_enum_variants, parse_satay_integer_type, parse_satay_parse_as,
-    parse_satay_treat_error_as_none, satay_parse_as_wire, validate_satay_integer_type,
+    lower_range_scalar, lower_satay_enum_variants, lower_satay_integer_type, lower_satay_parse_as,
+    lower_satay_treat_error_as_none,
 };
 use super::super::validate::constraint::{parse_integer_type, parse_validation, reject_keyword};
 use crate::error::ValidationError;
@@ -109,24 +109,17 @@ fn parse_component_alias_or_nutype(
     let context = format!("schema `{schema_name}`");
     let rust_name = type_ident(schema_name);
     let description = optional_description(&schema.description);
-    let parse_as = parse_satay_parse_as(schema, &context)?;
-    let integer_type = parse_satay_integer_type(schema, &context)?;
-
-    validate_satay_integer_type(schema_type, parse_as, integer_type, &context)?;
+    let parse_as = lower_satay_parse_as(schema, &context);
+    let integer_type = lower_satay_integer_type(schema, &context);
 
     if let Some(parse_as @ (ParseAs::IntegerRange | ParseAs::NumberRange)) = parse_as {
         if schema_type != Some(OasSchemaType::String) {
-            return Err(ValidationError::SatayParseAsRequiresString {
-                context: context.to_owned(),
-                parse_as: satay_parse_as_wire(parse_as).to_owned(),
-                kind: schema_type
-                    .map(schema_type_wire)
-                    .unwrap_or("missing")
-                    .to_owned(),
-            });
+            unreachable!(
+                "validation should reject incompatible x-satay range parse-as before lowering for {context}"
+            );
         }
 
-        let scalar = parse_range_scalar(schema, parse_as, integer_type, &context)?;
+        let scalar = lower_range_scalar(schema, parse_as, integer_type, &context);
 
         if nullable {
             let inner =
@@ -200,7 +193,7 @@ fn parse_string_enum(
         wire_names.push(value);
     }
 
-    let explicit_variants = parse_satay_enum_variants(schema, context, &wire_values)?;
+    let explicit_variants = lower_satay_enum_variants(schema, context, &wire_values);
     let mut used = BTreeSet::from(["Unknown".to_owned()]);
 
     for rust_name in explicit_variants.values() {
@@ -258,10 +251,10 @@ fn parse_struct_fields(
             registry,
             Some(&format!("{schema_name} {wire_name}")),
         )?;
-        let treat_error_as_none = parse_satay_treat_error_as_none(
+        let treat_error_as_none = lower_satay_treat_error_as_none(
             property_schema,
             &format!("property `{schema_name}.{wire_name}`"),
-        )?;
+        );
         fields.push(Field {
             wire_name: wire_name.clone(),
             rust_name,
@@ -324,15 +317,13 @@ fn parse_type_ref_base(
     type_name_hint: Option<&str>,
 ) -> Result<TypeRef, ValidationError> {
     let description = optional_description(&schema.description);
-    let parse_as = parse_satay_parse_as(schema, context)?;
-    let integer_type = parse_satay_integer_type(schema, context)?;
-
-    validate_satay_integer_type(schema_type, parse_as, integer_type, context)?;
+    let parse_as = lower_satay_parse_as(schema, context);
+    let integer_type = lower_satay_integer_type(schema, context);
 
     if let Some(parse_as) = parse_as {
         match (schema_type, parse_as) {
             (Some(OasSchemaType::String), ParseAs::IntegerRange | ParseAs::NumberRange) => {
-                let scalar = parse_range_scalar(schema, parse_as, integer_type, context)?;
+                let scalar = lower_range_scalar(schema, parse_as, integer_type, context);
                 return Ok(registry.inline_range_ref(
                     type_name_hint.unwrap_or(context),
                     description,
@@ -344,14 +335,9 @@ fn parse_type_ref_base(
                 return Ok(TypeRef::ParsedInteger(parse_as));
             }
             _ => {
-                return Err(ValidationError::SatayParseAsRequiresString {
-                    context: context.to_owned(),
-                    parse_as: satay_parse_as_wire(parse_as).to_owned(),
-                    kind: schema_type
-                        .map(schema_type_wire)
-                        .unwrap_or("missing")
-                        .to_owned(),
-                });
+                unreachable!(
+                    "validation should reject incompatible x-satay parse-as before lowering for {context}"
+                );
             }
         }
     }
