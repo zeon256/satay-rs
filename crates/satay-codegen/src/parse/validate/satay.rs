@@ -1,6 +1,9 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use oas3::spec::{ObjectSchema as OasObjectSchema, SchemaType as OasSchemaType};
+use oas3::spec::{
+    ObjectOrReference, ObjectSchema as OasObjectSchema, Schema as OasSchema,
+    SchemaType as OasSchemaType,
+};
 
 use super::super::helpers::satay_object;
 use super::super::reference::schema_type_wire;
@@ -9,13 +12,65 @@ use super::super::satay::{
     satay_parse_as_wire, validate_satay_integer_type,
 };
 use crate::error::ValidationError;
-use crate::model::ParseAs;
+use crate::model::{IntegerType, ParseAs, RangeScalar};
+
+#[derive(Debug, Default)]
+pub(crate) struct ValidatedSatay {
+    schemas: BTreeMap<SchemaKey, ValidatedSataySchema>,
+}
+
+impl ValidatedSatay {
+    pub(super) fn insert_schema(&mut self, schema: &OasObjectSchema, satay: ValidatedSataySchema) {
+        self.schemas.insert(SchemaKey::new(schema), satay);
+    }
+
+    pub(crate) fn schema(&self, schema: &OasObjectSchema, context: &str) -> &ValidatedSataySchema {
+        self.schemas
+            .get(&SchemaKey::new(schema))
+            .unwrap_or_else(|| {
+                panic!("validated x-satay data missing during lowering for {context}")
+            })
+    }
+
+    pub(crate) fn treat_error_as_none(&self, schema: &OasSchema, context: &str) -> bool {
+        match schema {
+            OasSchema::Boolean(_) => false,
+            OasSchema::Object(object) => match object.as_ref() {
+                ObjectOrReference::Object(schema) => {
+                    self.schema(schema, context).treat_error_as_none
+                }
+                ObjectOrReference::Ref { .. } => false,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ValidatedSataySchema {
+    pub(crate) parse_as: Option<ParseAs>,
+    pub(crate) integer_type: Option<IntegerType>,
+    pub(crate) range_scalar: Option<RangeScalar>,
+    pub(crate) enum_variants: BTreeMap<String, String>,
+    pub(crate) treat_error_as_none: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct SchemaKey(usize);
+
+impl SchemaKey {
+    fn new(schema: &OasObjectSchema) -> Self {
+        Self(schema as *const OasObjectSchema as usize)
+    }
+}
 
 pub(super) fn validate_component_enum_satay(
     schema: &OasObjectSchema,
     context: &str,
-) -> Result<(), ValidationError> {
-    validate_enum_variants(schema, context)
+) -> Result<ValidatedSataySchema, ValidationError> {
+    Ok(ValidatedSataySchema {
+        enum_variants: validate_enum_variants(schema, context)?,
+        ..ValidatedSataySchema::default()
+    })
 }
 
 pub(super) fn validate_type_satay(
@@ -23,16 +78,17 @@ pub(super) fn validate_type_satay(
     schema_type: Option<OasSchemaType>,
     context: &str,
     allow_treat_error_as_none: bool,
-) -> Result<Option<ParseAs>, ValidationError> {
+) -> Result<ValidatedSataySchema, ValidationError> {
     let parse_as = parse_satay_parse_as(schema, context)?;
     let integer_type = parse_satay_integer_type(schema, context)?;
+    let mut range_scalar = None;
 
     validate_satay_integer_type(schema_type, parse_as, integer_type, context)?;
 
     if let Some(parse_as) = parse_as {
         match (schema_type, parse_as) {
             (Some(OasSchemaType::String), ParseAs::IntegerRange | ParseAs::NumberRange) => {
-                parse_range_scalar(schema, parse_as, integer_type, context)?;
+                range_scalar = Some(parse_range_scalar(schema, parse_as, integer_type, context)?);
             }
             (Some(OasSchemaType::String), _) => {}
             (Some(OasSchemaType::Integer), ParseAs::Bool) => {}
@@ -49,55 +105,60 @@ pub(super) fn validate_type_satay(
         }
     }
 
-    if allow_treat_error_as_none {
-        validate_treat_error_as_none(schema, context)?;
-    }
-
-    Ok(parse_as)
+    Ok(ValidatedSataySchema {
+        parse_as,
+        integer_type,
+        range_scalar,
+        treat_error_as_none: allow_treat_error_as_none
+            && validate_treat_error_as_none(schema, context)?,
+        ..ValidatedSataySchema::default()
+    })
 }
 
 pub(super) fn validate_type_enum_satay(
     schema: &OasObjectSchema,
     context: &str,
-) -> Result<(), ValidationError> {
+) -> Result<BTreeMap<String, String>, ValidationError> {
     validate_enum_variants(schema, context)
 }
 
-fn validate_enum_variants(schema: &OasObjectSchema, context: &str) -> Result<(), ValidationError> {
+fn validate_enum_variants(
+    schema: &OasObjectSchema,
+    context: &str,
+) -> Result<BTreeMap<String, String>, ValidationError> {
     if schema.enum_values.is_empty() {
-        return Ok(());
+        return Ok(BTreeMap::new());
     }
 
     let mut enum_values = BTreeSet::new();
     for value in &schema.enum_values {
         let Some(value) = value.as_str() else {
-            return Ok(());
+            return Ok(BTreeMap::new());
         };
         enum_values.insert(value.to_owned());
     }
 
-    parse_satay_enum_variants(schema, context, &enum_values)?;
-    Ok(())
+    parse_satay_enum_variants(schema, context, &enum_values)
 }
 
 fn validate_treat_error_as_none(
     schema: &OasObjectSchema,
     context: &str,
-) -> Result<(), ValidationError> {
+) -> Result<bool, ValidationError> {
     let Some(satay) = satay_object(schema, context)? else {
-        return Ok(());
+        return Ok(false);
     };
 
     let Some(value) = satay.get("treat-error-as-none") else {
-        return Ok(());
+        return Ok(false);
     };
 
-    value
+    let value = value
         .as_bool()
         .ok_or_else(|| ValidationError::InvalidBooleanKeyword {
             context: context.to_owned(),
             keyword: "treat-error-as-none",
         })?;
 
-    Ok(())
+    Ok(value)
 }

@@ -11,11 +11,15 @@ use super::super::reference::{
     resolve_parameter, resolve_path_item, resolve_request_body, resolve_response,
 };
 use super::super::resolve::ResolvedDocument;
+use super::satay::ValidatedSatay;
 use super::schema::validate_type_schema;
 use crate::error::ValidationError;
 use crate::model::HttpMethod;
 
-pub(super) fn validate_operations(document: &ResolvedDocument<'_>) -> Result<(), ValidationError> {
+pub(super) fn validate_operations(
+    document: &ResolvedDocument<'_>,
+    satay: &mut ValidatedSatay,
+) -> Result<(), ValidationError> {
     let Some(paths) = document.spec.paths.as_ref() else {
         return Ok(());
     };
@@ -27,26 +31,65 @@ pub(super) fn validate_operations(document: &ResolvedDocument<'_>) -> Result<(),
             document,
             &path_item.parameters,
             &format!("path item `{path}` parameters"),
+            satay,
         )?;
 
-        validate_path_operation(document, HttpMethod::Get, path, path_item.get.as_ref())?;
-        validate_path_operation(document, HttpMethod::Post, path, path_item.post.as_ref())?;
-        validate_path_operation(document, HttpMethod::Put, path, path_item.put.as_ref())?;
-        validate_path_operation(document, HttpMethod::Patch, path, path_item.patch.as_ref())?;
+        validate_path_operation(
+            document,
+            HttpMethod::Get,
+            path,
+            path_item.get.as_ref(),
+            satay,
+        )?;
+        validate_path_operation(
+            document,
+            HttpMethod::Post,
+            path,
+            path_item.post.as_ref(),
+            satay,
+        )?;
+        validate_path_operation(
+            document,
+            HttpMethod::Put,
+            path,
+            path_item.put.as_ref(),
+            satay,
+        )?;
+        validate_path_operation(
+            document,
+            HttpMethod::Patch,
+            path,
+            path_item.patch.as_ref(),
+            satay,
+        )?;
         validate_path_operation(
             document,
             HttpMethod::Delete,
             path,
             path_item.delete.as_ref(),
+            satay,
         )?;
-        validate_path_operation(document, HttpMethod::Head, path, path_item.head.as_ref())?;
+        validate_path_operation(
+            document,
+            HttpMethod::Head,
+            path,
+            path_item.head.as_ref(),
+            satay,
+        )?;
         validate_path_operation(
             document,
             HttpMethod::Options,
             path,
             path_item.options.as_ref(),
+            satay,
         )?;
-        validate_path_operation(document, HttpMethod::Trace, path, path_item.trace.as_ref())?;
+        validate_path_operation(
+            document,
+            HttpMethod::Trace,
+            path,
+            path_item.trace.as_ref(),
+            satay,
+        )?;
     }
 
     Ok(())
@@ -57,12 +100,13 @@ fn validate_path_operation(
     method: HttpMethod,
     path: &str,
     operation: Option<&OasOperation>,
+    satay: &mut ValidatedSatay,
 ) -> Result<(), ValidationError> {
     let Some(operation) = operation else {
         return Ok(());
     };
 
-    validate_operation(document, method, path, operation)
+    validate_operation(document, method, path, operation, satay)
 }
 
 fn validate_operation(
@@ -70,6 +114,7 @@ fn validate_operation(
     method: HttpMethod,
     path: &str,
     operation: &OasOperation,
+    satay: &mut ValidatedSatay,
 ) -> Result<(), ValidationError> {
     let operation_id = operation
         .operation_id
@@ -80,12 +125,14 @@ fn validate_operation(
         document,
         &operation.parameters,
         &format!("operation `{operation_id}` parameters"),
+        satay,
     )?;
 
     validate_request_body(
         document,
         operation.request_body.as_ref(),
         &format!("operation `{operation_id}` requestBody"),
+        satay,
     )?;
 
     if let Some(responses) = operation.responses.as_ref() {
@@ -93,6 +140,7 @@ fn validate_operation(
             document,
             responses,
             &format!("operation `{operation_id}` responses"),
+            satay,
         )?;
     }
 
@@ -103,9 +151,10 @@ fn validate_parameter_list(
     document: &ResolvedDocument<'_>,
     parameters: &[ObjectOrReference<OasParameter>],
     context: &str,
+    satay: &mut ValidatedSatay,
 ) -> Result<(), ValidationError> {
     for parameter in parameters {
-        validate_parameter(document, parameter, context)?;
+        validate_parameter(document, parameter, context, satay)?;
     }
 
     Ok(())
@@ -115,6 +164,7 @@ fn validate_parameter(
     document: &ResolvedDocument<'_>,
     parameter: &ObjectOrReference<OasParameter>,
     context: &str,
+    satay: &mut ValidatedSatay,
 ) -> Result<(), ValidationError> {
     let parameter = resolve_parameter(document, parameter, context)?;
 
@@ -126,13 +176,19 @@ fn validate_parameter(
         return Ok(());
     };
 
-    validate_type_schema(schema, &format!("parameter `{}`", parameter.name), false)
+    validate_type_schema(
+        schema,
+        &format!("parameter `{}`", parameter.name),
+        false,
+        satay,
+    )
 }
 
 fn validate_request_body(
     document: &ResolvedDocument<'_>,
     request_body: Option<&ObjectOrReference<OasRequestBody>>,
     context: &str,
+    satay: &mut ValidatedSatay,
 ) -> Result<(), ValidationError> {
     let Some(request_body) = request_body else {
         return Ok(());
@@ -146,13 +202,14 @@ fn validate_request_body(
         return Ok(());
     };
 
-    validate_type_schema(schema, context, false)
+    validate_type_schema(schema, context, false, satay)
 }
 
 fn validate_responses(
     document: &ResolvedDocument<'_>,
     responses: &OasMap<String, ObjectOrReference<OasResponse>>,
     context: &str,
+    satay: &mut ValidatedSatay,
 ) -> Result<(), ValidationError> {
     for (status, response) in responses {
         if status == "default" {
@@ -172,7 +229,7 @@ fn validate_responses(
             continue;
         };
 
-        validate_type_schema(schema, &format!("{context} {status} schema"), false)?;
+        validate_type_schema(schema, &format!("{context} {status} schema"), false, satay)?;
     }
 
     Ok(())
