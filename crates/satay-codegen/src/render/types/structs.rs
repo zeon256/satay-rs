@@ -1,9 +1,9 @@
-use crate::model::{Api, ComponentKind, Field, TypeRef};
+use crate::model::{Field, TypeRef};
 use syn::parse_quote;
 
 use super::super::{
-    component_kind, doc_attrs, ident, is_nullable_type, lit_str, parse_as_integer_serde_module,
-    parse_as_string_serde_module, rust_field_type,
+    doc_attrs, ident, lit_str, parse_as_integer_serde_module, parse_as_string_serde_module,
+    rust_field_type,
 };
 
 pub fn render_struct(
@@ -11,13 +11,12 @@ pub fn render_struct(
     description: Option<&str>,
     fields: &[Field],
     serde: bool,
-    api: Option<&Api>,
 ) -> syn::ItemStruct {
     let name = ident(name);
     let attrs = struct_attrs(description, serde);
     let fields = fields
         .iter()
-        .map(|field| render_struct_field(field, serde, api))
+        .map(|field| render_struct_field(field, serde))
         .collect::<Vec<_>>();
 
     parse_quote!(
@@ -39,15 +38,15 @@ fn struct_attrs(description: Option<&str>, serde: bool) -> Vec<syn::Attribute> {
     attrs
 }
 
-fn render_struct_field(field: &Field, serde: bool, api: Option<&Api>) -> syn::Field {
+fn render_struct_field(field: &Field, serde: bool) -> syn::Field {
     let name = ident(&field.rust_name);
     let ty = rust_field_type(&field.ty, field.required, field.treat_error_as_none);
-    let attrs = field_attrs(field, serde, api);
+    let attrs = field_attrs(field, serde);
 
     parse_quote!(#(#attrs)* pub #name: #ty)
 }
 
-fn field_attrs(field: &Field, serde: bool, api: Option<&Api>) -> Vec<syn::Attribute> {
+fn field_attrs(field: &Field, serde: bool) -> Vec<syn::Attribute> {
     let mut attrs = doc_attrs(field.description.as_deref());
     if !serde {
         return attrs;
@@ -65,7 +64,7 @@ fn field_attrs(field: &Field, serde: bool, api: Option<&Api>) -> Vec<syn::Attrib
         serde_attrs.push(quote::quote!(
             serialize_with = "satay_runtime::treat_error_as_none::serialize"
         ));
-    } else if let Some(module) = parsed_serde_module(field, api) {
+    } else if let Some(module) = parsed_serde_module(field) {
         serde_attrs.push(quote::quote!(with = #module));
     }
     if !field.required || field.treat_error_as_none {
@@ -78,27 +77,16 @@ fn field_attrs(field: &Field, serde: bool, api: Option<&Api>) -> Vec<syn::Attrib
     attrs
 }
 
-fn parsed_serde_module(field: &Field, api: Option<&Api>) -> Option<syn::LitStr> {
-    let ty = parsed_serde_type(field.ty.non_nullable(), api);
-    let module = match ty.non_nullable() {
+fn parsed_serde_module(field: &Field) -> Option<syn::LitStr> {
+    let module = match field.ty.non_option() {
         TypeRef::ParsedString(parse_as) => parse_as_string_serde_module(*parse_as),
         TypeRef::ParsedInteger(parse_as) => parse_as_integer_serde_module(*parse_as),
         _ => return None,
     };
-    let module = if !field.required || is_nullable_type(&field.ty, api) {
+    let module = if !field.required || field.ty.is_option() {
         format!("{module}::option")
     } else {
         module.to_owned()
     };
     Some(lit_str(&module))
-}
-
-fn parsed_serde_type<'a>(ty: &'a TypeRef, api: Option<&'a Api>) -> &'a TypeRef {
-    match (ty, api) {
-        (TypeRef::Named(name), Some(api)) => match component_kind(api, name) {
-            Some(ComponentKind::Alias(alias)) => parsed_serde_type(alias.non_nullable(), Some(api)),
-            _ => ty,
-        },
-        _ => ty,
-    }
 }

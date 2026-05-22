@@ -1386,7 +1386,6 @@ name = "satay-codegen"
 version = "0.1.0"
 dependencies = [
  "heck",
- "indexmap",
  "oas3",
  "prettyplease",
  "proc-macro2",

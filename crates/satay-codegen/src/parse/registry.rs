@@ -26,7 +26,7 @@ impl TypeRegistry {
         inner: TypeRef,
         validation: Validation,
     ) -> TypeRef {
-        let rust_name = unique_ident(type_ident(type_name_hint), &mut self.used_names);
+        let rust_name = self.generated_type_name(type_name_hint);
 
         self.generated.push(ConstrainedType {
             rust_name: rust_name.clone(),
@@ -47,7 +47,7 @@ impl TypeRegistry {
         description: Option<String>,
         variants: Vec<EnumVariant>,
     ) -> TypeRef {
-        let rust_name = unique_ident(type_ident(type_name_hint), &mut self.used_names);
+        let rust_name = self.generated_type_name(type_name_hint);
 
         self.inline_enums.push(Component {
             rust_name: rust_name.clone(),
@@ -64,7 +64,7 @@ impl TypeRegistry {
         description: Option<String>,
         scalar: RangeScalar,
     ) -> TypeRef {
-        let rust_name = unique_ident(type_ident(type_name_hint), &mut self.used_names);
+        let rust_name = self.generated_type_name(type_name_hint);
 
         self.inline_ranges.push(Component {
             rust_name: rust_name.clone(),
@@ -87,4 +87,23 @@ impl TypeRegistry {
         components.extend(self.inline_ranges);
         (components, self.generated)
     }
+
+    fn generated_type_name(&mut self, type_name_hint: &str) -> String {
+        let candidate = type_ident(type_name_hint);
+        if self.used_names.insert(candidate.clone()) {
+            return candidate;
+        }
+
+        let candidate = format!("{candidate}_{}", stable_suffix(type_name_hint));
+        unique_ident(candidate, &mut self.used_names)
+    }
+}
+
+fn stable_suffix(value: &str) -> String {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for byte in value.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    format!("{hash:08X}")
 }

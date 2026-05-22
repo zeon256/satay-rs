@@ -17,21 +17,21 @@ pub(crate) struct ValidatedDocument<'a> {
     pub(crate) operations: Vec<ValidatedOperation>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ValidatedComponent {
     pub(crate) schema_name: String,
     pub(crate) description: Option<String>,
     pub(crate) kind: ValidatedComponentKind,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum ValidatedComponentKind {
     Reference(String),
     Struct(Vec<ValidatedField>),
     Type(ValidatedType),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ValidatedField {
     pub(crate) wire_name: String,
     pub(crate) description: Option<String>,

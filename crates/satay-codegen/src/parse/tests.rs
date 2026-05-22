@@ -327,7 +327,7 @@ components:
 
         let display_name = component(&api, "DisplayName");
         match &display_name.kind {
-            ComponentKind::Alias(TypeRef::Nullable(inner)) => match inner.as_ref() {
+            ComponentKind::Alias(TypeRef::Option(inner)) => match inner.as_ref() {
                 TypeRef::Constrained { rust_name, inner } => {
                     assert_eq!(rust_name, "DisplayNameValue");
                     assert_eq!(inner.as_ref(), &TypeRef::String);
@@ -523,6 +523,103 @@ components:
                 );
             }
             other => panic!("expected Arrival struct, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lowers_alias_refs_before_rendering() {
+        let api = parse_valid(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /reading:
+    get:
+      operationId: getReading
+      parameters:
+        - name: readingId
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/ReadingId'
+      responses:
+        '200':
+          description: Reading
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reading'
+components:
+  schemas:
+    Reading:
+      type: object
+      required:
+        - id
+        - nickname
+      properties:
+        id:
+          $ref: '#/components/schemas/ReadingId'
+        nickname:
+          $ref: '#/components/schemas/OptionalName'
+    ReadingId:
+      type: string
+      x-satay:
+        parse-as: u32
+    OptionalName:
+      type: [string, "null"]
+"#,
+        );
+
+        let reading = component(&api, "Reading");
+        match &reading.kind {
+            ComponentKind::Struct(fields) => {
+                assert_eq!(field(fields, "id").ty, TypeRef::ParsedString(ParseAs::U32));
+                assert_eq!(
+                    field(fields, "nickname").ty,
+                    TypeRef::Option(Box::new(TypeRef::String))
+                );
+            }
+            other => panic!("expected Reading struct, got {other:?}"),
+        }
+
+        let reading_id = parameter(&api.operations[0], "readingId");
+        assert_eq!(reading_id.ty, TypeRef::ParsedString(ParseAs::U32));
+    }
+
+    #[test]
+    fn rejects_parameters_that_reference_nullable_aliases() {
+        let err = parse_invalid(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /reading:
+    get:
+      operationId: getReading
+      parameters:
+        - name: nickname
+          in: query
+          schema:
+            $ref: '#/components/schemas/OptionalName'
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    OptionalName:
+      type: [string, "null"]
+"#,
+        );
+
+        match err {
+            ValidationError::NullableParameterUnsupported { wire_name } => {
+                assert_eq!(wire_name, "nickname");
+            }
+            other => panic!("unexpected error: {other}"),
         }
     }
 
@@ -1168,7 +1265,7 @@ components:
         );
 
         match &component(&api, "OptionalName").kind {
-            ComponentKind::Alias(TypeRef::Nullable(inner)) => match inner.as_ref() {
+            ComponentKind::Alias(TypeRef::Option(inner)) => match inner.as_ref() {
                 TypeRef::Constrained { rust_name, inner } => {
                     assert_eq!(rust_name, "OptionalNameValue");
                     assert_eq!(inner.as_ref(), &TypeRef::String);
