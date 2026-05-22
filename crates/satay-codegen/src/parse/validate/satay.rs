@@ -1,9 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use oas3::spec::{
-    ObjectOrReference, ObjectSchema as OasObjectSchema, Schema as OasSchema,
-    SchemaType as OasSchemaType,
-};
+use oas3::spec::{ObjectSchema as OasObjectSchema, SchemaType as OasSchemaType};
 
 use super::super::helpers::satay_object;
 use super::super::reference::schema_type_wire;
@@ -14,53 +11,13 @@ use super::super::satay::{
 use crate::error::ValidationError;
 use crate::model::{IntegerType, ParseAs, RangeScalar};
 
-#[derive(Debug, Default)]
-pub(crate) struct ValidatedSatay {
-    schemas: BTreeMap<SchemaKey, ValidatedSataySchema>,
-}
-
-impl ValidatedSatay {
-    pub(super) fn insert_schema(&mut self, schema: &OasObjectSchema, satay: ValidatedSataySchema) {
-        self.schemas.insert(SchemaKey::new(schema), satay);
-    }
-
-    pub(crate) fn schema(&self, schema: &OasObjectSchema, context: &str) -> &ValidatedSataySchema {
-        self.schemas
-            .get(&SchemaKey::new(schema))
-            .unwrap_or_else(|| {
-                panic!("validated x-satay data missing during lowering for {context}")
-            })
-    }
-
-    pub(crate) fn treat_error_as_none(&self, schema: &OasSchema, context: &str) -> bool {
-        match schema {
-            OasSchema::Boolean(_) => false,
-            OasSchema::Object(object) => match object.as_ref() {
-                ObjectOrReference::Object(schema) => {
-                    self.schema(schema, context).treat_error_as_none
-                }
-                ObjectOrReference::Ref { .. } => false,
-            },
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ValidatedSataySchema {
     pub(crate) parse_as: Option<ParseAs>,
-    pub(crate) integer_type: Option<IntegerType>,
+    pub(crate) explicit_integer_type: Option<IntegerType>,
     pub(crate) range_scalar: Option<RangeScalar>,
     pub(crate) enum_variants: BTreeMap<String, String>,
     pub(crate) treat_error_as_none: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct SchemaKey(usize);
-
-impl SchemaKey {
-    fn new(schema: &OasObjectSchema) -> Self {
-        Self(schema as *const OasObjectSchema as usize)
-    }
 }
 
 pub(super) fn validate_component_enum_satay(
@@ -80,15 +37,20 @@ pub(super) fn validate_type_satay(
     allow_treat_error_as_none: bool,
 ) -> Result<ValidatedSataySchema, ValidationError> {
     let parse_as = parse_satay_parse_as(schema, context)?;
-    let integer_type = parse_satay_integer_type(schema, context)?;
+    let explicit_integer_type = parse_satay_integer_type(schema, context)?;
     let mut range_scalar = None;
 
-    validate_satay_integer_type(schema_type, parse_as, integer_type, context)?;
+    validate_satay_integer_type(schema_type, parse_as, explicit_integer_type, context)?;
 
     if let Some(parse_as) = parse_as {
         match (schema_type, parse_as) {
             (Some(OasSchemaType::String), ParseAs::IntegerRange | ParseAs::NumberRange) => {
-                range_scalar = Some(parse_range_scalar(schema, parse_as, integer_type, context)?);
+                range_scalar = Some(parse_range_scalar(
+                    schema,
+                    parse_as,
+                    explicit_integer_type,
+                    context,
+                )?);
             }
             (Some(OasSchemaType::String), _) => {}
             (Some(OasSchemaType::Integer), ParseAs::Bool) => {}
@@ -107,7 +69,7 @@ pub(super) fn validate_type_satay(
 
     Ok(ValidatedSataySchema {
         parse_as,
-        integer_type,
+        explicit_integer_type,
         range_scalar,
         treat_error_as_none: allow_treat_error_as_none
             && validate_treat_error_as_none(schema, context)?,

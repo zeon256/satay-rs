@@ -2,15 +2,16 @@ pub(crate) mod constraint;
 mod operation;
 mod satay;
 mod schema;
+mod state;
 
 use super::resolve::ResolvedDocument;
 use crate::error::ValidationError;
-pub(crate) use satay::ValidatedSatay;
+pub(crate) use state::ValidatedSchemas;
 
 #[derive(Debug)]
 pub(crate) struct ValidatedDocument<'a> {
     pub(crate) resolved: ResolvedDocument<'a>,
-    pub(crate) satay: ValidatedSatay,
+    pub(crate) schemas: ValidatedSchemas,
 }
 
 pub(crate) fn validate_document<'a>(
@@ -24,14 +25,14 @@ pub(crate) fn validate_document<'a>(
         });
     }
 
-    let mut satay = ValidatedSatay::default();
+    let mut schemas = ValidatedSchemas::default();
 
-    schema::validate_components(&document, &mut satay)?;
-    operation::validate_operations(&document, &mut satay)?;
+    schema::validate_components(&document, &mut schemas)?;
+    operation::validate_operations(&document, &mut schemas)?;
 
     Ok(ValidatedDocument {
         resolved: document,
-        satay,
+        schemas,
     })
 }
 
