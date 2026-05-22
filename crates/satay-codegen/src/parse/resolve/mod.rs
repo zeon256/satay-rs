@@ -316,38 +316,18 @@ fn validate_path_item(
         )?;
     }
 
-    validate_operation_refs(document, path_item.get.as_ref(), &format!("{context}.get"))?;
-    validate_operation_refs(
-        document,
-        path_item.post.as_ref(),
-        &format!("{context}.post"),
-    )?;
-    validate_operation_refs(document, path_item.put.as_ref(), &format!("{context}.put"))?;
-    validate_operation_refs(
-        document,
-        path_item.patch.as_ref(),
-        &format!("{context}.patch"),
-    )?;
-    validate_operation_refs(
-        document,
-        path_item.delete.as_ref(),
-        &format!("{context}.delete"),
-    )?;
-    validate_operation_refs(
-        document,
-        path_item.head.as_ref(),
-        &format!("{context}.head"),
-    )?;
-    validate_operation_refs(
-        document,
-        path_item.options.as_ref(),
-        &format!("{context}.options"),
-    )?;
-    validate_operation_refs(
-        document,
-        path_item.trace.as_ref(),
-        &format!("{context}.trace"),
-    )?;
+    for (method, operation) in [
+        ("get", path_item.get.as_ref()),
+        ("post", path_item.post.as_ref()),
+        ("put", path_item.put.as_ref()),
+        ("patch", path_item.patch.as_ref()),
+        ("delete", path_item.delete.as_ref()),
+        ("head", path_item.head.as_ref()),
+        ("options", path_item.options.as_ref()),
+        ("trace", path_item.trace.as_ref()),
+    ] {
+        validate_operation_refs(document, operation, &format!("{context}.{method}"))?;
+    }
 
     Ok(())
 }

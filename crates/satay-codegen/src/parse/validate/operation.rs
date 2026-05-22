@@ -38,70 +38,25 @@ pub(super) fn validate_operations(
             &format!("path item `{path}` parameters"),
         )?;
 
-        validate_path_operation(
-            document,
-            &mut operations,
-            HttpMethod::Get,
-            path,
-            path_item.get.as_ref(),
-            &path_parameters,
-        )?;
-        validate_path_operation(
-            document,
-            &mut operations,
-            HttpMethod::Post,
-            path,
-            path_item.post.as_ref(),
-            &path_parameters,
-        )?;
-        validate_path_operation(
-            document,
-            &mut operations,
-            HttpMethod::Put,
-            path,
-            path_item.put.as_ref(),
-            &path_parameters,
-        )?;
-        validate_path_operation(
-            document,
-            &mut operations,
-            HttpMethod::Patch,
-            path,
-            path_item.patch.as_ref(),
-            &path_parameters,
-        )?;
-        validate_path_operation(
-            document,
-            &mut operations,
-            HttpMethod::Delete,
-            path,
-            path_item.delete.as_ref(),
-            &path_parameters,
-        )?;
-        validate_path_operation(
-            document,
-            &mut operations,
-            HttpMethod::Head,
-            path,
-            path_item.head.as_ref(),
-            &path_parameters,
-        )?;
-        validate_path_operation(
-            document,
-            &mut operations,
-            HttpMethod::Options,
-            path,
-            path_item.options.as_ref(),
-            &path_parameters,
-        )?;
-        validate_path_operation(
-            document,
-            &mut operations,
-            HttpMethod::Trace,
-            path,
-            path_item.trace.as_ref(),
-            &path_parameters,
-        )?;
+        for (method, operation) in [
+            (HttpMethod::Get, path_item.get.as_ref()),
+            (HttpMethod::Post, path_item.post.as_ref()),
+            (HttpMethod::Put, path_item.put.as_ref()),
+            (HttpMethod::Patch, path_item.patch.as_ref()),
+            (HttpMethod::Delete, path_item.delete.as_ref()),
+            (HttpMethod::Head, path_item.head.as_ref()),
+            (HttpMethod::Options, path_item.options.as_ref()),
+            (HttpMethod::Trace, path_item.trace.as_ref()),
+        ] {
+            validate_path_operation(
+                document,
+                &mut operations,
+                method,
+                path,
+                operation,
+                &path_parameters,
+            )?;
+        }
     }
 
     Ok(operations)
