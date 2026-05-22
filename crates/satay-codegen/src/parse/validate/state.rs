@@ -2,25 +2,39 @@ use std::collections::BTreeMap;
 
 use oas3::spec::{ObjectOrReference, ObjectSchema as OasObjectSchema, Schema as OasSchema};
 
+use super::index::{SchemaId, SchemaIndex};
 use super::satay::ValidatedSataySchema;
 use crate::model::{IntegerType, Validation};
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct ValidatedSchemas {
-    schemas: BTreeMap<SchemaKey, ValidatedSchema>,
+    index: SchemaIndex,
+    schemas: BTreeMap<SchemaId, ValidatedSchema>,
 }
 
 impl ValidatedSchemas {
-    pub(super) fn insert_schema(&mut self, schema: &OasObjectSchema, validated: ValidatedSchema) {
-        self.schemas.insert(SchemaKey::new(schema), validated);
+    pub(super) fn new(index: SchemaIndex) -> Self {
+        Self {
+            index,
+            schemas: BTreeMap::new(),
+        }
+    }
+
+    pub(super) fn insert_schema(
+        &mut self,
+        schema: &OasObjectSchema,
+        context: &str,
+        validated: ValidatedSchema,
+    ) {
+        let id = self.index.id(schema, context);
+        self.schemas.insert(id, validated);
     }
 
     pub(crate) fn schema(&self, schema: &OasObjectSchema, context: &str) -> &ValidatedSchema {
-        self.schemas
-            .get(&SchemaKey::new(schema))
-            .unwrap_or_else(|| {
-                panic!("validated schema data missing during lowering for {context}")
-            })
+        let id = self.index.id(schema, context);
+        self.schemas.get(&id).unwrap_or_else(|| {
+            panic!("validated schema data missing during lowering for {context}")
+        })
     }
 
     pub(crate) fn treat_error_as_none(&self, schema: &OasSchema, context: &str) -> bool {
@@ -41,13 +55,4 @@ pub(crate) struct ValidatedSchema {
     pub(crate) satay: ValidatedSataySchema,
     pub(crate) integer_type: Option<IntegerType>,
     pub(crate) validation: Option<Validation>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct SchemaKey(usize);
-
-impl SchemaKey {
-    fn new(schema: &OasObjectSchema) -> Self {
-        Self(schema as *const OasObjectSchema as usize)
-    }
 }

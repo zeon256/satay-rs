@@ -50,6 +50,7 @@ pub(super) fn validate_type_schema(
     if validated_satay.parse_as.is_some() {
         schemas.insert_schema(
             schema,
+            context,
             validated_schema_constraints(schema, schema_type, context, validated_satay)?,
         );
         return Ok(());
@@ -60,6 +61,7 @@ pub(super) fn validate_type_schema(
         validated_satay.enum_variants = validate_type_enum_satay(schema, context)?;
         schemas.insert_schema(
             schema,
+            context,
             validated_schema_constraints(schema, schema_type, context, validated_satay)?,
         );
         return Ok(());
@@ -68,6 +70,7 @@ pub(super) fn validate_type_schema(
     validate_inline_type_shape(schema, schema_type, context, schemas)?;
     schemas.insert_schema(
         schema,
+        context,
         validated_schema_constraints(schema, schema_type, context, validated_satay)?,
     );
 
@@ -95,6 +98,7 @@ fn validate_component_schema(
         let validated_satay = validate_component_enum_satay(schema, &context)?;
         schemas.insert_schema(
             schema,
+            &context,
             validated_schema_constraints(schema, schema_type, &context, validated_satay)?,
         );
         return Ok(());
@@ -139,6 +143,7 @@ fn validate_component_alias_satay(
     if parse_as.is_some() {
         schemas.insert_schema(
             schema,
+            context,
             validated_schema_constraints(schema, schema_type, context, validated_satay)?,
         );
         return Ok(());
@@ -147,6 +152,7 @@ fn validate_component_alias_satay(
     validate_alias_type_shape(schema, schema_type, context, schemas)?;
     schemas.insert_schema(
         schema,
+        context,
         validated_schema_constraints(schema, schema_type, context, validated_satay)?,
     );
 
