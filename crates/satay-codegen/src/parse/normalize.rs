@@ -9,31 +9,74 @@ use oas3::{
     },
 };
 
-use super::super::reference::{
+use super::reference::{
     resolve_parameter, resolve_path_item, resolve_request_body, resolve_response,
 };
-use super::super::resolve::ResolvedDocument;
+use super::resolve::ResolvedDocument;
 use crate::error::ValidationError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct SchemaId(usize);
 
-#[derive(Debug, Default)]
-pub(super) struct SchemaIndex {
-    ids: BTreeMap<SchemaKey, SchemaId>,
+impl SchemaId {
+    pub(crate) const fn new(index: usize) -> Self {
+        Self(index)
+    }
 }
 
-impl SchemaIndex {
-    pub(super) fn id(&self, schema: &OasObjectSchema, context: &str) -> SchemaId {
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct NormalizedSchema<'a> {
+    pub(crate) schema: &'a OasObjectSchema,
+}
+
+#[derive(Debug)]
+pub(crate) struct NormalizedSchemas<'a> {
+    ids: BTreeMap<SchemaKey, SchemaId>,
+    schemas: BTreeMap<SchemaId, NormalizedSchema<'a>>,
+}
+
+impl<'a> NormalizedSchemas<'a> {
+    pub(crate) fn new() -> Self {
+        Self {
+            ids: BTreeMap::new(),
+            schemas: BTreeMap::new(),
+        }
+    }
+
+    pub(crate) fn object_id(&self, schema: &OasObjectSchema, context: &str) -> SchemaId {
         self.ids
             .get(&SchemaKey::new(schema))
             .copied()
             .unwrap_or_else(|| panic!("schema id missing during validation/lowering for {context}"))
     }
 
-    fn insert(&mut self, schema: &OasObjectSchema) {
-        let next = SchemaId(self.ids.len());
-        self.ids.entry(SchemaKey::new(schema)).or_insert(next);
+    pub(crate) fn schema_id(&self, schema: &OasSchema, context: &str) -> Option<SchemaId> {
+        match schema {
+            OasSchema::Boolean(_) => None,
+            OasSchema::Object(object) => match object.as_ref() {
+                ObjectOrReference::Object(schema) => Some(self.object_id(schema, context)),
+                ObjectOrReference::Ref { .. } => None,
+            },
+        }
+    }
+
+    pub(crate) fn schema(&self, id: SchemaId, context: &str) -> NormalizedSchema<'a> {
+        self.schemas
+            .get(&id)
+            .copied()
+            .unwrap_or_else(|| panic!("normalized schema missing for {context}"))
+    }
+
+    fn insert(&mut self, schema: &'a OasObjectSchema) -> SchemaId {
+        let key = SchemaKey::new(schema);
+        if let Some(id) = self.ids.get(&key).copied() {
+            return id;
+        }
+
+        let id = SchemaId::new(self.schemas.len());
+        self.ids.insert(key, id);
+        self.schemas.insert(id, NormalizedSchema { schema });
+        id
     }
 }
 
@@ -46,87 +89,99 @@ impl SchemaKey {
     }
 }
 
-pub(super) fn index_document(
-    document: &ResolvedDocument<'_>,
-) -> Result<SchemaIndex, ValidationError> {
-    let mut indexer = SchemaIndexer {
-        index: SchemaIndex::default(),
+#[derive(Debug)]
+pub(crate) struct NormalizedDocument<'a> {
+    pub(crate) resolved: ResolvedDocument<'a>,
+    pub(crate) schemas: NormalizedSchemas<'a>,
+}
+
+pub(crate) fn normalize_document<'a>(
+    resolved: ResolvedDocument<'a>,
+) -> Result<NormalizedDocument<'a>, ValidationError> {
+    let mut normalizer = SchemaNormalizer {
+        schemas: NormalizedSchemas::new(),
     };
 
-    indexer.index_components(document)?;
-    indexer.index_paths(document)?;
+    normalizer.normalize_components(&resolved)?;
+    normalizer.normalize_paths(&resolved)?;
 
-    Ok(indexer.index)
+    Ok(NormalizedDocument {
+        resolved,
+        schemas: normalizer.schemas,
+    })
 }
 
-struct SchemaIndexer {
-    index: SchemaIndex,
+struct SchemaNormalizer<'a> {
+    schemas: NormalizedSchemas<'a>,
 }
 
-impl SchemaIndexer {
-    fn index_components(&mut self, document: &ResolvedDocument<'_>) -> Result<(), ValidationError> {
+impl<'a> SchemaNormalizer<'a> {
+    fn normalize_components(
+        &mut self,
+        document: &ResolvedDocument<'a>,
+    ) -> Result<(), ValidationError> {
         let Some(components) = document.spec.components.as_ref() else {
             return Ok(());
         };
 
         for (schema_name, schema) in &components.schemas {
-            self.index_schema(schema, &format!("schema `{schema_name}`"))?;
+            self.normalize_schema(schema, &format!("schema `{schema_name}`"))?;
         }
 
         Ok(())
     }
 
-    fn index_paths(&mut self, document: &ResolvedDocument<'_>) -> Result<(), ValidationError> {
+    fn normalize_paths(&mut self, document: &ResolvedDocument<'a>) -> Result<(), ValidationError> {
         let Some(paths) = document.spec.paths.as_ref() else {
             return Ok(());
         };
 
         for (path, path_item) in paths {
             let path_item = resolve_path_item(document, path_item, &format!("path item `{path}`"))?;
-            self.index_path_item(document, path_item, &format!("path item `{path}`"))?;
+            self.normalize_path_item(document, path_item, &format!("path item `{path}`"))?;
         }
 
         Ok(())
     }
 
-    fn index_path_item(
+    fn normalize_path_item(
         &mut self,
-        document: &ResolvedDocument<'_>,
-        path_item: &OasPathItem,
+        document: &ResolvedDocument<'a>,
+        path_item: &'a OasPathItem,
         context: &str,
     ) -> Result<(), ValidationError> {
         for parameter in &path_item.parameters {
-            self.index_parameter(document, parameter, &format!("{context}.parameters"))?;
+            self.normalize_parameter(document, parameter, &format!("{context}.parameters"))?;
         }
 
-        self.index_operation(document, path_item.get.as_ref(), &format!("{context}.get"))?;
-        self.index_operation(
+        self.normalize_operation(document, path_item.get.as_ref(), &format!("{context}.get"))?;
+        self.normalize_operation(
             document,
             path_item.post.as_ref(),
             &format!("{context}.post"),
         )?;
-        self.index_operation(document, path_item.put.as_ref(), &format!("{context}.put"))?;
-        self.index_operation(
+        self.normalize_operation(document, path_item.put.as_ref(), &format!("{context}.put"))?;
+        self.normalize_operation(
             document,
             path_item.patch.as_ref(),
             &format!("{context}.patch"),
         )?;
-        self.index_operation(
+        self.normalize_operation(
             document,
             path_item.delete.as_ref(),
             &format!("{context}.delete"),
         )?;
-        self.index_operation(
+        self.normalize_operation(
             document,
             path_item.head.as_ref(),
             &format!("{context}.head"),
         )?;
-        self.index_operation(
+        self.normalize_operation(
             document,
             path_item.options.as_ref(),
             &format!("{context}.options"),
         )?;
-        self.index_operation(
+        self.normalize_operation(
             document,
             path_item.trace.as_ref(),
             &format!("{context}.trace"),
@@ -135,10 +190,10 @@ impl SchemaIndexer {
         Ok(())
     }
 
-    fn index_operation(
+    fn normalize_operation(
         &mut self,
-        document: &ResolvedDocument<'_>,
-        operation: Option<&OasOperation>,
+        document: &ResolvedDocument<'a>,
+        operation: Option<&'a OasOperation>,
         context: &str,
     ) -> Result<(), ValidationError> {
         let Some(operation) = operation else {
@@ -152,7 +207,7 @@ impl SchemaIndexer {
             .unwrap_or_else(|| context.to_owned());
 
         for parameter in &operation.parameters {
-            self.index_parameter(
+            self.normalize_parameter(
                 document,
                 parameter,
                 &format!("{operation_context} parameters"),
@@ -160,7 +215,7 @@ impl SchemaIndexer {
         }
 
         if let Some(request_body) = operation.request_body.as_ref() {
-            self.index_request_body(
+            self.normalize_request_body(
                 document,
                 request_body,
                 &format!("{operation_context} requestBody"),
@@ -169,7 +224,7 @@ impl SchemaIndexer {
 
         if let Some(responses) = operation.responses.as_ref() {
             for (status, response) in responses {
-                self.index_response(
+                self.normalize_response(
                     document,
                     response,
                     &format!("{operation_context} responses {status}"),
@@ -180,80 +235,84 @@ impl SchemaIndexer {
         Ok(())
     }
 
-    fn index_parameter(
+    fn normalize_parameter(
         &mut self,
-        document: &ResolvedDocument<'_>,
-        parameter: &ObjectOrReference<OasParameter>,
+        document: &ResolvedDocument<'a>,
+        parameter: &'a ObjectOrReference<OasParameter>,
         context: &str,
     ) -> Result<(), ValidationError> {
         let parameter = resolve_parameter(document, parameter, context)?;
         if let Some(schema) = parameter.schema.as_ref() {
-            self.index_schema(schema, &format!("{context}.schema"))?;
+            self.normalize_schema(schema, &format!("{context}.schema"))?;
         }
 
         Ok(())
     }
 
-    fn index_request_body(
+    fn normalize_request_body(
         &mut self,
-        document: &ResolvedDocument<'_>,
-        request_body: &ObjectOrReference<OasRequestBody>,
+        document: &ResolvedDocument<'a>,
+        request_body: &'a ObjectOrReference<OasRequestBody>,
         context: &str,
     ) -> Result<(), ValidationError> {
         let request_body = resolve_request_body(document, request_body, context)?;
-        self.index_content(&request_body.content, &format!("{context}.content"))
+        self.normalize_content(&request_body.content, &format!("{context}.content"))
     }
 
-    fn index_response(
+    fn normalize_response(
         &mut self,
-        document: &ResolvedDocument<'_>,
-        response: &ObjectOrReference<OasResponse>,
+        document: &ResolvedDocument<'a>,
+        response: &'a ObjectOrReference<OasResponse>,
         context: &str,
     ) -> Result<(), ValidationError> {
         let response = resolve_response(document, response, context)?;
-        self.index_content(&response.content, &format!("{context}.content"))
+        self.normalize_content(&response.content, &format!("{context}.content"))
     }
 
-    fn index_content(
+    fn normalize_content(
         &mut self,
-        content: &OasMap<String, OasMediaType>,
+        content: &'a OasMap<String, OasMediaType>,
         context: &str,
     ) -> Result<(), ValidationError> {
         for (media_type, media) in content {
             if let Some(schema) = media.schema.as_ref() {
-                self.index_schema(schema, &format!("{context}.{media_type}.schema"))?;
+                self.normalize_schema(schema, &format!("{context}.{media_type}.schema"))?;
             }
         }
 
         Ok(())
     }
 
-    fn index_schema(&mut self, schema: &OasSchema, context: &str) -> Result<(), ValidationError> {
+    fn normalize_schema(
+        &mut self,
+        schema: &'a OasSchema,
+        context: &str,
+    ) -> Result<(), ValidationError> {
         match schema {
             OasSchema::Boolean(_) => Ok(()),
             OasSchema::Object(schema) => match schema.as_ref() {
-                ObjectOrReference::Object(schema) => self.index_object_schema(schema, context),
+                ObjectOrReference::Object(schema) => self.normalize_object_schema(schema, context),
                 ObjectOrReference::Ref { .. } => Ok(()),
             },
         }
     }
 
-    fn index_object_schema(
+    fn normalize_object_schema(
         &mut self,
-        schema: &OasObjectSchema,
+        schema: &'a OasObjectSchema,
         context: &str,
     ) -> Result<(), ValidationError> {
-        self.index.insert(schema);
+        self.schemas.insert(schema);
 
         for (property_name, property_schema) in &schema.properties {
-            self.index_schema(
+            self.normalize_schema(
                 property_schema,
                 &format!("{context}.properties.{property_name}"),
             )?;
         }
 
         if let Some(items) = schema.items.as_deref() {
-            self.index_schema(items, &format!("{context}.items"))?;
+            self.normalize_schema(items, &format!("{context}.items"))?;
         }
 
         for (keyword, schemas) in [
@@ -262,7 +321,7 @@ impl SchemaIndexer {
             ("allOf", &schema.all_of),
         ] {
             for (index, schema) in schemas.iter().enumerate() {
-                self.index_schema(schema, &format!("{context}.{keyword}[{index}]"))?;
+                self.normalize_schema(schema, &format!("{context}.{keyword}[{index}]"))?;
             }
         }
 

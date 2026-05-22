@@ -16,8 +16,10 @@ flowchart TD
     document --> parseApi["parse::parse_api"]
     parseApi --> resolve["resolve::resolve_document"]
     resolve --> resolved["ResolvedDocument<'a><br/>borrowed oas3::Spec"]
-    resolved --> validate["validate::validate_document"]
-    validate --> validated["ValidatedDocument<'a><br/>ResolvedDocument + ValidatedSchemas"]
+    resolved --> normalize["normalize::normalize_document"]
+    normalize --> normalized["NormalizedDocument<'a><br/>ResolvedDocument + NormalizedSchemas"]
+    normalized --> validate["validate::validate_document"]
+    validate --> validated["ValidatedDocument<'a><br/>NormalizedDocument + ValidatedSchemas"]
     validated --> lower["lower::lower_document"]
     lower --> model["model::Api<br/>normalized codegen IR"]
     model --> render["render::render_api"]
@@ -43,6 +45,7 @@ flowchart LR
 
     subgraph parse["parse/"]
         parseMod["mod.rs<br/>parse_document, parse_api"] --> resolve
+        parseMod --> normalize
         parseMod --> validate
         parseMod --> lower
         parseMod --> reference
@@ -50,6 +53,7 @@ flowchart LR
         parseMod --> satay
 
         resolve["resolve/<br/>local ref validation"]
+        normalize["normalize.rs<br/>SchemaId assignment + schema graph"]
         reference["reference.rs<br/>on-demand ref helpers"]
         validate["validate/<br/>supported subset + schema metadata"]
         lower["lower/<br/>oas3 -> model::Api"]
@@ -74,9 +78,10 @@ flowchart LR
 
 `parse::parse_document` parses the incoming string with `oas3::from_yaml` and stores the parsed `oas3::spec::Spec` in a small `Document` wrapper.
 
-`parse::parse_api` runs three phases:
+`parse::parse_api` runs four phases:
 
 - `resolve::resolve_document` checks that supported local references point at existing component entries and that component-object reference chains are not circular.
+- `normalize::normalize_document` walks reachable schema locations and assigns stable `SchemaId`s to object schema instances.
 - `validate::validate_document` checks the supported OpenAPI subset and records per-schema metadata needed later.
 - `lower::lower_document` converts the validated `oas3` document into the `model::Api` IR.
 
@@ -88,21 +93,38 @@ Reference resolution is deliberately split between validation and use:
 
 Only local component references are supported today, for example `#/components/schemas/User`.
 
+## Normalize Stage
+
+Normalization is a narrow schema-identity pass. It does not rewrite the OpenAPI tree yet; instead, it builds a `NormalizedDocument` that pairs the resolved document with a `NormalizedSchemas` graph.
+
+```mermaid
+flowchart TD
+    resolved["ResolvedDocument"] --> normalize["normalize::normalize_document"]
+    normalize --> components["component schemas"]
+    normalize --> paths["path, operation, request, response schemas"]
+    components --> graph["NormalizedSchemas<br/>SchemaId -> NormalizedSchema"]
+    paths --> graph
+    graph --> normalized["NormalizedDocument"]
+```
+
+`SchemaId` is the stable key used by validation metadata and by lowering. Raw `oas3` schema object identity is now contained inside `NormalizedSchemas`, so `ValidatedSchemas` can be constructed directly from `SchemaId` values in focused tests without building an OpenAPI document graph.
+
+The current `NormalizedSchema` still points at the borrowed `oas3::ObjectSchema`. The next normalization step would be to replace those borrowed schema objects with a fully semantic schema shape, but that is deliberately separate from this identity and state split.
+
 ## Validation Stage
 
 Validation is centered on `parse/validate/mod.rs` and produces a `ValidatedDocument`:
 
 ```mermaid
 flowchart TD
-    resolved["ResolvedDocument"] --> version["OpenAPI version check<br/>3.1.x only"]
-    version --> index["index::index_document"]
-    index --> schemas["ValidatedSchemas<br/>SchemaId -> ValidatedSchema"]
+    normalized["NormalizedDocument"] --> version["OpenAPI version check<br/>3.1.x only"]
+    version --> schemas["ValidatedSchemas<br/>SchemaId -> ValidatedSchema"]
     schemas --> components["schema::validate_components"]
     components --> operations["operation::validate_operations"]
     operations --> validated["ValidatedDocument"]
 ```
 
-The schema index assigns `SchemaId`s to object schema instances before validation. `ValidatedSchemas` then stores derived metadata by `SchemaId`, so lowering can retrieve decisions without redoing validation.
+`ValidatedSchemas` stores derived metadata by `SchemaId`, so lowering can retrieve decisions without redoing validation. It no longer owns the raw schema identity map; that belongs to `NormalizedSchemas`.
 
 Per-schema metadata is stored in `ValidatedSchema`:
 
@@ -116,14 +138,13 @@ Validation responsibilities are split by file:
 - `validate/operation.rs` validates paths, operation parameters, request bodies, responses, status codes, path placeholders, and JSON media-type requirements.
 - `validate/constraint.rs` parses and normalizes string, integer, number, and array constraints for `nutype` rendering. It also infers integer types from bounds when no explicit `x-satay.integer-type` is provided.
 - `validate/satay.rs` validates Satay vendor extensions such as `parse-as`, `integer-type`, `enum-variants`, and `treat-error-as-none`.
-- `validate/index.rs` walks components and paths to assign schema IDs to object schemas reachable from supported locations.
 - `validate/state.rs` owns the `ValidatedSchemas` lookup state used by validation and lowering.
 
 Unsupported OpenAPI features are rejected with `ValidationError` instead of being ignored. Lowering and rendering rely on those validation guarantees and use `unreachable!` or `expect` for states that validation should have made impossible.
 
 ## Lowering Stage
 
-Lowering converts `oas3` data plus validation metadata into the normalized IR in `model.rs`.
+Lowering converts normalized `oas3` schema identities plus validation metadata into the normalized IR in `model.rs`.
 
 ```mermaid
 flowchart TD
@@ -332,6 +353,7 @@ Key invariants enforced before rendering:
 Most feature additions need changes in this order:
 
 - Add or adjust `ValidationError` variants for the new supported or rejected cases.
+- Update `parse/normalize` if the feature introduces new schema locations that need `SchemaId`s.
 - Update `parse/validate` so the new shape is either accepted with metadata or rejected explicitly.
 - Extend `model.rs` only if the existing `TypeRef`, `ComponentKind`, or operation IR cannot represent the feature.
 - Update `parse/lower` to produce the IR from validated `oas3` data.
