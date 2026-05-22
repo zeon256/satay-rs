@@ -10,12 +10,8 @@ use super::super::reference::{
     schema_type_wire,
 };
 use super::super::registry::TypeRegistry;
-use super::super::resolve::ResolvedDocument;
-use super::super::satay::{
-    lower_range_scalar, lower_satay_enum_variants, lower_satay_integer_type, lower_satay_parse_as,
-    lower_satay_treat_error_as_none,
-};
 use super::super::validate::constraint::{parse_integer_type, parse_validation, reject_keyword};
+use super::super::validate::{ValidatedDocument, ValidatedSatay};
 use crate::error::ValidationError;
 use crate::ident::{field_ident, type_ident, unique_ident, variant_ident};
 use crate::model::{
@@ -23,10 +19,10 @@ use crate::model::{
 };
 
 pub(super) fn parse_components(
-    document: &ResolvedDocument<'_>,
+    document: &ValidatedDocument<'_>,
     registry: &mut TypeRegistry,
 ) -> Result<Vec<Component>, ValidationError> {
-    let Some(components) = document.spec.components.as_ref() else {
+    let Some(components) = document.resolved.spec.components.as_ref() else {
         return Ok(vec![]);
     };
 
@@ -35,7 +31,7 @@ pub(super) fn parse_components(
     for (schema_name, schema) in &components.schemas {
         let rust_name = type_ident(schema_name);
         let description = schema_description(schema);
-        let kind = parse_component_kind(schema_name, schema, registry)?;
+        let kind = parse_component_kind(schema_name, schema, registry, &document.satay)?;
         parsed.push(Component {
             rust_name,
             description,
@@ -50,6 +46,7 @@ fn parse_component_kind(
     schema_name: &str,
     schema: &OasSchema,
     registry: &mut TypeRegistry,
+    satay: &ValidatedSatay,
 ) -> Result<ComponentKind, ValidationError> {
     let context = format!("schema `{schema_name}`");
 
@@ -66,7 +63,7 @@ fn parse_component_kind(
     let (schema_type, nullable) = schema_type_and_nullable(schema, &context)?;
 
     if !schema.enum_values.is_empty() {
-        let variants = parse_string_enum(schema, &context)?;
+        let variants = parse_string_enum(schema, &context, satay)?;
         if nullable {
             let inner = registry.inline_enum_ref(
                 &format!("{schema_name} value"),
@@ -80,7 +77,7 @@ fn parse_component_kind(
 
     match schema_type {
         Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => Ok(
-            ComponentKind::Struct(parse_struct_fields(schema_name, schema, registry)?),
+            ComponentKind::Struct(parse_struct_fields(schema_name, schema, registry, satay)?),
         ),
         Some(
             OasSchemaType::Array
@@ -88,7 +85,14 @@ fn parse_component_kind(
             | OasSchemaType::Integer
             | OasSchemaType::Number
             | OasSchemaType::Boolean,
-        ) => parse_component_alias_or_nutype(schema_name, schema, schema_type, nullable, registry),
+        ) => parse_component_alias_or_nutype(
+            schema_name,
+            schema,
+            schema_type,
+            nullable,
+            registry,
+            satay,
+        ),
         Some(kind) => Err(ValidationError::UnsupportedComponentType {
             schema: schema_name.to_owned(),
             kind: schema_type_wire(kind).to_owned(),
@@ -105,21 +109,24 @@ fn parse_component_alias_or_nutype(
     schema_type: Option<OasSchemaType>,
     nullable: bool,
     registry: &mut TypeRegistry,
+    satay: &ValidatedSatay,
 ) -> Result<ComponentKind, ValidationError> {
     let context = format!("schema `{schema_name}`");
     let rust_name = type_ident(schema_name);
     let description = optional_description(&schema.description);
-    let parse_as = lower_satay_parse_as(schema, &context);
-    let integer_type = lower_satay_integer_type(schema, &context);
+    let satay_schema = satay.schema(schema, &context);
+    let parse_as = satay_schema.parse_as;
 
-    if let Some(parse_as @ (ParseAs::IntegerRange | ParseAs::NumberRange)) = parse_as {
+    if matches!(parse_as, Some(ParseAs::IntegerRange | ParseAs::NumberRange)) {
         if schema_type != Some(OasSchemaType::String) {
             unreachable!(
                 "validation should reject incompatible x-satay range parse-as before lowering for {context}"
             );
         }
 
-        let scalar = lower_range_scalar(schema, parse_as, integer_type, &context);
+        let scalar = satay_schema
+            .range_scalar
+            .expect("validated x-satay range scalar missing during component lowering");
 
         if nullable {
             let inner =
@@ -134,7 +141,14 @@ fn parse_component_alias_or_nutype(
         }));
     }
 
-    let base = parse_type_ref_base(schema, schema_type, &context, registry, Some(schema_name))?;
+    let base = parse_type_ref_base(
+        schema,
+        schema_type,
+        &context,
+        registry,
+        Some(schema_name),
+        satay,
+    )?;
 
     let validation = parse_validation(schema, &base, &context)?;
 
@@ -162,6 +176,7 @@ fn parse_component_alias_or_nutype(
 fn parse_string_enum(
     schema: &OasObjectSchema,
     context: &str,
+    satay: &ValidatedSatay,
 ) -> Result<Vec<EnumVariant>, ValidationError> {
     let (schema_type, _) = schema_type_and_nullable(schema, context)?;
 
@@ -180,7 +195,6 @@ fn parse_string_enum(
         });
     }
 
-    let mut wire_values = BTreeSet::new();
     let mut wire_names = Vec::with_capacity(schema.enum_values.len());
 
     for value in &schema.enum_values {
@@ -189,11 +203,10 @@ fn parse_string_enum(
                 context: context.to_owned(),
             });
         };
-        wire_values.insert(value.to_owned());
         wire_names.push(value);
     }
 
-    let explicit_variants = lower_satay_enum_variants(schema, context, &wire_values);
+    let explicit_variants = &satay.schema(schema, context).enum_variants;
     let mut used = BTreeSet::from(["Unknown".to_owned()]);
 
     for rust_name in explicit_variants.values() {
@@ -226,6 +239,7 @@ fn parse_struct_fields(
     schema_name: &str,
     schema: &OasObjectSchema,
     registry: &mut TypeRegistry,
+    satay: &ValidatedSatay,
 ) -> Result<Vec<Field>, ValidationError> {
     let context = format!("schema `{schema_name}`");
     let required = parse_required_set(schema);
@@ -250,8 +264,9 @@ fn parse_struct_fields(
             &format!("property `{schema_name}.{wire_name}`"),
             registry,
             Some(&format!("{schema_name} {wire_name}")),
+            satay,
         )?;
-        let treat_error_as_none = lower_satay_treat_error_as_none(
+        let treat_error_as_none = satay.treat_error_as_none(
             property_schema,
             &format!("property `{schema_name}.{wire_name}`"),
         );
@@ -277,6 +292,7 @@ pub(super) fn parse_type_ref(
     context: &str,
     registry: &mut TypeRegistry,
     type_name_hint: Option<&str>,
+    satay: &ValidatedSatay,
 ) -> Result<TypeRef, ValidationError> {
     if let Some(reference) = schema_ref(schema, context)? {
         return Ok(TypeRef::Named(schema_ref_type_name(reference)?));
@@ -288,7 +304,14 @@ pub(super) fn parse_type_ref(
 
     let description = optional_description(&schema.description);
     let (schema_type, nullable) = schema_type_and_nullable(schema, context)?;
-    let base = parse_type_ref_base(schema, schema_type, context, registry, type_name_hint)?;
+    let base = parse_type_ref_base(
+        schema,
+        schema_type,
+        context,
+        registry,
+        type_name_hint,
+        satay,
+    )?;
 
     let validation = parse_validation(schema, &base, context)?;
     let ty = if let Some(validation) = validation {
@@ -315,15 +338,19 @@ fn parse_type_ref_base(
     context: &str,
     registry: &mut TypeRegistry,
     type_name_hint: Option<&str>,
+    satay: &ValidatedSatay,
 ) -> Result<TypeRef, ValidationError> {
     let description = optional_description(&schema.description);
-    let parse_as = lower_satay_parse_as(schema, context);
-    let integer_type = lower_satay_integer_type(schema, context);
+    let satay_schema = satay.schema(schema, context);
+    let parse_as = satay_schema.parse_as;
+    let integer_type = satay_schema.integer_type;
 
     if let Some(parse_as) = parse_as {
         match (schema_type, parse_as) {
             (Some(OasSchemaType::String), ParseAs::IntegerRange | ParseAs::NumberRange) => {
-                let scalar = lower_range_scalar(schema, parse_as, integer_type, context);
+                let scalar = satay_schema
+                    .range_scalar
+                    .expect("validated x-satay range scalar missing during type lowering");
                 return Ok(registry.inline_range_ref(
                     type_name_hint.unwrap_or(context),
                     description,
@@ -343,7 +370,7 @@ fn parse_type_ref_base(
     }
 
     if !schema.enum_values.is_empty() {
-        let mut variants = parse_string_enum(schema, context)?;
+        let mut variants = parse_string_enum(schema, context, satay)?;
         let default_empty_variant = variant_ident("");
         variants.retain(|v| !v.wire_name.is_empty() || v.rust_name != default_empty_variant);
         if variants.is_empty() {
@@ -387,6 +414,7 @@ fn parse_type_ref_base(
                 &format!("{context} items"),
                 registry,
                 item_name_hint.as_deref(),
+                satay,
             )?)))
         }
         Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => {

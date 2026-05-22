@@ -1,9 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use oas3::spec::{
-    ObjectOrReference, ObjectSchema as OasObjectSchema, Schema as OasSchema,
-    SchemaType as OasSchemaType,
-};
+use oas3::spec::{ObjectSchema as OasObjectSchema, SchemaType as OasSchemaType};
 
 use super::helpers::satay_object;
 use super::reference::schema_type_wire;
@@ -61,19 +58,6 @@ pub(super) fn parse_satay_enum_variants(
     Ok(mappings)
 }
 
-pub(super) fn lower_satay_enum_variants(
-    schema: &OasObjectSchema,
-    context: &str,
-    enum_values: &BTreeSet<String>,
-) -> BTreeMap<String, String> {
-    match parse_satay_enum_variants(schema, context, enum_values) {
-        Ok(mappings) => mappings,
-        Err(error) => unreachable!(
-            "validated x-satay enum-variants failed during lowering for {context}: {error:?}"
-        ),
-    }
-}
-
 pub(super) fn parse_satay_parse_as(
     schema: &OasObjectSchema,
     context: &str,
@@ -98,15 +82,6 @@ pub(super) fn parse_satay_parse_as(
             context: context.to_owned(),
             parse_as: value.to_owned(),
         })
-}
-
-pub(super) fn lower_satay_parse_as(schema: &OasObjectSchema, context: &str) -> Option<ParseAs> {
-    match parse_satay_parse_as(schema, context) {
-        Ok(parse_as) => parse_as,
-        Err(error) => unreachable!(
-            "validated x-satay parse-as failed during lowering for {context}: {error:?}"
-        ),
-    }
 }
 
 pub(super) fn parse_satay_integer_type(
@@ -137,18 +112,6 @@ pub(super) fn parse_satay_integer_type(
             integer_type: value.to_owned(),
         }
     })
-}
-
-pub(super) fn lower_satay_integer_type(
-    schema: &OasObjectSchema,
-    context: &str,
-) -> Option<IntegerType> {
-    match parse_satay_integer_type(schema, context) {
-        Ok(integer_type) => integer_type,
-        Err(error) => unreachable!(
-            "validated x-satay integer-type failed during lowering for {context}: {error:?}"
-        ),
-    }
 }
 
 pub(super) fn validate_satay_integer_type(
@@ -202,64 +165,6 @@ pub(super) fn parse_range_scalar(
             }),
         },
         _ => unreachable!("range scalar requires a range parse-as value"),
-    }
-}
-
-pub(super) fn lower_range_scalar(
-    schema: &OasObjectSchema,
-    parse_as: ParseAs,
-    integer_type: Option<IntegerType>,
-    context: &str,
-) -> RangeScalar {
-    match parse_range_scalar(schema, parse_as, integer_type, context) {
-        Ok(scalar) => scalar,
-        Err(error) => unreachable!(
-            "validated x-satay range scalar failed during lowering for {context}: {error:?}"
-        ),
-    }
-}
-
-pub(super) fn parse_satay_treat_error_as_none(
-    schema: &OasSchema,
-    context: &str,
-) -> Result<bool, ValidationError> {
-    let satay = match schema {
-        OasSchema::Boolean(_) => return Ok(false),
-        OasSchema::Object(object) => match object.as_ref() {
-            ObjectOrReference::Object(schema) => schema.extensions.get("satay"),
-            ObjectOrReference::Ref { .. } => return Ok(false),
-        },
-    };
-
-    let Some(satay) = satay else {
-        return Ok(false);
-    };
-
-    let Some(satay) = satay.as_object() else {
-        return Err(ValidationError::ExpectedObjectField {
-            context: context.to_owned(),
-            field: "x-satay",
-        });
-    };
-
-    let Some(value) = satay.get("treat-error-as-none") else {
-        return Ok(false);
-    };
-
-    value
-        .as_bool()
-        .ok_or_else(|| ValidationError::InvalidBooleanKeyword {
-            context: context.to_owned(),
-            keyword: "treat-error-as-none",
-        })
-}
-
-pub(super) fn lower_satay_treat_error_as_none(schema: &OasSchema, context: &str) -> bool {
-    match parse_satay_treat_error_as_none(schema, context) {
-        Ok(treat_error_as_none) => treat_error_as_none,
-        Err(error) => unreachable!(
-            "validated x-satay treat-error-as-none failed during lowering for {context}: {error:?}"
-        ),
     }
 }
 

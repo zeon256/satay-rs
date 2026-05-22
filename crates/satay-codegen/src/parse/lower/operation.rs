@@ -16,6 +16,7 @@ use super::super::reference::{
 };
 use super::super::registry::TypeRegistry;
 use super::super::resolve::ResolvedDocument;
+use super::super::validate::ValidatedDocument;
 use super::schema::parse_type_ref;
 use crate::error::ValidationError;
 use crate::ident::{field_ident, function_ident, response_variant_ident, type_ident, unique_ident};
@@ -65,16 +66,20 @@ pub(super) fn parse_api_key_security_schemes(
 }
 
 pub(super) fn parse_operations(
-    document: &ResolvedDocument<'_>,
+    document: &ValidatedDocument<'_>,
     registry: &mut TypeRegistry,
 ) -> Result<Vec<SatayOperation>, ValidationError> {
-    let spec = &document.spec;
+    let spec = &document.resolved.spec;
     let paths = spec.paths.as_ref().ok_or(ValidationError::MissingPaths)?;
 
     let mut operations = vec![];
 
     for (path, path_item) in paths {
-        let path_item = resolve_path_item(document, path_item, &format!("path item `{path}`"))?;
+        let path_item = resolve_path_item(
+            &document.resolved,
+            path_item,
+            &format!("path item `{path}`"),
+        )?;
 
         let path_parameter_prefix = type_ident(&format!("{path} parameter"));
         let path_parameters = parse_parameter_list(
@@ -171,7 +176,7 @@ pub(super) fn parse_operations(
 
 #[allow(clippy::too_many_arguments)]
 fn parse_path_operation(
-    document: &ResolvedDocument<'_>,
+    document: &ValidatedDocument<'_>,
     operations: &mut Vec<SatayOperation>,
     method: HttpMethod,
     path: &str,
@@ -196,7 +201,7 @@ fn parse_path_operation(
 }
 
 fn parse_operation(
-    document: &ResolvedDocument<'_>,
+    document: &ValidatedDocument<'_>,
     method: HttpMethod,
     path: &str,
     path_parameters: &[Parameter],
@@ -265,7 +270,7 @@ fn parse_operation(
 }
 
 fn parse_parameter_list(
-    document: &ResolvedDocument<'_>,
+    document: &ValidatedDocument<'_>,
     parameters: &[ObjectOrReference<OasParameter>],
     context: &str,
     registry: &mut TypeRegistry,
@@ -286,13 +291,13 @@ fn parse_parameter_list(
 }
 
 fn parse_parameter(
-    document: &ResolvedDocument<'_>,
+    document: &ValidatedDocument<'_>,
     parameter: &ObjectOrReference<OasParameter>,
     context: &str,
     registry: &mut TypeRegistry,
     type_prefix: &str,
 ) -> Result<Parameter, ValidationError> {
-    let parameter = resolve_parameter(document, parameter, context)?;
+    let parameter = resolve_parameter(&document.resolved, parameter, context)?;
 
     let wire_name = parameter.name.clone();
 
@@ -330,6 +335,7 @@ fn parse_parameter(
         &format!("parameter `{wire_name}`"),
         registry,
         Some(&format!("{type_prefix} {wire_name} parameter")),
+        &document.satay,
     )?;
 
     if ty.is_nullable() {
@@ -390,7 +396,7 @@ fn deduplicate_parameter_fields(parameters: &mut [Parameter]) {
 }
 
 fn parse_request_body(
-    document: &ResolvedDocument<'_>,
+    document: &ValidatedDocument<'_>,
     request_body: Option<&ObjectOrReference<OasRequestBody>>,
     context: &str,
     parameters: &[Parameter],
@@ -400,7 +406,7 @@ fn parse_request_body(
     let Some(request_body) = request_body else {
         return Ok(None);
     };
-    let request_body = resolve_request_body(document, request_body, context)?;
+    let request_body = resolve_request_body(&document.resolved, request_body, context)?;
 
     if request_body.content.is_empty() {
         return Err(ValidationError::MissingContent {
@@ -436,13 +442,14 @@ fn parse_request_body(
             context,
             registry,
             Some(&format!("{type_prefix} request body")),
+            &document.satay,
         )?,
         required: request_body.required.unwrap_or(false),
     }))
 }
 
 fn parse_responses(
-    document: &ResolvedDocument<'_>,
+    document: &ValidatedDocument<'_>,
     responses: &OasMap<String, ObjectOrReference<OasResponse>>,
     context: &str,
     registry: &mut TypeRegistry,
@@ -452,7 +459,8 @@ fn parse_responses(
 
     for (status, response) in responses {
         if status == "default" {
-            let response = resolve_response(document, response, &format!("{context} default"))?;
+            let response =
+                resolve_response(&document.resolved, response, &format!("{context} default"))?;
             if !response.content.is_empty() {
                 return Err(ValidationError::DefaultResponseBodyUnsupported {
                     context: context.to_owned(),
@@ -475,7 +483,8 @@ fn parse_responses(
             });
         }
 
-        let response = resolve_response(document, response, &format!("{context} {status}"))?;
+        let response =
+            resolve_response(&document.resolved, response, &format!("{context} {status}"))?;
 
         let body = if response.content.is_empty() {
             None
@@ -492,6 +501,7 @@ fn parse_responses(
                     &format!("{context} {status} schema"),
                     registry,
                     Some(&format!("{type_prefix} response {status}")),
+                    &document.satay,
                 )?),
                 None => None,
             }

@@ -1,7 +1,7 @@
 use oas3::spec::Spec as OasSpec;
 
 use super::registry::TypeRegistry;
-use super::resolve::ResolvedDocument;
+use super::validate::ValidatedDocument;
 use crate::error::ValidationError;
 use crate::ident::type_ident;
 use crate::model::Api;
@@ -9,13 +9,13 @@ use crate::model::Api;
 mod operation;
 mod schema;
 
-pub(crate) fn lower_document(document: &ResolvedDocument<'_>) -> Result<Api, ValidationError> {
+pub(crate) fn lower_document(document: &ValidatedDocument<'_>) -> Result<Api, ValidationError> {
     tracing::debug!("lowering API from resolved document");
 
-    let spec = document.spec;
+    let spec = document.resolved.spec;
     let mut registry = TypeRegistry::default();
     let server_url = parse_server_url(spec);
-    let api_key_security_schemes = operation::parse_api_key_security_schemes(document)?;
+    let api_key_security_schemes = operation::parse_api_key_security_schemes(&document.resolved)?;
 
     reserve_component_type_names(spec, &mut registry);
 

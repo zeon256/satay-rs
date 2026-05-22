@@ -22,8 +22,8 @@ pub(crate) fn parse_api(document: &Document) -> Result<Api, ValidationError> {
     tracing::debug!("parsing API from document");
 
     let resolved = resolve::resolve_document(document)?;
-    validate::validate_document(&resolved)?;
-    lower::lower_document(&resolved)
+    let validated = validate::validate_document(resolved)?;
+    lower::lower_document(&validated)
 }
 
 pub(crate) fn parse_document(spec: &str) -> Result<Document, ParseError> {
