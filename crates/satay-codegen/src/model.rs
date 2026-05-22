@@ -1,11 +1,8 @@
-use indexmap::IndexMap;
-
 #[derive(Debug)]
 pub(crate) struct Api {
     pub(crate) server_url: String,
     pub(crate) api_key_security_schemes: Vec<ApiKeySecurityScheme>,
     pub(crate) components: Vec<Component>,
-    component_index_by_name: IndexMap<String, usize>,
     pub(crate) constrained_types: Vec<ConstrainedType>,
     pub(crate) operations: Vec<Operation>,
 }
@@ -18,28 +15,13 @@ impl Api {
         constrained_types: Vec<ConstrainedType>,
         operations: Vec<Operation>,
     ) -> Self {
-        let mut component_index_by_name = IndexMap::with_capacity(components.len());
-        for (index, component) in components.iter().enumerate() {
-            component_index_by_name
-                .entry(component.rust_name.clone())
-                .or_insert(index);
-        }
-
         Self {
             server_url,
             api_key_security_schemes,
             components,
-            component_index_by_name,
             constrained_types,
             operations,
         }
-    }
-
-    pub(crate) fn component_kind(&self, name: &str) -> Option<&ComponentKind> {
-        self.component_index_by_name
-            .get(name)
-            .and_then(|index| self.components.get(*index))
-            .map(|component| &component.kind)
     }
 }
 
@@ -56,14 +38,14 @@ pub(crate) enum ApiKeyLocation {
     Query,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Component {
     pub(crate) rust_name: String,
     pub(crate) description: Option<String>,
     pub(crate) kind: ComponentKind,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum ComponentKind {
     Struct(Vec<Field>),
     Enum(Vec<EnumVariant>),
@@ -177,7 +159,7 @@ pub(crate) enum TypeRef {
         rust_name: String,
         inner: Box<TypeRef>,
     },
-    Nullable(Box<TypeRef>),
+    Option(Box<TypeRef>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -266,13 +248,20 @@ pub(crate) struct ResponseCase {
 }
 
 impl TypeRef {
-    pub(crate) fn is_nullable(&self) -> bool {
-        matches!(self, Self::Nullable(_))
+    pub(crate) fn option(inner: TypeRef) -> Self {
+        match inner {
+            already @ Self::Option(_) => already,
+            other => Self::Option(Box::new(other)),
+        }
     }
 
-    pub(crate) fn non_nullable(&self) -> &TypeRef {
+    pub(crate) fn is_option(&self) -> bool {
+        matches!(self, Self::Option(_))
+    }
+
+    pub(crate) fn non_option(&self) -> &TypeRef {
         match self {
-            Self::Nullable(inner) => inner.non_nullable(),
+            Self::Option(inner) => inner.non_option(),
             other => other,
         }
     }
@@ -343,8 +332,8 @@ impl IntegerType {
 pub(crate) fn is_array_type(ty: &TypeRef) -> bool {
     match ty {
         TypeRef::Array(_) => true,
-        TypeRef::Constrained { inner, .. } => is_array_type(inner.non_nullable()),
-        TypeRef::Nullable(inner) => is_array_type(inner.non_nullable()),
+        TypeRef::Constrained { inner, .. } => is_array_type(inner.non_option()),
+        TypeRef::Option(inner) => is_array_type(inner.non_option()),
         _ => false,
     }
 }

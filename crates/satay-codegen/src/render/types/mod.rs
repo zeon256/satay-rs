@@ -26,7 +26,7 @@ pub(super) fn render_types_file(api: &Api) -> syn::File {
         ));
     }
     for component in &api.components {
-        render_component(api, component, &mut items);
+        render_component(component, &mut items);
     }
     for constrained_type in &api.constrained_types {
         items.push(Item::Struct(constrained::render_constrained_type(
@@ -41,7 +41,7 @@ pub(super) fn render_types_file(api: &Api) -> syn::File {
     }
 }
 
-fn render_component(api: &Api, component: &Component, items: &mut Vec<syn::Item>) {
+fn render_component(component: &Component, items: &mut Vec<syn::Item>) {
     match &component.kind {
         ComponentKind::Struct(fields) => {
             items.push(Item::Struct(structs::render_struct(
@@ -49,7 +49,6 @@ fn render_component(api: &Api, component: &Component, items: &mut Vec<syn::Item>
                 component.description.as_deref(),
                 fields,
                 true,
-                Some(api),
             )));
         }
         ComponentKind::Enum(variants) => items.extend(enums::render_enum(

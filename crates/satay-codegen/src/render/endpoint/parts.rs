@@ -2,13 +2,12 @@ use proc_macro2::Literal;
 use syn::parse_quote;
 
 use crate::model::{
-    Api, ComponentKind, Operation, Parameter, ParameterLocation, ParseAs, PathSegment, TypeRef,
-    is_array_type,
+    Operation, Parameter, ParameterLocation, ParseAs, PathSegment, TypeRef, is_array_type,
 };
 
-use super::super::{component_kind, doc_attrs, ident, input_field, lit_str, rust_field_type};
+use super::super::{doc_attrs, ident, input_field, lit_str, rust_field_type};
 
-pub(super) fn render_parts_function(api: &Api, operation: &Operation) -> syn::ItemFn {
+pub(super) fn render_parts_function(operation: &Operation) -> syn::ItemFn {
     let docs = doc_attrs(operation.description.as_deref());
     let body_type = operation.request_body.as_ref().map_or_else(
         || parse_quote!(()),
@@ -24,9 +23,9 @@ pub(super) fn render_parts_function(api: &Api, operation: &Operation) -> syn::It
     let path_capacity = Literal::usize_unsuffixed(operation.path.len());
 
     let mut statements = vec![parse_quote!(let mut uri = String::with_capacity(#path_capacity);)];
-    statements.extend(render_path(api, operation));
-    statements.extend(render_query(api, operation));
-    statements.extend(render_header_statements(api, operation));
+    statements.extend(render_path(operation));
+    statements.extend(render_query(operation));
+    statements.extend(render_header_statements(operation));
     let request_parts = render_request_parts_return(operation);
 
     parse_quote!(
@@ -40,7 +39,7 @@ pub(super) fn render_parts_function(api: &Api, operation: &Operation) -> syn::It
     )
 }
 
-fn render_header_statements(api: &Api, operation: &Operation) -> Vec<syn::Stmt> {
+fn render_header_statements(operation: &Operation) -> Vec<syn::Stmt> {
     let header_parameters = operation
         .parameters
         .iter()
@@ -77,13 +76,13 @@ fn render_header_statements(api: &Api, operation: &Operation) -> Vec<syn::Stmt> 
     for parameter in header_parameters {
         let wire_name = lit_str(&parameter.wire_name);
         let field = ident(&parameter.rust_name);
-        let expr = value_expr(input_field(&parameter.rust_name), &parameter.ty, api);
+        let expr = value_expr(input_field(&parameter.rust_name), &parameter.ty);
         if parameter.required {
             statements.push(parse_quote!(
                 satay_runtime::insert_header(&mut headers, #wire_name, #expr)?;
             ));
         } else {
-            let expr = value_expr(parse_quote!(value), &parameter.ty, api);
+            let expr = value_expr(parse_quote!(value), &parameter.ty);
             statements.push(parse_quote!(
                 if let Some(value) = &input.#field {
                     satay_runtime::insert_header(&mut headers, #wire_name, #expr)?;
@@ -115,7 +114,7 @@ fn render_request_parts_return(operation: &Operation) -> syn::Expr {
     )
 }
 
-fn render_path(api: &Api, operation: &Operation) -> Vec<syn::Stmt> {
+fn render_path(operation: &Operation) -> Vec<syn::Stmt> {
     let mut statements = Vec::new();
     for segment in &operation.path_segments {
         match segment {
@@ -133,7 +132,7 @@ fn render_path(api: &Api, operation: &Operation) -> Vec<syn::Stmt> {
                             && parameter.wire_name == *name
                     })
                     .expect("path parameters validated before render");
-                let expr = value_expr(input_field(&parameter.rust_name), &parameter.ty, api);
+                let expr = value_expr(input_field(&parameter.rust_name), &parameter.ty);
                 statements.push(parse_quote!(
                     satay_runtime::append_path_segment(&mut uri, #expr);
                 ));
@@ -143,7 +142,7 @@ fn render_path(api: &Api, operation: &Operation) -> Vec<syn::Stmt> {
     statements
 }
 
-fn render_query(api: &Api, operation: &Operation) -> Vec<syn::Stmt> {
+fn render_query(operation: &Operation) -> Vec<syn::Stmt> {
     let query_parameters = operation
         .parameters
         .iter()
@@ -155,25 +154,25 @@ fn render_query(api: &Api, operation: &Operation) -> Vec<syn::Stmt> {
 
     let mut statements = vec![parse_quote!(let mut first_query = true;)];
     for parameter in query_parameters {
-        statements.extend(render_query_parameter(api, parameter));
+        statements.extend(render_query_parameter(parameter));
     }
     statements
 }
 
-fn render_query_parameter(api: &Api, parameter: &Parameter) -> Vec<syn::Stmt> {
-    if let Some(item) = array_item_type(parameter.ty.non_nullable(), api) {
-        return render_array_query_parameter(api, parameter, item);
+fn render_query_parameter(parameter: &Parameter) -> Vec<syn::Stmt> {
+    if let Some(item) = array_item_type(parameter.ty.non_option()) {
+        return render_array_query_parameter(parameter, item);
     }
 
     let wire_name = lit_str(&parameter.wire_name);
     if parameter.required {
-        let expr = value_expr(input_field(&parameter.rust_name), &parameter.ty, api);
+        let expr = value_expr(input_field(&parameter.rust_name), &parameter.ty);
         vec![parse_quote!(
             satay_runtime::append_query_pair(&mut uri, &mut first_query, #wire_name, #expr);
         )]
     } else {
         let field = ident(&parameter.rust_name);
-        let expr = value_expr(parse_quote!(value), &parameter.ty, api);
+        let expr = value_expr(parse_quote!(value), &parameter.ty);
         vec![parse_quote!(
             if let Some(value) = &input.#field {
                 satay_runtime::append_query_pair(&mut uri, &mut first_query, #wire_name, #expr);
@@ -182,20 +181,15 @@ fn render_query_parameter(api: &Api, parameter: &Parameter) -> Vec<syn::Stmt> {
     }
 }
 
-fn render_array_query_parameter(
-    api: &Api,
-    parameter: &Parameter,
-    item: &TypeRef,
-) -> Vec<syn::Stmt> {
+fn render_array_query_parameter(parameter: &Parameter, item: &TypeRef) -> Vec<syn::Stmt> {
     let wire_name = lit_str(&parameter.wire_name);
-    let value = value_expr(parse_quote!(value), item, api);
+    let value = value_expr(parse_quote!(value), item);
 
     if parameter.required {
         let values = array_values_expr(
             input_field(&parameter.rust_name),
             &parameter.ty,
             ArrayValueBase::Owned,
-            api,
         );
         vec![parse_quote!(
             for value in #values {
@@ -208,7 +202,6 @@ fn render_array_query_parameter(
             parse_quote!(values),
             &parameter.ty,
             ArrayValueBase::Borrowed,
-            api,
         );
         vec![parse_quote!(
             if let Some(values) = &input.#field {
@@ -220,17 +213,10 @@ fn render_array_query_parameter(
     }
 }
 
-fn array_item_type<'a>(ty: &'a TypeRef, api: &'a Api) -> Option<&'a TypeRef> {
+fn array_item_type(ty: &TypeRef) -> Option<&TypeRef> {
     match ty {
         TypeRef::Array(item) => Some(item),
-        TypeRef::Constrained { inner, .. } => array_item_type(inner.non_nullable(), api),
-        TypeRef::Named(name) => match component_kind(api, name) {
-            Some(ComponentKind::Alias(alias)) => array_item_type(alias.non_nullable(), api),
-            Some(ComponentKind::Nutype(constrained_type)) => {
-                array_item_type(constrained_type.inner.non_nullable(), api)
-            }
-            _ => None,
-        },
+        TypeRef::Constrained { inner, .. } => array_item_type(inner.non_option()),
         _ => None,
     }
 }
@@ -241,100 +227,39 @@ enum ArrayValueBase {
     Borrowed,
 }
 
-fn array_values_expr(
-    base: syn::Expr,
-    ty: &TypeRef,
-    base_kind: ArrayValueBase,
-    api: &Api,
-) -> syn::Expr {
-    match ty.non_nullable() {
+fn array_values_expr(base: syn::Expr, ty: &TypeRef, base_kind: ArrayValueBase) -> syn::Expr {
+    match ty.non_option() {
         TypeRef::Array(_) => match base_kind {
             ArrayValueBase::Owned => parse_quote!(&#base),
             ArrayValueBase::Borrowed => base,
         },
-        TypeRef::Constrained { inner, .. } if is_array_type(inner.non_nullable()) => {
+        TypeRef::Constrained { inner, .. } if is_array_type(inner.non_option()) => {
             parse_quote!(#base.as_ref())
         }
-        TypeRef::Named(name) => match component_kind(api, name) {
-            Some(ComponentKind::Alias(alias)) => {
-                alias_array_values_expr(base, alias.non_nullable(), base_kind, api)
-            }
-            Some(ComponentKind::Nutype(constrained_type))
-                if array_item_type(constrained_type.inner.non_nullable(), api).is_some() =>
-            {
-                parse_quote!(#base.as_ref())
-            }
-            _ => unreachable!("array values are only rendered for array types"),
-        },
         _ => unreachable!("array values are only rendered for array types"),
     }
 }
 
-fn alias_array_values_expr(
-    base: syn::Expr,
-    ty: &TypeRef,
-    base_kind: ArrayValueBase,
-    api: &Api,
-) -> syn::Expr {
-    match ty.non_nullable() {
-        TypeRef::Array(_) => match base_kind {
-            ArrayValueBase::Owned => parse_quote!(&#base),
-            ArrayValueBase::Borrowed => base,
-        },
-        TypeRef::Constrained { inner, .. }
-            if array_item_type(inner.non_nullable(), api).is_some() =>
-        {
-            parse_quote!(#base.as_ref())
-        }
-        TypeRef::Named(name) => match component_kind(api, name) {
-            Some(ComponentKind::Alias(alias)) => {
-                alias_array_values_expr(base, alias.non_nullable(), base_kind, api)
-            }
-            Some(ComponentKind::Nutype(constrained_type))
-                if array_item_type(constrained_type.inner.non_nullable(), api).is_some() =>
-            {
-                parse_quote!(#base.as_ref())
-            }
-            _ => unreachable!("array values are only rendered for array types"),
-        },
-        _ => unreachable!("array values are only rendered for array types"),
-    }
-}
-
-fn value_expr(base: syn::Expr, ty: &TypeRef, api: &Api) -> syn::Expr {
-    match ty.non_nullable() {
+fn value_expr(base: syn::Expr, ty: &TypeRef) -> syn::Expr {
+    match ty.non_option() {
         TypeRef::String => parse_quote!(#base.as_str()),
         TypeRef::ParsedString(parse_as) | TypeRef::ParsedInteger(parse_as) => {
             parsed_value_expr(base, *parse_as)
         }
-        TypeRef::Named(name) => named_value_expr(base, name, api),
+        TypeRef::Named(_) => parse_quote!(#base.as_ref()),
         TypeRef::Range(_) => parse_quote!(&#base.to_string()),
-        TypeRef::Constrained { inner, .. } => {
-            constrained_value_expr(base, inner.non_nullable(), api)
-        }
+        TypeRef::Constrained { inner, .. } => constrained_value_expr(base, inner.non_option()),
         TypeRef::Integer(_) | TypeRef::F32 | TypeRef::F64 | TypeRef::Bool => {
             parse_quote!(&#base.to_string())
         }
-        TypeRef::Array(_) | TypeRef::Nullable(_) => unreachable!("arrays are handled by caller"),
+        TypeRef::Array(_) | TypeRef::Option(_) => unreachable!("arrays are handled by caller"),
     }
 }
 
-fn named_value_expr(base: syn::Expr, name: &str, api: &Api) -> syn::Expr {
-    match component_kind(api, name) {
-        Some(ComponentKind::Alias(alias)) => value_expr(base, alias, api),
-        Some(ComponentKind::Nutype(constrained_type)) => {
-            constrained_value_expr(base, constrained_type.inner.non_nullable(), api)
-        }
-        Some(ComponentKind::Range(_)) => parse_quote!(&#base.to_string()),
-        Some(ComponentKind::Enum(_)) | None => parse_quote!(#base.as_ref()),
-        Some(ComponentKind::Struct(_)) => parse_quote!(#base.as_ref()),
-    }
-}
-
-fn constrained_value_expr(base: syn::Expr, inner: &TypeRef, api: &Api) -> syn::Expr {
+fn constrained_value_expr(base: syn::Expr, inner: &TypeRef) -> syn::Expr {
     match inner {
         TypeRef::String => parse_quote!(#base.as_ref()),
-        TypeRef::Named(name) => named_value_expr(base, name, api),
+        TypeRef::Named(_) => parse_quote!(#base.as_ref()),
         TypeRef::Range(_) => parse_quote!(&#base.to_string()),
         TypeRef::ParsedString(parse_as) | TypeRef::ParsedInteger(parse_as) => {
             parsed_value_expr(base, *parse_as)
@@ -342,7 +267,7 @@ fn constrained_value_expr(base: syn::Expr, inner: &TypeRef, api: &Api) -> syn::E
         TypeRef::Integer(_) | TypeRef::F32 | TypeRef::F64 | TypeRef::Bool => {
             parse_quote!(&#base.to_string())
         }
-        TypeRef::Array(_) | TypeRef::Constrained { .. } | TypeRef::Nullable(_) => {
+        TypeRef::Array(_) | TypeRef::Constrained { .. } | TypeRef::Option(_) => {
             unreachable!("arrays are handled by caller")
         }
     }

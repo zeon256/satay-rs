@@ -41,7 +41,7 @@ pub(super) fn render_endpoint_parts_file(api: &Api, operation: &Operation) -> sy
         items.push(Item::Impl(default_impl));
     }
     items.push(Item::Enum(response::render_response(operation)));
-    items.push(Item::Fn(parts::render_parts_function(api, operation)));
+    items.push(Item::Fn(parts::render_parts_function(operation)));
 
     syn::File {
         shebang: None,
@@ -133,7 +133,7 @@ fn collect_type_refs(ty: &TypeRef, names: &mut Vec<Ident>) {
             names.push(super::ident(rust_name));
         }
         TypeRef::Array(inner) => collect_type_refs(inner, names),
-        TypeRef::Nullable(inner) => collect_type_refs(inner, names),
+        TypeRef::Option(inner) => collect_type_refs(inner, names),
         TypeRef::Range(range_type) => {
             names.push(super::ident(&range_type.rust_name));
         }

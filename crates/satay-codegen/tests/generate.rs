@@ -828,7 +828,7 @@ components:
             .contents
             .contains("pub no_service_at: Option<satay_runtime::Time>")
     );
-    assert!(types_rs.contents.contains("pub alias_id: ReadingId"));
+    assert!(types_rs.contents.contains("pub alias_id: u32"));
     assert!(
         types_rs
             .contents
@@ -876,7 +876,7 @@ components:
     );
 
     let parts_rs = find_file(&files, "get_reading/parts.rs");
-    assert!(parts_rs.contents.contains("pub reading_id: ReadingId"));
+    assert!(parts_rs.contents.contains("pub reading_id: u32"));
     assert!(parts_rs.contents.contains("input.reading_id.to_string()"));
 
     let temp = tempfile::tempdir().expect("create temp crate");

@@ -17,7 +17,6 @@ pub(super) fn render_input(operation: &Operation) -> syn::ItemStruct {
         operation.description.as_deref(),
         &input_fields,
         false,
-        None,
     )
 }
 
@@ -84,7 +83,7 @@ fn render_input_setter(field: &Field) -> TokenStream {
     let setter_name = input_setter_name(field);
     let name = ident(&field.rust_name);
     let ty = input_builder_arg_type(&field.ty);
-    if field.ty.is_nullable() {
+    if field.ty.is_option() {
         quote!(
             pub fn #setter_name(mut self, #name: #ty) -> Self {
                 self.#name = #name;

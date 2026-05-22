@@ -20,7 +20,7 @@ pub(super) fn parse_validation(
         | TypeRef::Bool
         | TypeRef::Named(_)
         | TypeRef::Constrained { .. }
-        | TypeRef::Nullable(_) => Ok(None),
+        | TypeRef::Option(_) => Ok(None),
     }
 }
 
