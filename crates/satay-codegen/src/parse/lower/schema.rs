@@ -9,8 +9,7 @@ use super::super::reference::{
     object_schema, reject_composition, schema_ref, schema_ref_type_name, schema_type_and_nullable,
 };
 use super::super::registry::TypeRegistry;
-use super::super::validate::constraint::{parse_integer_type, parse_validation, reject_keyword};
-use super::super::validate::{ValidatedDocument, ValidatedSatay};
+use super::super::validate::{ValidatedDocument, ValidatedSchemas};
 use crate::error::ValidationError;
 use crate::ident::{field_ident, type_ident, unique_ident, variant_ident};
 use crate::model::{
@@ -30,7 +29,7 @@ pub(super) fn parse_components(
     for (schema_name, schema) in &components.schemas {
         let rust_name = type_ident(schema_name);
         let description = schema_description(schema);
-        let kind = parse_component_kind(schema_name, schema, registry, &document.satay)?;
+        let kind = parse_component_kind(schema_name, schema, registry, &document.schemas)?;
         parsed.push(Component {
             rust_name,
             description,
@@ -45,7 +44,7 @@ fn parse_component_kind(
     schema_name: &str,
     schema: &OasSchema,
     registry: &mut TypeRegistry,
-    satay: &ValidatedSatay,
+    schemas: &ValidatedSchemas,
 ) -> Result<ComponentKind, ValidationError> {
     let context = format!("schema `{schema_name}`");
 
@@ -62,7 +61,7 @@ fn parse_component_kind(
     let (schema_type, nullable) = schema_type_and_nullable(schema, &context)?;
 
     if !schema.enum_values.is_empty() {
-        let variants = parse_string_enum(schema, &context, satay);
+        let variants = parse_string_enum(schema, &context, schemas);
         if nullable {
             let inner = registry.inline_enum_ref(
                 &format!("{schema_name} value"),
@@ -76,7 +75,7 @@ fn parse_component_kind(
 
     match schema_type {
         Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => Ok(
-            ComponentKind::Struct(parse_struct_fields(schema_name, schema, registry, satay)?),
+            ComponentKind::Struct(parse_struct_fields(schema_name, schema, registry, schemas)?),
         ),
         Some(
             OasSchemaType::Array
@@ -90,7 +89,7 @@ fn parse_component_kind(
             schema_type,
             nullable,
             registry,
-            satay,
+            schemas,
         ),
         Some(_) | None => {
             unreachable!("validation should reject unsupported component schemas before lowering");
@@ -104,12 +103,13 @@ fn parse_component_alias_or_nutype(
     schema_type: Option<OasSchemaType>,
     nullable: bool,
     registry: &mut TypeRegistry,
-    satay: &ValidatedSatay,
+    schemas: &ValidatedSchemas,
 ) -> Result<ComponentKind, ValidationError> {
     let context = format!("schema `{schema_name}`");
     let rust_name = type_ident(schema_name);
     let description = optional_description(&schema.description);
-    let satay_schema = satay.schema(schema, &context);
+    let validated_schema = schemas.schema(schema, &context);
+    let satay_schema = &validated_schema.satay;
     let parse_as = satay_schema.parse_as;
 
     if matches!(parse_as, Some(ParseAs::IntegerRange | ParseAs::NumberRange)) {
@@ -142,10 +142,10 @@ fn parse_component_alias_or_nutype(
         &context,
         registry,
         Some(schema_name),
-        satay,
+        schemas,
     )?;
 
-    let validation = parse_validation(schema, &base, &context)?;
+    let validation = validated_schema.validation.clone();
 
     match (validation, nullable) {
         (Some(validation), false) => Ok(ComponentKind::Nutype(ConstrainedType {
@@ -171,7 +171,7 @@ fn parse_component_alias_or_nutype(
 fn parse_string_enum(
     schema: &OasObjectSchema,
     context: &str,
-    satay: &ValidatedSatay,
+    schemas: &ValidatedSchemas,
 ) -> Vec<EnumVariant> {
     let (schema_type, _) = validated_schema_type_and_nullable(schema, context);
 
@@ -194,7 +194,7 @@ fn parse_string_enum(
         wire_names.push(value);
     }
 
-    let explicit_variants = &satay.schema(schema, context).enum_variants;
+    let explicit_variants = &schemas.schema(schema, context).satay.enum_variants;
     let mut used = BTreeSet::from(["Unknown".to_owned()]);
 
     for rust_name in explicit_variants.values() {
@@ -227,13 +227,9 @@ fn parse_struct_fields(
     schema_name: &str,
     schema: &OasObjectSchema,
     registry: &mut TypeRegistry,
-    satay: &ValidatedSatay,
+    schemas: &ValidatedSchemas,
 ) -> Result<Vec<Field>, ValidationError> {
-    let context = format!("schema `{schema_name}`");
     let required = parse_required_set(schema);
-
-    reject_keyword(schema.min_properties.is_some(), "minProperties", &context)?;
-    reject_keyword(schema.max_properties.is_some(), "maxProperties", &context)?;
 
     if schema.properties.is_empty() {
         unreachable!("validation should reject object schemas without properties before lowering");
@@ -250,9 +246,9 @@ fn parse_struct_fields(
             &format!("property `{schema_name}.{wire_name}`"),
             registry,
             Some(&format!("{schema_name} {wire_name}")),
-            satay,
+            schemas,
         )?;
-        let treat_error_as_none = satay.treat_error_as_none(
+        let treat_error_as_none = schemas.treat_error_as_none(
             property_schema,
             &format!("property `{schema_name}.{wire_name}`"),
         );
@@ -278,7 +274,7 @@ pub(super) fn parse_type_ref(
     context: &str,
     registry: &mut TypeRegistry,
     type_name_hint: Option<&str>,
-    satay: &ValidatedSatay,
+    schemas: &ValidatedSchemas,
 ) -> Result<TypeRef, ValidationError> {
     if let Some(reference) = schema_ref(schema, context)? {
         return Ok(TypeRef::Named(schema_ref_type_name(reference)?));
@@ -296,10 +292,10 @@ pub(super) fn parse_type_ref(
         context,
         registry,
         type_name_hint,
-        satay,
+        schemas,
     )?;
 
-    let validation = parse_validation(schema, &base, context)?;
+    let validation = schemas.schema(schema, context).validation.clone();
     let ty = if let Some(validation) = validation {
         registry.constrained_ref(
             type_name_hint.unwrap_or(context),
@@ -324,12 +320,12 @@ fn parse_type_ref_base(
     context: &str,
     registry: &mut TypeRegistry,
     type_name_hint: Option<&str>,
-    satay: &ValidatedSatay,
+    schemas: &ValidatedSchemas,
 ) -> Result<TypeRef, ValidationError> {
     let description = optional_description(&schema.description);
-    let satay_schema = satay.schema(schema, context);
+    let validated_schema = schemas.schema(schema, context);
+    let satay_schema = &validated_schema.satay;
     let parse_as = satay_schema.parse_as;
-    let integer_type = satay_schema.integer_type;
 
     if let Some(parse_as) = parse_as {
         match (schema_type, parse_as) {
@@ -356,7 +352,7 @@ fn parse_type_ref_base(
     }
 
     if !schema.enum_values.is_empty() {
-        let mut variants = parse_string_enum(schema, context, satay);
+        let mut variants = parse_string_enum(schema, context, schemas);
         let default_empty_variant = variant_ident("");
         variants.retain(|v| !v.wire_name.is_empty() || v.rust_name != default_empty_variant);
         if variants.is_empty() {
@@ -372,11 +368,11 @@ fn parse_type_ref_base(
 
     match schema_type {
         Some(OasSchemaType::String) => Ok(TypeRef::String),
-        Some(OasSchemaType::Integer) => Ok(TypeRef::Integer(parse_integer_type(
-            schema,
-            context,
-            integer_type,
-        )?)),
+        Some(OasSchemaType::Integer) => {
+            Ok(TypeRef::Integer(validated_schema.integer_type.expect(
+                "validated integer type missing during type lowering",
+            )))
+        }
         Some(OasSchemaType::Number) => match schema.format.as_deref() {
             Some("float") => Ok(TypeRef::F32),
             Some("double") | None => Ok(TypeRef::F64),
@@ -396,7 +392,7 @@ fn parse_type_ref_base(
                 &format!("{context} items"),
                 registry,
                 item_name_hint.as_deref(),
-                satay,
+                schemas,
             )?)))
         }
         Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => {

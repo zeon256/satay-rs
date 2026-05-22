@@ -324,7 +324,7 @@ fn parse_parameter(
         &format!("parameter `{wire_name}`"),
         registry,
         Some(&format!("{type_prefix} {wire_name} parameter")),
-        &document.satay,
+        &document.schemas,
     )?;
 
     if ty.is_nullable() {
@@ -416,7 +416,7 @@ fn parse_request_body(
             context,
             registry,
             Some(&format!("{type_prefix} request body")),
-            &document.satay,
+            &document.schemas,
         )?,
         required: request_body.required.unwrap_or(false),
     }))
@@ -462,7 +462,7 @@ fn parse_responses(
                     &format!("{context} {status} schema"),
                     registry,
                     Some(&format!("{type_prefix} response {status}")),
-                    &document.satay,
+                    &document.schemas,
                 )?),
                 None => None,
             }

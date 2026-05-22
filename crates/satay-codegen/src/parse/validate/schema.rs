@@ -6,21 +6,25 @@ use super::super::reference::{
     object_schema, reject_composition, schema_ref, schema_type_and_nullable, schema_type_wire,
 };
 use super::super::resolve::ResolvedDocument;
+use super::constraint::{parse_integer_type, parse_validation, reject_keyword};
 use super::satay::{
-    ValidatedSatay, validate_component_enum_satay, validate_type_enum_satay, validate_type_satay,
+    ValidatedSataySchema, validate_component_enum_satay, validate_type_enum_satay,
+    validate_type_satay,
 };
+use super::state::{ValidatedSchema, ValidatedSchemas};
 use crate::error::ValidationError;
+use crate::model::{IntegerType, TypeRef};
 
 pub(super) fn validate_components(
     document: &ResolvedDocument<'_>,
-    satay: &mut ValidatedSatay,
+    schemas: &mut ValidatedSchemas,
 ) -> Result<(), ValidationError> {
     let Some(components) = document.spec.components.as_ref() else {
         return Ok(());
     };
 
     for (schema_name, schema) in &components.schemas {
-        validate_component_schema(schema_name, schema, satay)?;
+        validate_component_schema(schema_name, schema, schemas)?;
     }
 
     Ok(())
@@ -30,7 +34,7 @@ pub(super) fn validate_type_schema(
     schema: &OasSchema,
     context: &str,
     allow_treat_error_as_none: bool,
-    satay: &mut ValidatedSatay,
+    schemas: &mut ValidatedSchemas,
 ) -> Result<(), ValidationError> {
     if schema_ref(schema, context)?.is_some() {
         return Ok(());
@@ -44,19 +48,28 @@ pub(super) fn validate_type_schema(
         validate_type_satay(schema, schema_type, context, allow_treat_error_as_none)?;
 
     if validated_satay.parse_as.is_some() {
-        satay.insert_schema(schema, validated_satay);
+        schemas.insert_schema(
+            schema,
+            validated_schema_constraints(schema, schema_type, context, validated_satay)?,
+        );
         return Ok(());
     }
 
     if validated_satay.parse_as.is_none() && !schema.enum_values.is_empty() {
         validate_enum_shape(schema, schema_type, context)?;
         validated_satay.enum_variants = validate_type_enum_satay(schema, context)?;
-        satay.insert_schema(schema, validated_satay);
+        schemas.insert_schema(
+            schema,
+            validated_schema_constraints(schema, schema_type, context, validated_satay)?,
+        );
         return Ok(());
     }
 
-    satay.insert_schema(schema, validated_satay);
-    validate_inline_type_shape(schema, schema_type, context, satay)?;
+    validate_inline_type_shape(schema, schema_type, context, schemas)?;
+    schemas.insert_schema(
+        schema,
+        validated_schema_constraints(schema, schema_type, context, validated_satay)?,
+    );
 
     Ok(())
 }
@@ -64,7 +77,7 @@ pub(super) fn validate_type_schema(
 fn validate_component_schema(
     schema_name: &str,
     schema: &OasSchema,
-    satay: &mut ValidatedSatay,
+    schemas: &mut ValidatedSchemas,
 ) -> Result<(), ValidationError> {
     let context = format!("schema `{schema_name}`");
 
@@ -80,13 +93,16 @@ fn validate_component_schema(
     if !schema.enum_values.is_empty() {
         validate_enum_shape(schema, schema_type, &context)?;
         let validated_satay = validate_component_enum_satay(schema, &context)?;
-        satay.insert_schema(schema, validated_satay);
+        schemas.insert_schema(
+            schema,
+            validated_schema_constraints(schema, schema_type, &context, validated_satay)?,
+        );
         return Ok(());
     }
 
     match schema_type {
         Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => {
-            validate_struct_properties(schema_name, schema, satay)?;
+            validate_struct_properties(schema_name, schema, schemas)?;
         }
         Some(
             OasSchemaType::Array
@@ -94,7 +110,7 @@ fn validate_component_schema(
             | OasSchemaType::Integer
             | OasSchemaType::Number
             | OasSchemaType::Boolean,
-        ) => validate_component_alias_satay(schema, schema_type, &context, satay)?,
+        ) => validate_component_alias_satay(schema, schema_type, &context, schemas)?,
         Some(kind) => {
             return Err(ValidationError::UnsupportedComponentType {
                 schema: schema_name.to_owned(),
@@ -115,17 +131,24 @@ fn validate_component_alias_satay(
     schema: &OasObjectSchema,
     schema_type: Option<OasSchemaType>,
     context: &str,
-    satay: &mut ValidatedSatay,
+    schemas: &mut ValidatedSchemas,
 ) -> Result<(), ValidationError> {
     let validated_satay = validate_type_satay(schema, schema_type, context, false)?;
     let parse_as = validated_satay.parse_as;
-    satay.insert_schema(schema, validated_satay);
 
     if parse_as.is_some() {
+        schemas.insert_schema(
+            schema,
+            validated_schema_constraints(schema, schema_type, context, validated_satay)?,
+        );
         return Ok(());
     }
 
-    validate_alias_type_shape(schema, schema_type, context, satay)?;
+    validate_alias_type_shape(schema, schema_type, context, schemas)?;
+    schemas.insert_schema(
+        schema,
+        validated_schema_constraints(schema, schema_type, context, validated_satay)?,
+    );
 
     Ok(())
 }
@@ -133,14 +156,18 @@ fn validate_component_alias_satay(
 fn validate_struct_properties(
     schema_name: &str,
     schema: &OasObjectSchema,
-    satay: &mut ValidatedSatay,
+    schemas: &mut ValidatedSchemas,
 ) -> Result<(), ValidationError> {
+    let context = format!("schema `{schema_name}`");
+    reject_keyword(schema.min_properties.is_some(), "minProperties", &context)?;
+    reject_keyword(schema.max_properties.is_some(), "maxProperties", &context)?;
+
     for (wire_name, property_schema) in &schema.properties {
         validate_type_schema(
             property_schema,
             &format!("property `{schema_name}.{wire_name}`"),
             true,
-            satay,
+            schemas,
         )?;
     }
 
@@ -151,7 +178,7 @@ fn validate_alias_type_shape(
     schema: &OasObjectSchema,
     schema_type: Option<OasSchemaType>,
     context: &str,
-    satay: &mut ValidatedSatay,
+    schemas: &mut ValidatedSchemas,
 ) -> Result<(), ValidationError> {
     match schema_type {
         Some(OasSchemaType::Number) => validate_number_format(schema, context),
@@ -163,7 +190,7 @@ fn validate_alias_type_shape(
                     .ok_or_else(|| ValidationError::MissingArrayItems {
                         context: context.to_owned(),
                     })?;
-            validate_type_schema(items, &format!("{context} items"), false, satay)
+            validate_type_schema(items, &format!("{context} items"), false, schemas)
         }
         Some(OasSchemaType::String | OasSchemaType::Integer | OasSchemaType::Boolean) => Ok(()),
         _ => Ok(()),
@@ -174,7 +201,7 @@ fn validate_inline_type_shape(
     schema: &OasObjectSchema,
     schema_type: Option<OasSchemaType>,
     context: &str,
-    satay: &mut ValidatedSatay,
+    schemas: &mut ValidatedSchemas,
 ) -> Result<(), ValidationError> {
     match schema_type {
         Some(OasSchemaType::String | OasSchemaType::Integer | OasSchemaType::Boolean) => Ok(()),
@@ -187,7 +214,7 @@ fn validate_inline_type_shape(
                     .ok_or_else(|| ValidationError::MissingArrayItems {
                         context: context.to_owned(),
                     })?;
-            validate_type_schema(items, &format!("{context} items"), false, satay)
+            validate_type_schema(items, &format!("{context} items"), false, schemas)
         }
         Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => {
             Err(ValidationError::InlineObjectSchema {
@@ -245,5 +272,72 @@ fn validate_number_format(schema: &OasObjectSchema, context: &str) -> Result<(),
             context: context.to_owned(),
             format: format.to_owned(),
         }),
+    }
+}
+
+fn validated_schema_constraints(
+    schema: &OasObjectSchema,
+    schema_type: Option<OasSchemaType>,
+    context: &str,
+    satay: ValidatedSataySchema,
+) -> Result<ValidatedSchema, ValidationError> {
+    if satay.parse_as.is_some() || !schema.enum_values.is_empty() {
+        return Ok(ValidatedSchema {
+            satay,
+            ..ValidatedSchema::default()
+        });
+    }
+
+    let integer_type = if schema_type == Some(OasSchemaType::Integer) {
+        Some(parse_integer_type(
+            schema,
+            context,
+            satay.explicit_integer_type,
+        )?)
+    } else {
+        None
+    };
+
+    let Some(base) = constraint_base_type(schema, schema_type, integer_type, context) else {
+        return Ok(ValidatedSchema {
+            satay,
+            integer_type,
+            validation: None,
+        });
+    };
+
+    Ok(ValidatedSchema {
+        validation: parse_validation(schema, &base, context)?,
+        satay,
+        integer_type,
+    })
+}
+
+fn constraint_base_type(
+    schema: &OasObjectSchema,
+    schema_type: Option<OasSchemaType>,
+    integer_type: Option<IntegerType>,
+    context: &str,
+) -> Option<TypeRef> {
+    match schema_type {
+        Some(OasSchemaType::String) => Some(TypeRef::String),
+        Some(OasSchemaType::Integer) => Some(TypeRef::Integer(integer_type.unwrap_or_else(|| {
+            unreachable!("validation should resolve integer type before constraints for {context}")
+        }))),
+        Some(OasSchemaType::Number) => Some(validated_number_type(schema, context)),
+        Some(OasSchemaType::Boolean) => Some(TypeRef::Bool),
+        Some(OasSchemaType::Array) => Some(TypeRef::Array(Box::new(TypeRef::Bool))),
+        Some(OasSchemaType::Object) | None => None,
+        Some(_) => None,
+    }
+}
+
+fn validated_number_type(schema: &OasObjectSchema, context: &str) -> TypeRef {
+    match schema.format.as_deref() {
+        Some("float") => TypeRef::F32,
+        Some("double") | None => TypeRef::F64,
+        Some(_) => {
+            unreachable!("validation should reject unsupported number formats for {context}")
+        }
     }
 }
