@@ -7,6 +7,7 @@ mod state;
 
 use super::resolve::ResolvedDocument;
 use crate::error::ValidationError;
+pub(crate) use index::SchemaId;
 pub(crate) use state::ValidatedSchemas;
 
 #[derive(Debug)]
