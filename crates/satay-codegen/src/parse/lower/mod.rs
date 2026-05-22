@@ -12,16 +12,15 @@ mod schema;
 pub(crate) fn lower_document(document: &ValidatedDocument<'_>) -> Result<Api, ValidationError> {
     tracing::debug!("lowering API from resolved document");
 
-    let spec = document.normalized.resolved.spec;
+    let spec = document.resolved.spec;
     let mut registry = TypeRegistry::default();
     let server_url = parse_server_url(spec);
-    let api_key_security_schemes =
-        operation::parse_api_key_security_schemes(&document.normalized.resolved)?;
+    let api_key_security_schemes = operation::parse_api_key_security_schemes(&document.resolved)?;
 
-    reserve_component_type_names(spec, &mut registry);
+    reserve_component_type_names(document, &mut registry);
 
-    let mut components = schema::parse_components(document, &mut registry)?;
-    let operations = operation::parse_operations(document, &mut registry)?;
+    let mut components = schema::parse_components(document, &mut registry);
+    let operations = operation::parse_operations(document, &mut registry);
     let constrained_types = registry.finish(&mut components);
 
     Ok(Api {
@@ -40,12 +39,8 @@ fn parse_server_url(spec: &OasSpec) -> String {
         .unwrap_or_default()
 }
 
-fn reserve_component_type_names(spec: &OasSpec, registry: &mut TypeRegistry) {
-    let Some(components) = spec.components.as_ref() else {
-        return;
-    };
-
-    for schema_name in components.schemas.keys() {
-        registry.reserve(type_ident(schema_name));
+fn reserve_component_type_names(document: &ValidatedDocument<'_>, registry: &mut TypeRegistry) {
+    for component in &document.components {
+        registry.reserve(type_ident(&component.schema_name));
     }
 }

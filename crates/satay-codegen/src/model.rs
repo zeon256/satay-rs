@@ -119,7 +119,7 @@ pub(crate) struct Field {
     pub(crate) treat_error_as_none: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct EnumVariant {
     pub(crate) wire_name: String,
     pub(crate) rust_name: String,
@@ -189,7 +189,7 @@ pub(crate) enum HttpMethod {
     Trace,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum PathSegment {
     Literal(String),
     Parameter(String),
