@@ -1,39 +1,15 @@
 use std::collections::BTreeMap;
 
-use oas3::spec::{ObjectOrReference, ObjectSchema as OasObjectSchema, Schema as OasSchema};
-
-use super::index::{SchemaId, SchemaIndex};
+use super::SchemaId;
 use super::satay::ValidatedSataySchema;
 use crate::model::{IntegerType, Validation};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct ValidatedSchemas {
-    index: SchemaIndex,
     schemas: BTreeMap<SchemaId, ValidatedSchema>,
 }
 
 impl ValidatedSchemas {
-    pub(super) fn new(index: SchemaIndex) -> Self {
-        Self {
-            index,
-            schemas: BTreeMap::new(),
-        }
-    }
-
-    pub(crate) fn object_id(&self, schema: &OasObjectSchema, context: &str) -> SchemaId {
-        self.index.id(schema, context)
-    }
-
-    pub(crate) fn schema_id(&self, schema: &OasSchema, context: &str) -> Option<SchemaId> {
-        match schema {
-            OasSchema::Boolean(_) => None,
-            OasSchema::Object(object) => match object.as_ref() {
-                ObjectOrReference::Object(schema) => Some(self.object_id(schema, context)),
-                ObjectOrReference::Ref { .. } => None,
-            },
-        }
-    }
-
     pub(super) fn insert_schema(&mut self, id: SchemaId, validated: ValidatedSchema) {
         self.schemas.insert(id, validated);
     }
@@ -54,4 +30,35 @@ pub(crate) struct ValidatedSchema {
     pub(crate) satay: ValidatedSataySchema,
     pub(crate) integer_type: Option<IntegerType>,
     pub(crate) validation: Option<Validation>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::IntegerType;
+
+    #[test]
+    fn stores_validated_schema_metadata_by_schema_id() {
+        let schema_id = SchemaId::new(7);
+        let mut schemas = ValidatedSchemas::default();
+
+        schemas.insert_schema(
+            schema_id,
+            ValidatedSchema {
+                satay: ValidatedSataySchema {
+                    treat_error_as_none: true,
+                    ..ValidatedSataySchema::default()
+                },
+                integer_type: Some(IntegerType::U8),
+                validation: None,
+            },
+        );
+
+        assert_eq!(
+            schemas.schema(schema_id, "test").integer_type,
+            Some(IntegerType::U8)
+        );
+        assert!(schemas.treat_error_as_none(Some(schema_id), "test"));
+        assert!(!schemas.treat_error_as_none(None, "test"));
+    }
 }

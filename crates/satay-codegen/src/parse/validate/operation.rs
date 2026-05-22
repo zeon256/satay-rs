@@ -10,11 +10,11 @@ use oas3::{
 };
 
 use super::super::helpers::json_media_type;
+use super::super::normalize::NormalizedDocument;
 use super::super::reference::{
     object_schema, resolve_parameter, resolve_path_item, resolve_request_body, resolve_response,
     schema_ref, schema_type_and_nullable,
 };
-use super::super::resolve::ResolvedDocument;
 use super::schema::validate_type_schema;
 use super::state::ValidatedSchemas;
 use crate::error::ValidationError;
@@ -27,17 +27,22 @@ struct ValidatedParameter {
 }
 
 pub(super) fn validate_operations(
-    document: &ResolvedDocument<'_>,
+    document: &NormalizedDocument<'_>,
     schemas: &mut ValidatedSchemas,
 ) -> Result<(), ValidationError> {
     let paths = document
+        .resolved
         .spec
         .paths
         .as_ref()
         .ok_or(ValidationError::MissingPaths)?;
 
     for (path, path_item) in paths {
-        let path_item = resolve_path_item(document, path_item, &format!("path item `{path}`"))?;
+        let path_item = resolve_path_item(
+            &document.resolved,
+            path_item,
+            &format!("path item `{path}`"),
+        )?;
 
         let path_parameters = validate_parameter_list(
             document,
@@ -116,7 +121,7 @@ pub(super) fn validate_operations(
 }
 
 fn validate_path_operation(
-    document: &ResolvedDocument<'_>,
+    document: &NormalizedDocument<'_>,
     method: HttpMethod,
     path: &str,
     operation: Option<&OasOperation>,
@@ -131,7 +136,7 @@ fn validate_path_operation(
 }
 
 fn validate_operation(
-    document: &ResolvedDocument<'_>,
+    document: &NormalizedDocument<'_>,
     method: HttpMethod,
     path: &str,
     path_parameters: &[ValidatedParameter],
@@ -180,7 +185,7 @@ fn validate_operation(
 }
 
 fn validate_parameter_list(
-    document: &ResolvedDocument<'_>,
+    document: &NormalizedDocument<'_>,
     parameters: &[ObjectOrReference<OasParameter>],
     context: &str,
     schemas: &mut ValidatedSchemas,
@@ -195,12 +200,12 @@ fn validate_parameter_list(
 }
 
 fn validate_parameter(
-    document: &ResolvedDocument<'_>,
+    document: &NormalizedDocument<'_>,
     parameter: &ObjectOrReference<OasParameter>,
     context: &str,
     schemas: &mut ValidatedSchemas,
 ) -> Result<ValidatedParameter, ValidationError> {
-    let parameter = resolve_parameter(document, parameter, context)?;
+    let parameter = resolve_parameter(&document.resolved, parameter, context)?;
     let wire_name = parameter.name.clone();
 
     let location = match parameter.location {
@@ -232,7 +237,13 @@ fn validate_parameter(
                 wire_name: wire_name.clone(),
             })?;
 
-    validate_type_schema(schema, &format!("parameter `{wire_name}`"), false, schemas)?;
+    validate_type_schema(
+        document,
+        schema,
+        &format!("parameter `{wire_name}`"),
+        false,
+        schemas,
+    )?;
     validate_parameter_schema_shape(schema, &wire_name, location)?;
 
     if location == ParameterLocation::Path && parameter.required != Some(true) {
@@ -246,7 +257,7 @@ fn validate_parameter(
 }
 
 fn validate_request_body(
-    document: &ResolvedDocument<'_>,
+    document: &NormalizedDocument<'_>,
     request_body: Option<&ObjectOrReference<OasRequestBody>>,
     context: &str,
     schemas: &mut ValidatedSchemas,
@@ -255,7 +266,7 @@ fn validate_request_body(
         return Ok(());
     };
 
-    let request_body = resolve_request_body(document, request_body, context)?;
+    let request_body = resolve_request_body(&document.resolved, request_body, context)?;
 
     if request_body.content.is_empty() {
         return Err(ValidationError::MissingContent {
@@ -275,18 +286,19 @@ fn validate_request_body(
             context: context.to_owned(),
         })?;
 
-    validate_type_schema(schema, context, false, schemas)
+    validate_type_schema(document, schema, context, false, schemas)
 }
 
 fn validate_responses(
-    document: &ResolvedDocument<'_>,
+    document: &NormalizedDocument<'_>,
     responses: &OasMap<String, ObjectOrReference<OasResponse>>,
     context: &str,
     schemas: &mut ValidatedSchemas,
 ) -> Result<(), ValidationError> {
     for (status, response) in responses {
         if status == "default" {
-            let response = resolve_response(document, response, &format!("{context} default"))?;
+            let response =
+                resolve_response(&document.resolved, response, &format!("{context} default"))?;
             if !response.content.is_empty() {
                 return Err(ValidationError::DefaultResponseBodyUnsupported {
                     context: context.to_owned(),
@@ -309,7 +321,8 @@ fn validate_responses(
             });
         }
 
-        let response = resolve_response(document, response, &format!("{context} {status}"))?;
+        let response =
+            resolve_response(&document.resolved, response, &format!("{context} {status}"))?;
 
         if response.content.is_empty() {
             continue;
@@ -326,6 +339,7 @@ fn validate_responses(
         };
 
         validate_type_schema(
+            document,
             schema,
             &format!("{context} {status} schema"),
             false,

@@ -17,7 +17,7 @@ use super::super::reference::{
 use super::super::registry::TypeRegistry;
 use super::super::resolve::ResolvedDocument;
 use super::super::validate::ValidatedDocument;
-use super::schema::parse_type_ref;
+use super::schema::{SchemaContext, parse_type_ref};
 use crate::error::ValidationError;
 use crate::ident::{field_ident, function_ident, response_variant_ident, type_ident, unique_ident};
 use crate::model::{
@@ -69,7 +69,7 @@ pub(super) fn parse_operations(
     document: &ValidatedDocument<'_>,
     registry: &mut TypeRegistry,
 ) -> Result<Vec<SatayOperation>, ValidationError> {
-    let spec = &document.resolved.spec;
+    let spec = &document.normalized.resolved.spec;
     let paths = spec
         .paths
         .as_ref()
@@ -79,7 +79,7 @@ pub(super) fn parse_operations(
 
     for (path, path_item) in paths {
         let path_item = resolve_path_item(
-            &document.resolved,
+            &document.normalized.resolved,
             path_item,
             &format!("path item `{path}`"),
         )?;
@@ -297,7 +297,7 @@ fn parse_parameter(
     registry: &mut TypeRegistry,
     type_prefix: &str,
 ) -> Result<Parameter, ValidationError> {
-    let parameter = resolve_parameter(&document.resolved, parameter, context)?;
+    let parameter = resolve_parameter(&document.normalized.resolved, parameter, context)?;
 
     let wire_name = parameter.name.clone();
 
@@ -324,7 +324,10 @@ fn parse_parameter(
         &format!("parameter `{wire_name}`"),
         registry,
         Some(&format!("{type_prefix} {wire_name} parameter")),
-        &document.schemas,
+        SchemaContext {
+            normalized: &document.normalized.schemas,
+            validated: &document.schemas,
+        },
     )?;
 
     if ty.is_nullable() {
@@ -387,7 +390,7 @@ fn parse_request_body(
     let Some(request_body) = request_body else {
         return Ok(None);
     };
-    let request_body = resolve_request_body(&document.resolved, request_body, context)?;
+    let request_body = resolve_request_body(&document.normalized.resolved, request_body, context)?;
 
     if request_body.content.is_empty() {
         unreachable!("validation should require request body content before lowering");
@@ -416,7 +419,10 @@ fn parse_request_body(
             context,
             registry,
             Some(&format!("{type_prefix} request body")),
-            &document.schemas,
+            SchemaContext {
+                normalized: &document.normalized.schemas,
+                validated: &document.schemas,
+            },
         )?,
         required: request_body.required.unwrap_or(false),
     }))
@@ -433,8 +439,11 @@ fn parse_responses(
 
     for (status, response) in responses {
         if status == "default" {
-            let response =
-                resolve_response(&document.resolved, response, &format!("{context} default"))?;
+            let response = resolve_response(
+                &document.normalized.resolved,
+                response,
+                &format!("{context} default"),
+            )?;
             if !response.content.is_empty() {
                 unreachable!("validation should reject default response bodies before lowering");
             }
@@ -448,8 +457,11 @@ fn parse_responses(
             unreachable!("validation should reject out-of-range status codes before lowering");
         }
 
-        let response =
-            resolve_response(&document.resolved, response, &format!("{context} {status}"))?;
+        let response = resolve_response(
+            &document.normalized.resolved,
+            response,
+            &format!("{context} {status}"),
+        )?;
 
         let body = if response.content.is_empty() {
             None
@@ -462,7 +474,10 @@ fn parse_responses(
                     &format!("{context} {status} schema"),
                     registry,
                     Some(&format!("{type_prefix} response {status}")),
-                    &document.schemas,
+                    SchemaContext {
+                        normalized: &document.normalized.schemas,
+                        validated: &document.schemas,
+                    },
                 )?),
                 None => None,
             }

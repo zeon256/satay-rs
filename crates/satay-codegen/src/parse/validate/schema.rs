@@ -2,10 +2,10 @@ use oas3::spec::{
     ObjectSchema as OasObjectSchema, Schema as OasSchema, SchemaType as OasSchemaType,
 };
 
+use super::super::normalize::NormalizedDocument;
 use super::super::reference::{
     object_schema, reject_composition, schema_ref, schema_type_and_nullable, schema_type_wire,
 };
-use super::super::resolve::ResolvedDocument;
 use super::constraint::{parse_integer_type, parse_validation, reject_keyword};
 use super::satay::{
     ValidatedSataySchema, validate_component_enum_satay, validate_type_enum_satay,
@@ -16,21 +16,22 @@ use crate::error::ValidationError;
 use crate::model::{IntegerType, TypeRef};
 
 pub(super) fn validate_components(
-    document: &ResolvedDocument<'_>,
+    document: &NormalizedDocument<'_>,
     schemas: &mut ValidatedSchemas,
 ) -> Result<(), ValidationError> {
-    let Some(components) = document.spec.components.as_ref() else {
+    let Some(components) = document.resolved.spec.components.as_ref() else {
         return Ok(());
     };
 
     for (schema_name, schema) in &components.schemas {
-        validate_component_schema(schema_name, schema, schemas)?;
+        validate_component_schema(document, schema_name, schema, schemas)?;
     }
 
     Ok(())
 }
 
 pub(super) fn validate_type_schema(
+    document: &NormalizedDocument<'_>,
     schema: &OasSchema,
     context: &str,
     allow_treat_error_as_none: bool,
@@ -42,7 +43,8 @@ pub(super) fn validate_type_schema(
 
     let schema = object_schema(schema, context)?;
     reject_composition(schema, context)?;
-    let schema_id = schemas.object_id(schema, context);
+    let schema_id = document.schemas.object_id(schema, context);
+    let schema = document.schemas.schema(schema_id, context).schema;
 
     let (schema_type, _) = schema_type_and_nullable(schema, context)?;
     let mut validated_satay =
@@ -66,7 +68,7 @@ pub(super) fn validate_type_schema(
         return Ok(());
     }
 
-    validate_inline_type_shape(schema, schema_type, context, schemas)?;
+    validate_inline_type_shape(document, schema, schema_type, context, schemas)?;
     schemas.insert_schema(
         schema_id,
         validated_schema_constraints(schema, schema_type, context, validated_satay)?,
@@ -76,6 +78,7 @@ pub(super) fn validate_type_schema(
 }
 
 fn validate_component_schema(
+    document: &NormalizedDocument<'_>,
     schema_name: &str,
     schema: &OasSchema,
     schemas: &mut ValidatedSchemas,
@@ -88,7 +91,8 @@ fn validate_component_schema(
 
     let schema = object_schema(schema, &context)?;
     reject_composition(schema, &context)?;
-    let schema_id = schemas.object_id(schema, &context);
+    let schema_id = document.schemas.object_id(schema, &context);
+    let schema = document.schemas.schema(schema_id, &context).schema;
 
     let (schema_type, _) = schema_type_and_nullable(schema, &context)?;
 
@@ -104,7 +108,7 @@ fn validate_component_schema(
 
     match schema_type {
         Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => {
-            validate_struct_properties(schema_name, schema, schemas)?;
+            validate_struct_properties(document, schema_name, schema, schemas)?;
         }
         Some(
             OasSchemaType::Array
@@ -112,7 +116,7 @@ fn validate_component_schema(
             | OasSchemaType::Integer
             | OasSchemaType::Number
             | OasSchemaType::Boolean,
-        ) => validate_component_alias_satay(schema, schema_type, &context, schemas)?,
+        ) => validate_component_alias_satay(document, schema, schema_type, &context, schemas)?,
         Some(kind) => {
             return Err(ValidationError::UnsupportedComponentType {
                 schema: schema_name.to_owned(),
@@ -130,12 +134,14 @@ fn validate_component_schema(
 }
 
 fn validate_component_alias_satay(
+    document: &NormalizedDocument<'_>,
     schema: &OasObjectSchema,
     schema_type: Option<OasSchemaType>,
     context: &str,
     schemas: &mut ValidatedSchemas,
 ) -> Result<(), ValidationError> {
-    let schema_id = schemas.object_id(schema, context);
+    let schema_id = document.schemas.object_id(schema, context);
+    let schema = document.schemas.schema(schema_id, context).schema;
     let validated_satay = validate_type_satay(schema, schema_type, context, false)?;
     let parse_as = validated_satay.parse_as;
 
@@ -147,7 +153,7 @@ fn validate_component_alias_satay(
         return Ok(());
     }
 
-    validate_alias_type_shape(schema, schema_type, context, schemas)?;
+    validate_alias_type_shape(document, schema, schema_type, context, schemas)?;
     schemas.insert_schema(
         schema_id,
         validated_schema_constraints(schema, schema_type, context, validated_satay)?,
@@ -157,6 +163,7 @@ fn validate_component_alias_satay(
 }
 
 fn validate_struct_properties(
+    document: &NormalizedDocument<'_>,
     schema_name: &str,
     schema: &OasObjectSchema,
     schemas: &mut ValidatedSchemas,
@@ -167,6 +174,7 @@ fn validate_struct_properties(
 
     for (wire_name, property_schema) in &schema.properties {
         validate_type_schema(
+            document,
             property_schema,
             &format!("property `{schema_name}.{wire_name}`"),
             true,
@@ -178,6 +186,7 @@ fn validate_struct_properties(
 }
 
 fn validate_alias_type_shape(
+    document: &NormalizedDocument<'_>,
     schema: &OasObjectSchema,
     schema_type: Option<OasSchemaType>,
     context: &str,
@@ -193,7 +202,7 @@ fn validate_alias_type_shape(
                     .ok_or_else(|| ValidationError::MissingArrayItems {
                         context: context.to_owned(),
                     })?;
-            validate_type_schema(items, &format!("{context} items"), false, schemas)
+            validate_type_schema(document, items, &format!("{context} items"), false, schemas)
         }
         Some(OasSchemaType::String | OasSchemaType::Integer | OasSchemaType::Boolean) => Ok(()),
         _ => Ok(()),
@@ -201,6 +210,7 @@ fn validate_alias_type_shape(
 }
 
 fn validate_inline_type_shape(
+    document: &NormalizedDocument<'_>,
     schema: &OasObjectSchema,
     schema_type: Option<OasSchemaType>,
     context: &str,
@@ -217,7 +227,7 @@ fn validate_inline_type_shape(
                     .ok_or_else(|| ValidationError::MissingArrayItems {
                         context: context.to_owned(),
                     })?;
-            validate_type_schema(items, &format!("{context} items"), false, schemas)
+            validate_type_schema(document, items, &format!("{context} items"), false, schemas)
         }
         Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => {
             Err(ValidationError::InlineObjectSchema {

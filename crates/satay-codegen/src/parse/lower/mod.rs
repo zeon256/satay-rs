@@ -12,10 +12,11 @@ mod schema;
 pub(crate) fn lower_document(document: &ValidatedDocument<'_>) -> Result<Api, ValidationError> {
     tracing::debug!("lowering API from resolved document");
 
-    let spec = document.resolved.spec;
+    let spec = document.normalized.resolved.spec;
     let mut registry = TypeRegistry::default();
     let server_url = parse_server_url(spec);
-    let api_key_security_schemes = operation::parse_api_key_security_schemes(&document.resolved)?;
+    let api_key_security_schemes =
+        operation::parse_api_key_security_schemes(&document.normalized.resolved)?;
 
     reserve_component_type_names(spec, &mut registry);
 
