@@ -1,10 +1,46 @@
+use indexmap::IndexMap;
+
 #[derive(Debug)]
 pub(crate) struct Api {
     pub(crate) server_url: String,
     pub(crate) api_key_security_schemes: Vec<ApiKeySecurityScheme>,
     pub(crate) components: Vec<Component>,
+    component_index_by_name: IndexMap<String, usize>,
     pub(crate) constrained_types: Vec<ConstrainedType>,
     pub(crate) operations: Vec<Operation>,
+}
+
+impl Api {
+    pub(crate) fn new(
+        server_url: String,
+        api_key_security_schemes: Vec<ApiKeySecurityScheme>,
+        components: Vec<Component>,
+        constrained_types: Vec<ConstrainedType>,
+        operations: Vec<Operation>,
+    ) -> Self {
+        let mut component_index_by_name = IndexMap::with_capacity(components.len());
+        for (index, component) in components.iter().enumerate() {
+            component_index_by_name
+                .entry(component.rust_name.clone())
+                .or_insert(index);
+        }
+
+        Self {
+            server_url,
+            api_key_security_schemes,
+            components,
+            component_index_by_name,
+            constrained_types,
+            operations,
+        }
+    }
+
+    pub(crate) fn component_kind(&self, name: &str) -> Option<&ComponentKind> {
+        self.component_index_by_name
+            .get(name)
+            .and_then(|index| self.components.get(*index))
+            .map(|component| &component.kind)
+    }
 }
 
 #[derive(Debug)]

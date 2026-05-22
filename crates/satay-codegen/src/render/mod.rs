@@ -390,10 +390,7 @@ pub fn input_builder_value(value: TokenStream, ty: &TypeRef) -> TokenStream {
 }
 
 pub fn component_kind<'a>(api: &'a Api, name: &str) -> Option<&'a ComponentKind> {
-    api.components
-        .iter()
-        .find(|component| component.rust_name == name)
-        .map(|component| &component.kind)
+    api.component_kind(name)
 }
 
 pub fn is_nullable_type(ty: &TypeRef, api: Option<&Api>) -> bool {
@@ -493,10 +490,10 @@ mod tests {
 
     #[test]
     fn render_file_exposes_struct_ast_without_source_comparison() {
-        let api = Api {
-            server_url: String::new(),
-            api_key_security_schemes: vec![],
-            components: vec![Component {
+        let api = Api::new(
+            String::new(),
+            vec![],
+            vec![Component {
                 rust_name: "Pet".to_owned(),
                 description: None,
                 kind: ComponentKind::Struct(vec![
@@ -518,9 +515,9 @@ mod tests {
                     },
                 ]),
             }],
-            constrained_types: vec![],
-            operations: vec![],
-        };
+            vec![],
+            vec![],
+        );
 
         let file = types::render_types_file(&api);
         assert_eq!(file.items.len(), 1);
@@ -548,12 +545,12 @@ mod tests {
 
     #[test]
     fn render_file_exposes_operation_items_without_source_comparison() {
-        let api = Api {
-            server_url: String::new(),
-            api_key_security_schemes: vec![],
-            components: vec![],
-            constrained_types: vec![],
-            operations: vec![Operation {
+        let api = Api::new(
+            String::new(),
+            vec![],
+            vec![],
+            vec![],
+            vec![Operation {
                 fn_name: "create_pet".to_owned(),
                 description: None,
                 input_name: "CreatePetInput".to_owned(),
@@ -576,7 +573,7 @@ mod tests {
                     body: Some(TypeRef::Named("Pet".to_owned())),
                 }],
             }],
-        };
+        );
 
         let files = render_api(&api);
         assert!(files.iter().any(|f| f.relative_path == "mod.rs"));
