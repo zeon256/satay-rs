@@ -19,9 +19,9 @@ pub(crate) fn lower_document(document: &ValidatedDocument<'_>) -> Result<Api, Va
 
     reserve_component_type_names(document, &mut registry);
 
-    let mut components = schema::parse_components(document, &mut registry);
+    let components = schema::parse_components(document, &mut registry);
     let operations = operation::parse_operations(document, &mut registry);
-    let constrained_types = registry.finish(&mut components);
+    let (components, constrained_types) = registry.finish(components);
 
     Ok(Api::new(
         server_url,
