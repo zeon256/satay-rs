@@ -79,9 +79,12 @@ impl TypeRegistry {
         TypeRef::Range(RangeTypeRef { rust_name, scalar })
     }
 
-    pub(crate) fn finish(self, components: &mut Vec<Component>) -> Vec<ConstrainedType> {
+    pub(crate) fn finish(
+        self,
+        mut components: Vec<Component>,
+    ) -> (Vec<Component>, Vec<ConstrainedType>) {
         components.extend(self.inline_enums);
         components.extend(self.inline_ranges);
-        self.generated
+        (components, self.generated)
     }
 }
