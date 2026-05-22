@@ -24,9 +24,11 @@ runs:
         toolchain: ${{ inputs.toolchain }}
         components: ${{ inputs.components }}
 
-    - name: Install cargo-dylint
+    - name: Install cargo-dylint and dylint-link
       shell: bash
-      run: cargo install cargo-dylint
+      run: |
+        cargo install cargo-dylint
+        cargo install dylint-link
 
     - name: Cache Cargo dependencies
       uses: swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
