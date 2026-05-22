@@ -20,33 +20,32 @@ impl ValidatedSchemas {
         }
     }
 
-    pub(super) fn insert_schema(
-        &mut self,
-        schema: &OasObjectSchema,
-        context: &str,
-        validated: ValidatedSchema,
-    ) {
-        let id = self.index.id(schema, context);
+    pub(crate) fn object_id(&self, schema: &OasObjectSchema, context: &str) -> SchemaId {
+        self.index.id(schema, context)
+    }
+
+    pub(crate) fn schema_id(&self, schema: &OasSchema, context: &str) -> Option<SchemaId> {
+        match schema {
+            OasSchema::Boolean(_) => None,
+            OasSchema::Object(object) => match object.as_ref() {
+                ObjectOrReference::Object(schema) => Some(self.object_id(schema, context)),
+                ObjectOrReference::Ref { .. } => None,
+            },
+        }
+    }
+
+    pub(super) fn insert_schema(&mut self, id: SchemaId, validated: ValidatedSchema) {
         self.schemas.insert(id, validated);
     }
 
-    pub(crate) fn schema(&self, schema: &OasObjectSchema, context: &str) -> &ValidatedSchema {
-        let id = self.index.id(schema, context);
+    pub(crate) fn schema(&self, id: SchemaId, context: &str) -> &ValidatedSchema {
         self.schemas.get(&id).unwrap_or_else(|| {
             panic!("validated schema data missing during lowering for {context}")
         })
     }
 
-    pub(crate) fn treat_error_as_none(&self, schema: &OasSchema, context: &str) -> bool {
-        match schema {
-            OasSchema::Boolean(_) => false,
-            OasSchema::Object(object) => match object.as_ref() {
-                ObjectOrReference::Object(schema) => {
-                    self.schema(schema, context).satay.treat_error_as_none
-                }
-                ObjectOrReference::Ref { .. } => false,
-            },
-        }
+    pub(crate) fn treat_error_as_none(&self, id: Option<SchemaId>, context: &str) -> bool {
+        id.is_some_and(|id| self.schema(id, context).satay.treat_error_as_none)
     }
 }
 
