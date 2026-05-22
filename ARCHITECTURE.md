@@ -16,12 +16,10 @@ flowchart TD
     document --> parseApi["parse::parse_api"]
     parseApi --> resolve["resolve::resolve_document"]
     resolve --> resolved["ResolvedDocument<'a><br/>borrowed oas3::Spec"]
-    resolved --> normalize["normalize::normalize_document"]
-    normalize --> normalized["NormalizedDocument<'a><br/>ResolvedDocument + NormalizedSchemas"]
-    normalized --> validate["validate::validate_document"]
-    validate --> validated["ValidatedDocument<'a><br/>NormalizedDocument + ValidatedSchemas"]
+    resolved --> validate["validate::validate_document"]
+    validate --> validated["ValidatedDocument<'a><br/>ResolvedDocument + validated components/operations"]
     validated --> lower["lower::lower_document"]
-    lower --> model["model::Api<br/>normalized codegen IR"]
+    lower --> model["model::Api<br/>codegen IR"]
     model --> render["render::render_api"]
     render --> files["Vec<GeneratedFile>"]
 ```
@@ -29,6 +27,7 @@ flowchart TD
 Main boundaries:
 
 - `parse` owns OpenAPI parsing, reference checking, supported-subset validation, and lowering into the internal IR.
+- `ident` centralizes Rust identifier generation and de-duplication.
 - `model` defines the internal IR consumed by rendering.
 - `render` converts the IR to `syn` syntax trees, pretty-prints them with `prettyplease`, and returns generated file contents.
 - `error` defines the public parse and validation errors returned by `generate`.
@@ -41,22 +40,25 @@ flowchart LR
     lib --> render
     lib --> error
     parse --> model
+    parse --> ident
     render --> model
+    render --> ident
 
     subgraph parse["parse/"]
         parseMod["mod.rs<br/>parse_document, parse_api"] --> resolve
-        parseMod --> normalize
         parseMod --> validate
         parseMod --> lower
         parseMod --> reference
         parseMod --> registry
         parseMod --> satay
+        parseMod --> helpers
 
-        resolve["resolve/<br/>local ref validation"]
-        normalize["normalize.rs<br/>SchemaId assignment + schema graph"]
+        resolve["resolve/<br/>local ref validation"] --> refs
+        refs["resolve/refs.rs<br/>local JSON pointer parsing"]
+        helpers["helpers.rs<br/>descriptions, JSON media types, x-satay object access"]
         reference["reference.rs<br/>on-demand ref helpers"]
-        validate["validate/<br/>supported subset + schema metadata"]
-        lower["lower/<br/>oas3 -> model::Api"]
+        validate["validate/<br/>supported subset -> ValidatedDocument"]
+        lower["lower/<br/>ValidatedDocument -> model::Api"]
         registry["registry.rs<br/>generated type names"]
         satay["satay.rs<br/>x-satay parsing"]
     end
@@ -71,6 +73,7 @@ flowchart LR
     end
 
     model["model.rs<br/>Api IR"]
+    ident["ident.rs<br/>Rust names"]
     error["error/<br/>ParseError, ValidationError"]
 ```
 
@@ -78,38 +81,19 @@ flowchart LR
 
 `parse::parse_document` parses the incoming string with `oas3::from_yaml` and stores the parsed `oas3::spec::Spec` in a small `Document` wrapper.
 
-`parse::parse_api` runs four phases:
+`parse::parse_api` runs three phases:
 
 - `resolve::resolve_document` checks that supported local references point at existing component entries and that component-object reference chains are not circular.
-- `normalize::normalize_document` walks reachable schema locations and assigns stable `SchemaId`s to object schema instances.
-- `validate::validate_document` checks the supported OpenAPI subset and records per-schema metadata needed later.
-- `lower::lower_document` converts the validated `oas3` document into the `model::Api` IR.
+- `validate::validate_document` checks the supported OpenAPI subset and produces validated component and operation values.
+- `lower::lower_document` converts those validated values into the `model::Api` IR.
 
 Reference resolution is deliberately split between validation and use:
 
 - `resolve` validates references early but does not rewrite the OpenAPI tree.
 - `reference.rs` contains on-demand helpers such as `resolve_parameter`, `resolve_request_body`, `resolve_response`, and `resolve_path_item` for validation and lowering.
-- Schema `$ref`s are represented as named IR references to generated component types rather than expanded inline.
+- Schema `$ref`s are represented as named validated types and then named IR references to generated component types rather than expanded inline.
 
-Only local component references are supported today, for example `#/components/schemas/User`.
-
-## Normalize Stage
-
-Normalization is a narrow schema-identity pass. It does not rewrite the OpenAPI tree yet; instead, it builds a `NormalizedDocument` that pairs the resolved document with a `NormalizedSchemas` graph.
-
-```mermaid
-flowchart TD
-    resolved["ResolvedDocument"] --> normalize["normalize::normalize_document"]
-    normalize --> components["component schemas"]
-    normalize --> paths["path, operation, request, response schemas"]
-    components --> graph["NormalizedSchemas<br/>SchemaId -> NormalizedSchema"]
-    paths --> graph
-    graph --> normalized["NormalizedDocument"]
-```
-
-`SchemaId` is the stable key used by validation metadata and by lowering. Raw `oas3` schema object identity is now contained inside `NormalizedSchemas`, so `ValidatedSchemas` can be constructed directly from `SchemaId` values in focused tests without building an OpenAPI document graph.
-
-The current `NormalizedSchema` still points at the borrowed `oas3::ObjectSchema`. The next normalization step would be to replace those borrowed schema objects with a fully semantic schema shape, but that is deliberately separate from this identity and state split.
+Only local component references are supported today, for example `#/components/schemas/User`. The supported component reference sections are `schemas`, `securitySchemes`, `parameters`, `requestBodies`, `responses`, and `pathItems`.
 
 ## Validation Stage
 
@@ -117,34 +101,42 @@ Validation is centered on `parse/validate/mod.rs` and produces a `ValidatedDocum
 
 ```mermaid
 flowchart TD
-    normalized["NormalizedDocument"] --> version["OpenAPI version check<br/>3.1.x only"]
-    version --> schemas["ValidatedSchemas<br/>SchemaId -> ValidatedSchema"]
-    schemas --> components["schema::validate_components"]
-    components --> operations["operation::validate_operations"]
-    operations --> validated["ValidatedDocument"]
+    resolved["ResolvedDocument"] --> version["OpenAPI version check<br/>3.1.x only"]
+    version --> components["schema::validate_components<br/>Vec<ValidatedComponent>"]
+    version --> operations["operation::validate_operations<br/>Vec<ValidatedOperation>"]
+    components --> validated["ValidatedDocument"]
+    operations --> validated
 ```
 
-`ValidatedSchemas` stores derived metadata by `SchemaId`, so lowering can retrieve decisions without redoing validation. It no longer owns the raw schema identity map; that belongs to `NormalizedSchemas`.
+There is no separate normalization or schema-identity pass in the current implementation. Validation walks the resolved `oas3` document directly and builds validated data structures that lowering can consume without revisiting unsupported OpenAPI shapes.
 
-Per-schema metadata is stored in `ValidatedSchema`:
+`ValidatedDocument` stores:
 
-- `satay`: parsed and validated `x-satay` metadata.
-- `integer_type`: the inferred or explicitly selected Rust integer primitive.
-- `validation`: normalized validation constraints that will render as `nutype` newtypes.
+- `resolved`: the borrowed `ResolvedDocument` used for data that still comes from the original spec, such as servers and security schemes.
+- `components`: validated schema components as `ValidatedComponent` values.
+- `operations`: validated path operations as `ValidatedOperation` values.
+
+Schema decisions are carried by `ValidatedType`:
+
+- `kind`: the validated shape, such as a named component, primitive, parsed string/integer, array, enum, or range.
+- `nullable`: whether the OpenAPI schema allows `null`.
+- `validation`: normalized string, integer, number, or array constraints that will render as `nutype` newtypes.
+- `description`: the OpenAPI description, filtered to `None` when blank.
+- `treat_error_as_none`: validated `x-satay.treat-error-as-none` metadata for struct fields.
 
 Validation responsibilities are split by file:
 
-- `validate/schema.rs` validates component schemas and inline type schemas, rejects unsupported schema shapes, validates enum shape, validates aliases, and records schema constraints.
+- `validate/schema.rs` validates component schemas and inline type schemas, rejects unsupported schema shapes, validates enum shape, validates references, and records constraints on `ValidatedType`.
 - `validate/operation.rs` validates paths, operation parameters, request bodies, responses, status codes, path placeholders, and JSON media-type requirements.
 - `validate/constraint.rs` parses and normalizes string, integer, number, and array constraints for `nutype` rendering. It also infers integer types from bounds when no explicit `x-satay.integer-type` is provided.
 - `validate/satay.rs` validates Satay vendor extensions such as `parse-as`, `integer-type`, `enum-variants`, and `treat-error-as-none`.
-- `validate/state.rs` owns the `ValidatedSchemas` lookup state used by validation and lowering.
+- `parse/satay.rs` contains lower-level `x-satay` parsing helpers shared by validation.
 
 Unsupported OpenAPI features are rejected with `ValidationError` instead of being ignored. Lowering and rendering rely on those validation guarantees and use `unreachable!` or `expect` for states that validation should have made impossible.
 
 ## Lowering Stage
 
-Lowering converts normalized `oas3` schema identities plus validation metadata into the normalized IR in `model.rs`.
+Lowering converts `ValidatedDocument` values into the codegen IR in `model.rs`.
 
 ```mermaid
 flowchart TD
@@ -168,18 +160,18 @@ flowchart TD
 `lower/schema.rs` converts component schemas and nested type schemas into:
 
 - `ComponentKind::Struct` for object schemas with properties.
-- `ComponentKind::Enum` for string enum components.
-- `ComponentKind::Range` for component-level string range schemas.
-- `ComponentKind::Alias` for primitive, array, nullable, parsed-string, parsed-integer, range, and named aliases without extra constraints.
-- `ComponentKind::Nutype` for component schemas with validation constraints.
+- `ComponentKind::Enum` for non-null string enum components.
+- `ComponentKind::Range` for non-null component-level string range schemas from `x-satay.parse-as`.
+- `ComponentKind::Alias` for reference aliases, primitive aliases, arrays, nullable types, parsed string/integer values, ranges, and named aliases without top-level component constraints.
+- `ComponentKind::Nutype` for non-null component schemas with validation constraints.
 
 `lower/operation.rs` converts supported path operations into `Operation` values:
 
 - Operation names come from `operationId`, or from an inferred `method + path` name.
-- Path-level parameters are merged with operation-level parameters, with operation-level definitions overriding matching path-level definitions.
-- Path strings are split into literal and parameter `PathSegment`s.
-- Request bodies select the first supported JSON media type.
-- Response cases are sorted by status code and preserve response body types when a JSON schema exists.
+- Validated operations already contain merged path-level and operation-level parameters; lowering assigns Rust field names and de-duplicates input fields.
+- Path strings have already been split into literal and parameter `PathSegment`s during validation.
+- Request bodies preserve the validated JSON media type and become a generated `body` input field, de-duplicated if a parameter already uses that name.
+- Response cases preserve validated status-code ordering and response body types when a JSON schema exists.
 - Header and query API-key security schemes are converted to `ApiKeySecurityScheme` values for the generated `Api` builder.
 
 ## Internal IR
@@ -229,7 +221,7 @@ classDiagram
         Range
         Named
         Constrained
-        Nullable
+        Option
     }
     class Validation {
         String
@@ -257,7 +249,7 @@ Important IR conventions:
 
 - `TypeRef::Named` points at a type in the generated `types.rs` file.
 - `TypeRef::Constrained` points at an inline generated constrained type and keeps the inner type for request parameter serialization.
-- `TypeRef::Nullable` maps to `Option<T>` during rendering.
+- `TypeRef::Option` maps to `Option<T>` during rendering.
 - Optional fields are represented by `Field.required == false`; rendering decides whether to wrap in `Option<T>`.
 - `Field.treat_error_as_none` forces `Option<T>` plus custom serde handling even when a property is required in OpenAPI.
 
@@ -292,7 +284,7 @@ Shared rendering helpers in `render/mod.rs` handle:
 - Rustdoc attribute generation from OpenAPI descriptions.
 - `TypeRef` to Rust type conversion.
 - Operation input field construction.
-- Nullable and component-kind lookups.
+- Optional-field wrapping and input builder argument conversion.
 - Request body conversion mode selection.
 
 Renderer submodules:
@@ -342,9 +334,9 @@ Rendering is not fallible in the public API. If rendering or lowering hits an im
 Key invariants enforced before rendering:
 
 - Only OpenAPI `3.1.x` documents are accepted.
-- Only supported local component references are accepted.
-- Unsupported schema composition, map objects, inline object schemas, boolean JSON Schemas, non-string enums, non-JSON bodies, nullable parameters, cookie parameters, and unsupported constraint keywords are rejected.
-- Every operation has responses.
+- Only supported local references into `#/components/...` are accepted, and supported component-object reference chains are checked for cycles.
+- Unsupported schema composition, map objects, inline object schemas, boolean JSON Schemas, non-string enums, multi-type schemas beyond one non-null type plus `null`, content parameters, non-JSON bodies, default response bodies, nullable parameters, cookie parameters, array path/header parameters, and unsupported constraint keywords are rejected.
+- Every operation has a `responses` object.
 - Path parameters declared in the path template and parameter lists match.
 - Request and response bodies used by generated JSON helpers have supported JSON media types.
 
@@ -353,10 +345,10 @@ Key invariants enforced before rendering:
 Most feature additions need changes in this order:
 
 - Add or adjust `ValidationError` variants for the new supported or rejected cases.
-- Update `parse/normalize` if the feature introduces new schema locations that need `SchemaId`s.
-- Update `parse/validate` so the new shape is either accepted with metadata or rejected explicitly.
+- Update `parse/resolve` and `parse/reference` if the feature introduces new reference locations or resolution behavior.
+- Update `parse/validate` so the new shape is either accepted into `Validated*` values or rejected explicitly.
 - Extend `model.rs` only if the existing `TypeRef`, `ComponentKind`, or operation IR cannot represent the feature.
-- Update `parse/lower` to produce the IR from validated `oas3` data.
+- Update `parse/lower` to produce the IR from validated data.
 - Update `render` modules to emit Rust for the new IR.
 - Add tests in `crates/satay-codegen/tests/generate.rs` or parser-focused tests under `parse/tests.rs`.
 
