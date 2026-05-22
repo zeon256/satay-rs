@@ -105,7 +105,7 @@ fn generate(input: &Path, output: &Path, rustfmt: bool) -> Result<(), Error> {
     info!("generating client code");
     let files = satay_codegen::generate(&spec)?;
 
-    let mut rustfmt_files = Vec::new();
+    let mut rustfmt_files = vec![];
 
     for file in &files {
         let path = output.join(&file.relative_path);

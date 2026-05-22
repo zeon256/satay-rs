@@ -31,7 +31,7 @@ fn render_validation(validation: &Validation) -> TokenStream {
             max_length,
             pattern,
         } => {
-            let mut validators = Vec::new();
+            let mut validators = vec![];
             if let Some(pattern) = pattern {
                 let pattern = lit_str(pattern);
                 validators.push(quote!(regex = #pattern));
@@ -47,7 +47,7 @@ fn render_validation(validation: &Validation) -> TokenStream {
             quote!(validate(#(#validators),*))
         }
         Validation::Integer { minimum, maximum } => {
-            let mut validators = Vec::new();
+            let mut validators = vec![];
             if let Some(minimum) = minimum {
                 validators.push(integer_limit_validator(
                     "greater",

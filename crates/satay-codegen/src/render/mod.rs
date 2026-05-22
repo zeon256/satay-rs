@@ -21,7 +21,7 @@ pub(crate) fn render_api(api: &Api) -> Vec<GeneratedFile> {
         operations = api.operations.len(),
         "rendering API"
     );
-    let mut files = Vec::new();
+    let mut files = vec![];
 
     let top_mod = render_top_mod(api);
     files.push(GeneratedFile {
@@ -149,7 +149,7 @@ fn add_blank_lines_between_members(code: &str) -> String {
 }
 
 fn render_top_mod(api: &Api) -> syn::File {
-    let mut items: Vec<syn::Item> = Vec::new();
+    let mut items: Vec<syn::Item> = vec![];
     let server_url = lit_str(&api.server_url);
     items.push(parse_quote!(pub const SERVER_URL: &str = #server_url;));
 
