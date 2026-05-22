@@ -5,144 +5,138 @@ use oas3::{
     spec::{
         ObjectOrReference, Operation as OasOperation, Parameter as OasParameter,
         ParameterIn as OasParameterIn, RequestBody as OasRequestBody, Response as OasResponse,
-        Schema as OasSchema, SchemaType as OasSchemaType,
     },
 };
 
-use super::super::helpers::json_media_type;
-use super::super::normalize::NormalizedDocument;
+use super::super::helpers::{json_media_type, optional_description};
 use super::super::reference::{
-    object_schema, resolve_parameter, resolve_path_item, resolve_request_body, resolve_response,
-    schema_ref, schema_type_and_nullable,
+    resolve_parameter, resolve_path_item, resolve_request_body, resolve_response,
 };
+use super::super::resolve::ResolvedDocument;
 use super::schema::validate_type_schema;
-use super::state::ValidatedSchemas;
+use super::{ValidatedOperation, ValidatedParameter, ValidatedRequestBody, ValidatedResponse};
 use crate::error::ValidationError;
-use crate::model::{HttpMethod, ParameterLocation};
-
-#[derive(Debug, Clone)]
-struct ValidatedParameter {
-    location: ParameterLocation,
-    wire_name: String,
-}
+use crate::model::{HttpMethod, ParameterLocation, PathSegment};
 
 pub(super) fn validate_operations(
-    document: &NormalizedDocument<'_>,
-    schemas: &mut ValidatedSchemas,
-) -> Result<(), ValidationError> {
+    document: &ResolvedDocument<'_>,
+) -> Result<Vec<ValidatedOperation>, ValidationError> {
     let paths = document
-        .resolved
         .spec
         .paths
         .as_ref()
         .ok_or(ValidationError::MissingPaths)?;
 
+    let mut operations = vec![];
+
     for (path, path_item) in paths {
-        let path_item = resolve_path_item(
-            &document.resolved,
-            path_item,
-            &format!("path item `{path}`"),
-        )?;
+        let path_item = resolve_path_item(document, path_item, &format!("path item `{path}`"))?;
 
         let path_parameters = validate_parameter_list(
             document,
             &path_item.parameters,
             &format!("path item `{path}` parameters"),
-            schemas,
         )?;
 
         validate_path_operation(
             document,
+            &mut operations,
             HttpMethod::Get,
             path,
             path_item.get.as_ref(),
             &path_parameters,
-            schemas,
         )?;
         validate_path_operation(
             document,
+            &mut operations,
             HttpMethod::Post,
             path,
             path_item.post.as_ref(),
             &path_parameters,
-            schemas,
         )?;
         validate_path_operation(
             document,
+            &mut operations,
             HttpMethod::Put,
             path,
             path_item.put.as_ref(),
             &path_parameters,
-            schemas,
         )?;
         validate_path_operation(
             document,
+            &mut operations,
             HttpMethod::Patch,
             path,
             path_item.patch.as_ref(),
             &path_parameters,
-            schemas,
         )?;
         validate_path_operation(
             document,
+            &mut operations,
             HttpMethod::Delete,
             path,
             path_item.delete.as_ref(),
             &path_parameters,
-            schemas,
         )?;
         validate_path_operation(
             document,
+            &mut operations,
             HttpMethod::Head,
             path,
             path_item.head.as_ref(),
             &path_parameters,
-            schemas,
         )?;
         validate_path_operation(
             document,
+            &mut operations,
             HttpMethod::Options,
             path,
             path_item.options.as_ref(),
             &path_parameters,
-            schemas,
         )?;
         validate_path_operation(
             document,
+            &mut operations,
             HttpMethod::Trace,
             path,
             path_item.trace.as_ref(),
             &path_parameters,
-            schemas,
         )?;
     }
 
-    Ok(())
+    Ok(operations)
 }
 
 fn validate_path_operation(
-    document: &NormalizedDocument<'_>,
+    document: &ResolvedDocument<'_>,
+    operations: &mut Vec<ValidatedOperation>,
     method: HttpMethod,
     path: &str,
     operation: Option<&OasOperation>,
     path_parameters: &[ValidatedParameter],
-    schemas: &mut ValidatedSchemas,
 ) -> Result<(), ValidationError> {
     let Some(operation) = operation else {
         return Ok(());
     };
 
-    validate_operation(document, method, path, path_parameters, operation, schemas)
+    operations.push(validate_operation(
+        document,
+        method,
+        path,
+        path_parameters,
+        operation,
+    )?);
+
+    Ok(())
 }
 
 fn validate_operation(
-    document: &NormalizedDocument<'_>,
+    document: &ResolvedDocument<'_>,
     method: HttpMethod,
     path: &str,
     path_parameters: &[ValidatedParameter],
     operation: &OasOperation,
-    schemas: &mut ValidatedSchemas,
-) -> Result<(), ValidationError> {
+) -> Result<ValidatedOperation, ValidationError> {
     let operation_id = operation
         .operation_id
         .clone()
@@ -154,58 +148,61 @@ fn validate_operation(
         document,
         &operation.parameters,
         &format!("operation `{operation_id}` parameters"),
-        schemas,
     )? {
         upsert_parameter(&mut parameters, parameter);
     }
 
     validate_path_parameters(path, &parameters)?;
 
-    validate_request_body(
+    let request_body = validate_request_body(
         document,
         operation.request_body.as_ref(),
         &format!("operation `{operation_id}` requestBody"),
-        schemas,
     )?;
 
-    if let Some(responses) = operation.responses.as_ref() {
-        validate_responses(
-            document,
-            responses,
-            &format!("operation `{operation_id}` responses"),
-            schemas,
-        )?;
-    } else {
+    let Some(responses) = operation.responses.as_ref() else {
         return Err(ValidationError::MissingOperationResponses {
             operation_id: operation_id.clone(),
         });
-    }
+    };
+    let responses = validate_responses(
+        document,
+        responses,
+        &format!("operation `{operation_id}` responses"),
+    )?;
 
-    Ok(())
+    Ok(ValidatedOperation {
+        operation_id,
+        description: optional_description(&operation.description),
+        method,
+        path: path.to_owned(),
+        path_segments: parse_path_segments(path)?,
+        parameters,
+        request_body,
+        responses,
+    })
 }
 
 fn validate_parameter_list(
-    document: &NormalizedDocument<'_>,
+    document: &ResolvedDocument<'_>,
     parameters: &[ObjectOrReference<OasParameter>],
     context: &str,
-    schemas: &mut ValidatedSchemas,
 ) -> Result<Vec<ValidatedParameter>, ValidationError> {
     let mut parsed = Vec::with_capacity(parameters.len());
 
     for parameter in parameters {
-        parsed.push(validate_parameter(document, parameter, context, schemas)?);
+        parsed.push(validate_parameter(document, parameter, context)?);
     }
 
     Ok(parsed)
 }
 
 fn validate_parameter(
-    document: &NormalizedDocument<'_>,
+    document: &ResolvedDocument<'_>,
     parameter: &ObjectOrReference<OasParameter>,
     context: &str,
-    schemas: &mut ValidatedSchemas,
 ) -> Result<ValidatedParameter, ValidationError> {
-    let parameter = resolve_parameter(&document.resolved, parameter, context)?;
+    let parameter = resolve_parameter(document, parameter, context)?;
     let wire_name = parameter.name.clone();
 
     let location = match parameter.location {
@@ -237,36 +234,55 @@ fn validate_parameter(
                 wire_name: wire_name.clone(),
             })?;
 
-    validate_type_schema(
-        document,
-        schema,
-        &format!("parameter `{wire_name}`"),
-        false,
-        schemas,
-    )?;
-    validate_parameter_schema_shape(schema, &wire_name, location)?;
+    let ty = validate_type_schema(document, schema, &format!("parameter `{wire_name}`"), false)?;
 
-    if location == ParameterLocation::Path && parameter.required != Some(true) {
-        return Err(ValidationError::PathParameterNotRequired { wire_name });
+    if ty.is_nullable() {
+        return Err(ValidationError::NullableParameterUnsupported {
+            wire_name: wire_name.clone(),
+        });
     }
+
+    if location == ParameterLocation::Path && ty.is_array() {
+        return Err(ValidationError::ArrayPathParameterUnsupported {
+            wire_name: wire_name.clone(),
+        });
+    }
+
+    if location == ParameterLocation::Header && ty.is_array() {
+        return Err(ValidationError::ArrayHeaderParameterUnsupported {
+            wire_name: wire_name.clone(),
+        });
+    }
+
+    let required = match location {
+        ParameterLocation::Path => {
+            if parameter.required != Some(true) {
+                return Err(ValidationError::PathParameterNotRequired { wire_name });
+            }
+            true
+        }
+        ParameterLocation::Query | ParameterLocation::Header => parameter.required.unwrap_or(false),
+    };
 
     Ok(ValidatedParameter {
         location,
-        wire_name,
+        wire_name: parameter.name.clone(),
+        description: optional_description(&parameter.description),
+        ty,
+        required,
     })
 }
 
 fn validate_request_body(
-    document: &NormalizedDocument<'_>,
+    document: &ResolvedDocument<'_>,
     request_body: Option<&ObjectOrReference<OasRequestBody>>,
     context: &str,
-    schemas: &mut ValidatedSchemas,
-) -> Result<(), ValidationError> {
+) -> Result<Option<ValidatedRequestBody>, ValidationError> {
     let Some(request_body) = request_body else {
-        return Ok(());
+        return Ok(None);
     };
 
-    let request_body = resolve_request_body(&document.resolved, request_body, context)?;
+    let request_body = resolve_request_body(document, request_body, context)?;
 
     if request_body.content.is_empty() {
         return Err(ValidationError::MissingContent {
@@ -274,7 +290,7 @@ fn validate_request_body(
         });
     }
 
-    let (_, media_type) = json_media_type(&request_body.content).ok_or_else(|| {
+    let (content_type, media_type) = json_media_type(&request_body.content).ok_or_else(|| {
         ValidationError::MissingJsonContent {
             context: context.to_owned(),
         }
@@ -286,19 +302,24 @@ fn validate_request_body(
             context: context.to_owned(),
         })?;
 
-    validate_type_schema(document, schema, context, false, schemas)
+    Ok(Some(ValidatedRequestBody {
+        description: optional_description(&request_body.description),
+        content_type: content_type.to_owned(),
+        ty: validate_type_schema(document, schema, context, false)?,
+        required: request_body.required.unwrap_or(false),
+    }))
 }
 
 fn validate_responses(
-    document: &NormalizedDocument<'_>,
+    document: &ResolvedDocument<'_>,
     responses: &OasMap<String, ObjectOrReference<OasResponse>>,
     context: &str,
-    schemas: &mut ValidatedSchemas,
-) -> Result<(), ValidationError> {
+) -> Result<Vec<ValidatedResponse>, ValidationError> {
+    let mut parsed = vec![];
+
     for (status, response) in responses {
         if status == "default" {
-            let response =
-                resolve_response(&document.resolved, response, &format!("{context} default"))?;
+            let response = resolve_response(document, response, &format!("{context} default"))?;
             if !response.content.is_empty() {
                 return Err(ValidationError::DefaultResponseBodyUnsupported {
                     context: context.to_owned(),
@@ -321,67 +342,40 @@ fn validate_responses(
             });
         }
 
-        let response =
-            resolve_response(&document.resolved, response, &format!("{context} {status}"))?;
+        let response = resolve_response(document, response, &format!("{context} {status}"))?;
 
-        if response.content.is_empty() {
-            continue;
-        }
-
-        let (_, media_type) = json_media_type(&response.content).ok_or_else(|| {
-            ValidationError::MissingResponseJsonContent {
-                context: context.to_owned(),
-                status: status.to_owned(),
-            }
-        })?;
-        let Some(schema) = media_type.schema.as_ref() else {
-            continue;
+        let body = if response.content.is_empty() {
+            None
+        } else {
+            let (_, media_type) = json_media_type(&response.content).ok_or_else(|| {
+                ValidationError::MissingResponseJsonContent {
+                    context: context.to_owned(),
+                    status: status.to_owned(),
+                }
+            })?;
+            media_type
+                .schema
+                .as_ref()
+                .map(|schema| {
+                    validate_type_schema(
+                        document,
+                        schema,
+                        &format!("{context} {status} schema"),
+                        false,
+                    )
+                })
+                .transpose()?
         };
 
-        validate_type_schema(
-            document,
-            schema,
-            &format!("{context} {status} schema"),
-            false,
-            schemas,
-        )?;
-    }
-
-    Ok(())
-}
-
-fn validate_parameter_schema_shape(
-    schema: &OasSchema,
-    wire_name: &str,
-    location: ParameterLocation,
-) -> Result<(), ValidationError> {
-    let context = format!("parameter `{wire_name}`");
-    if schema_ref(schema, &context)?.is_some() {
-        return Ok(());
-    }
-
-    let schema = object_schema(schema, &context)?;
-    let (schema_type, nullable) = schema_type_and_nullable(schema, &context)?;
-
-    if nullable {
-        return Err(ValidationError::NullableParameterUnsupported {
-            wire_name: wire_name.to_owned(),
+        parsed.push(ValidatedResponse {
+            status: status_code,
+            description: optional_description(&response.description),
+            body,
         });
     }
 
-    if location == ParameterLocation::Path && schema_type == Some(OasSchemaType::Array) {
-        return Err(ValidationError::ArrayPathParameterUnsupported {
-            wire_name: wire_name.to_owned(),
-        });
-    }
-
-    if location == ParameterLocation::Header && schema_type == Some(OasSchemaType::Array) {
-        return Err(ValidationError::ArrayHeaderParameterUnsupported {
-            wire_name: wire_name.to_owned(),
-        });
-    }
-
-    Ok(())
+    parsed.sort_by_key(|response| response.status);
+    Ok(parsed)
 }
 
 fn upsert_parameter(parameters: &mut Vec<ValidatedParameter>, parameter: ValidatedParameter) {
@@ -441,6 +435,35 @@ fn path_parameter_names(path: &str) -> Result<BTreeSet<String>, ValidationError>
         })?;
 
         names.insert(rest[open + 1..open + 1 + close].to_owned());
+        rest = &rest[open + 1 + close + 1..];
+    }
+}
+
+fn parse_path_segments(path: &str) -> Result<Vec<PathSegment>, ValidationError> {
+    let mut segments = vec![];
+    let mut rest = path;
+
+    loop {
+        let Some(open) = rest.find('{') else {
+            if !rest.is_empty() {
+                segments.push(PathSegment::Literal(rest.to_owned()));
+            }
+            return Ok(segments);
+        };
+
+        let close = rest[open + 1..].find('}').ok_or_else(|| {
+            let path = path.to_owned();
+            ValidationError::UnclosedPathParameter { path }
+        })?;
+
+        if open > 0 {
+            segments.push(PathSegment::Literal(rest[..open].to_owned()));
+        }
+
+        segments.push(PathSegment::Parameter(
+            rest[open + 1..open + 1 + close].to_owned(),
+        ));
+
         rest = &rest[open + 1 + close + 1..];
     }
 }

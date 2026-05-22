@@ -5,7 +5,6 @@ use crate::model::Api;
 
 mod helpers;
 mod lower;
-mod normalize;
 mod reference;
 mod registry;
 mod resolve;
@@ -23,8 +22,7 @@ pub(crate) fn parse_api(document: &Document) -> Result<Api, ValidationError> {
     tracing::debug!("parsing API from document");
 
     let resolved = resolve::resolve_document(document)?;
-    let normalized = normalize::normalize_document(resolved)?;
-    let validated = validate::validate_document(normalized)?;
+    let validated = validate::validate_document(resolved)?;
     lower::lower_document(&validated)
 }
 
