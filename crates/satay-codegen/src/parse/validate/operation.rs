@@ -424,7 +424,7 @@ fn parse_path_segments(path: &str) -> Result<Vec<PathSegment>, ValidationError> 
 }
 
 fn inferred_operation_id(method: HttpMethod, path: &str) -> String {
-    let mut parts = Vec::new();
+    let mut parts = vec![];
     parts.push(method.operation_prefix().to_owned());
     for segment in path.split('/') {
         if segment.is_empty() {

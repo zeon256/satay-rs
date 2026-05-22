@@ -6,7 +6,7 @@ use crate::ident::type_ident;
 use crate::model::{Api, ApiKeyLocation, ApiKeySecurityScheme, Field, Operation, TypeRef};
 
 pub(super) fn render_api_file(api: &Api) -> syn::File {
-    let mut items = Vec::new();
+    let mut items = vec![];
     if let Some(operation_use) = build_api_operation_use(api) {
         items.push(Item::Use(operation_use));
     }
@@ -32,7 +32,7 @@ fn build_api_operation_use(api: &Api) -> Option<syn::ItemUse> {
         return None;
     }
 
-    let mut names = Vec::new();
+    let mut names = vec![];
     for operation in &api.operations {
         names.push(super::ident(&operation.input_name));
         names.push(super::ident(&operation.response_name));

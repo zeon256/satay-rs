@@ -7,7 +7,7 @@ mod ranges;
 pub(super) mod structs;
 
 pub(super) fn render_types_file(api: &Api) -> syn::File {
-    let mut items = Vec::new();
+    let mut items = vec![];
     let has_enum = api
         .components
         .iter()

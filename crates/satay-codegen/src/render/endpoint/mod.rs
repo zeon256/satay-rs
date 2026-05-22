@@ -31,7 +31,7 @@ pub(super) fn render_endpoint_mod(_operation: &Operation) -> syn::File {
 }
 
 pub(super) fn render_endpoint_parts_file(api: &Api, operation: &Operation) -> syn::File {
-    let mut items = Vec::new();
+    let mut items = vec![];
     if let Some(use_types) = build_parts_types_use(api, operation) {
         items.push(Item::Use(use_types));
     }
@@ -51,7 +51,7 @@ pub(super) fn render_endpoint_parts_file(api: &Api, operation: &Operation) -> sy
 }
 
 pub(super) fn render_endpoint_json_file(api: &Api, operation: &Operation) -> syn::File {
-    let mut items = Vec::new();
+    let mut items = vec![];
     if let Some(use_types) = build_json_types_use(api, operation) {
         items.push(Item::Use(use_types));
     }
@@ -72,7 +72,7 @@ pub(super) fn render_endpoint_json_file(api: &Api, operation: &Operation) -> syn
 }
 
 fn build_parts_types_use(api: &Api, operation: &Operation) -> Option<syn::ItemUse> {
-    let mut needed_names: Vec<Ident> = Vec::new();
+    let mut needed_names: Vec<Ident> = vec![];
 
     for param in &operation.parameters {
         collect_type_refs(&param.ty, &mut needed_names);
@@ -90,7 +90,7 @@ fn build_parts_types_use(api: &Api, operation: &Operation) -> Option<syn::ItemUs
 }
 
 fn build_json_types_use(api: &Api, operation: &Operation) -> Option<syn::ItemUse> {
-    let mut needed_names: Vec<Ident> = Vec::new();
+    let mut needed_names: Vec<Ident> = vec![];
 
     for response in &operation.responses {
         if let Some(body) = &response.body {

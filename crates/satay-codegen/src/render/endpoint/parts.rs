@@ -115,7 +115,7 @@ fn render_request_parts_return(operation: &Operation) -> syn::Expr {
 }
 
 fn render_path(operation: &Operation) -> Vec<syn::Stmt> {
-    let mut statements = Vec::new();
+    let mut statements = vec![];
     for segment in &operation.path_segments {
         match segment {
             PathSegment::Literal(literal) if !literal.is_empty() => {

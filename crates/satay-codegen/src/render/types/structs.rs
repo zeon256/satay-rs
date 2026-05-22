@@ -52,7 +52,7 @@ fn field_attrs(field: &Field, serde: bool) -> Vec<syn::Attribute> {
         return attrs;
     }
 
-    let mut serde_attrs = Vec::new();
+    let mut serde_attrs = vec![];
     if field.rust_name != field.wire_name {
         let wire_name = lit_str(&field.wire_name);
         serde_attrs.push(quote::quote!(rename = #wire_name));
