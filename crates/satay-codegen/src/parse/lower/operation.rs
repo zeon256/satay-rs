@@ -70,7 +70,10 @@ pub(super) fn parse_operations(
     registry: &mut TypeRegistry,
 ) -> Result<Vec<SatayOperation>, ValidationError> {
     let spec = &document.resolved.spec;
-    let paths = spec.paths.as_ref().ok_or(ValidationError::MissingPaths)?;
+    let paths = spec
+        .paths
+        .as_ref()
+        .expect("validation should require OpenAPI paths before lowering");
 
     let mut operations = vec![];
 
@@ -230,8 +233,7 @@ fn parse_operation(
     }
     deduplicate_parameter_fields(&mut parameters);
 
-    let path_segments = parse_path_segments(path)?;
-    validate_path_parameters(path, &path_segments, &parameters)?;
+    let path_segments = parse_path_segments(path);
 
     let request_body = parse_request_body(
         document,
@@ -247,9 +249,7 @@ fn parse_operation(
         operation
             .responses
             .as_ref()
-            .ok_or_else(|| ValidationError::MissingOperationResponses {
-                operation_id: operation_id.clone(),
-            })?,
+            .expect("validation should require operation responses before lowering"),
         &format!("operation `{operation_id}` responses"),
         registry,
         &type_prefix,
@@ -306,29 +306,18 @@ fn parse_parameter(
         OasParameterIn::Query => ParameterLocation::Query,
         OasParameterIn::Header => ParameterLocation::Header,
         OasParameterIn::Cookie => {
-            return Err(ValidationError::UnsupportedParameterLocation {
-                context: context.to_owned(),
-                wire_name: wire_name.clone(),
-                location: "cookie".to_owned(),
-            });
+            unreachable!("validation should reject cookie parameters before lowering");
         }
     };
 
     if parameter.content.is_some() {
-        return Err(ValidationError::ContentParameterUnsupported {
-            context: context.to_owned(),
-            wire_name: wire_name.clone(),
-        });
+        unreachable!("validation should reject content parameters before lowering");
     }
 
-    let schema =
-        parameter
-            .schema
-            .as_ref()
-            .ok_or_else(|| ValidationError::MissingParameterSchema {
-                context: context.to_owned(),
-                wire_name: wire_name.clone(),
-            })?;
+    let schema = parameter
+        .schema
+        .as_ref()
+        .expect("validation should require parameter schemas before lowering");
 
     let ty = parse_type_ref(
         schema,
@@ -339,29 +328,21 @@ fn parse_parameter(
     )?;
 
     if ty.is_nullable() {
-        return Err(ValidationError::NullableParameterUnsupported {
-            wire_name: wire_name.clone(),
-        });
+        unreachable!("validation should reject nullable parameters before lowering");
     }
 
     if location == ParameterLocation::Path && is_array_type(ty.non_nullable()) {
-        return Err(ValidationError::ArrayPathParameterUnsupported {
-            wire_name: wire_name.clone(),
-        });
+        unreachable!("validation should reject array path parameters before lowering");
     }
 
     if location == ParameterLocation::Header && is_array_type(ty.non_nullable()) {
-        return Err(ValidationError::ArrayHeaderParameterUnsupported {
-            wire_name: wire_name.clone(),
-        });
+        unreachable!("validation should reject array header parameters before lowering");
     }
 
     let required = match location {
         ParameterLocation::Path => {
             if parameter.required != Some(true) {
-                return Err(ValidationError::PathParameterNotRequired {
-                    wire_name: wire_name.clone(),
-                });
+                unreachable!("validation should reject optional path parameters before lowering");
             }
             true
         }
@@ -409,23 +390,16 @@ fn parse_request_body(
     let request_body = resolve_request_body(&document.resolved, request_body, context)?;
 
     if request_body.content.is_empty() {
-        return Err(ValidationError::MissingContent {
-            context: context.to_owned(),
-        });
+        unreachable!("validation should require request body content before lowering");
     }
 
-    let (content_type, media_type) = json_media_type(&request_body.content).ok_or_else(|| {
-        ValidationError::MissingJsonContent {
-            context: context.to_owned(),
-        }
-    })?;
+    let (content_type, media_type) = json_media_type(&request_body.content)
+        .expect("validation should require request body JSON content before lowering");
 
     let schema = media_type
         .schema
         .as_ref()
-        .ok_or_else(|| ValidationError::MissingJsonSchema {
-            context: context.to_owned(),
-        })?;
+        .expect("validation should require request body JSON schemas before lowering");
 
     let mut used = parameters
         .iter()
@@ -462,25 +436,16 @@ fn parse_responses(
             let response =
                 resolve_response(&document.resolved, response, &format!("{context} default"))?;
             if !response.content.is_empty() {
-                return Err(ValidationError::DefaultResponseBodyUnsupported {
-                    context: context.to_owned(),
-                });
+                unreachable!("validation should reject default response bodies before lowering");
             }
             continue;
         }
 
-        let status_code =
-            status
-                .parse::<u16>()
-                .map_err(|_| ValidationError::InvalidStatusCode {
-                    context: context.to_owned(),
-                    status: status.to_owned(),
-                })?;
+        let status_code = status
+            .parse::<u16>()
+            .expect("validation should reject invalid status codes before lowering");
         if !(100..=599).contains(&status_code) {
-            return Err(ValidationError::OutOfRangeStatusCode {
-                context: context.to_owned(),
-                status_code,
-            });
+            unreachable!("validation should reject out-of-range status codes before lowering");
         }
 
         let response =
@@ -489,12 +454,8 @@ fn parse_responses(
         let body = if response.content.is_empty() {
             None
         } else {
-            let (_, media_type) = json_media_type(&response.content).ok_or_else(|| {
-                ValidationError::MissingResponseJsonContent {
-                    context: context.to_owned(),
-                    status: status.to_owned(),
-                }
-            })?;
+            let (_, media_type) = json_media_type(&response.content)
+                .expect("validation should require response JSON content before lowering");
             match media_type.schema.as_ref() {
                 Some(schema) => Some(parse_type_ref(
                     schema,
@@ -519,7 +480,7 @@ fn parse_responses(
     Ok(cases)
 }
 
-fn parse_path_segments(path: &str) -> Result<Vec<PathSegment>, ValidationError> {
+fn parse_path_segments(path: &str) -> Vec<PathSegment> {
     let mut segments = vec![];
     let mut rest = path;
 
@@ -528,13 +489,12 @@ fn parse_path_segments(path: &str) -> Result<Vec<PathSegment>, ValidationError> 
             if !rest.is_empty() {
                 segments.push(PathSegment::Literal(rest.to_owned()));
             }
-            return Ok(segments);
+            return segments;
         };
 
-        let close = rest[open + 1..].find('}').ok_or_else(|| {
-            let path = path.to_owned();
-            ValidationError::UnclosedPathParameter { path }
-        })?;
+        let close = rest[open + 1..]
+            .find('}')
+            .expect("validation should reject unclosed path parameters before lowering");
 
         if open > 0 {
             segments.push(PathSegment::Literal(rest[..open].to_owned()));
@@ -546,42 +506,6 @@ fn parse_path_segments(path: &str) -> Result<Vec<PathSegment>, ValidationError> 
 
         rest = &rest[open + 1 + close + 1..];
     }
-}
-
-fn validate_path_parameters(
-    path: &str,
-    path_segments: &[PathSegment],
-    parameters: &[Parameter],
-) -> Result<(), ValidationError> {
-    let declared = parameters
-        .iter()
-        .filter(|parameter| parameter.location == ParameterLocation::Path)
-        .map(|parameter| parameter.wire_name.as_str())
-        .collect::<BTreeSet<_>>();
-
-    let mut placeholders = BTreeSet::new();
-    for segment in path_segments {
-        if let PathSegment::Parameter(name) = segment {
-            placeholders.insert(name.as_str());
-            if !declared.contains(name.as_str()) {
-                return Err(ValidationError::UndeclaredPathParameter {
-                    path: path.to_owned(),
-                    name: name.to_owned(),
-                });
-            }
-        }
-    }
-
-    for name in declared {
-        if !placeholders.contains(name) {
-            return Err(ValidationError::UnusedPathParameter {
-                path: path.to_owned(),
-                name: name.to_owned(),
-            });
-        }
-    }
-
-    Ok(())
 }
 
 fn inferred_operation_id(method: HttpMethod, path: &str) -> String {

@@ -7,7 +7,6 @@ use oas3::spec::{
 use super::super::helpers::{optional_description, schema_description};
 use super::super::reference::{
     object_schema, reject_composition, schema_ref, schema_ref_type_name, schema_type_and_nullable,
-    schema_type_wire,
 };
 use super::super::registry::TypeRegistry;
 use super::super::validate::constraint::{parse_integer_type, parse_validation, reject_keyword};
@@ -63,7 +62,7 @@ fn parse_component_kind(
     let (schema_type, nullable) = schema_type_and_nullable(schema, &context)?;
 
     if !schema.enum_values.is_empty() {
-        let variants = parse_string_enum(schema, &context, satay)?;
+        let variants = parse_string_enum(schema, &context, satay);
         if nullable {
             let inner = registry.inline_enum_ref(
                 &format!("{schema_name} value"),
@@ -93,13 +92,9 @@ fn parse_component_kind(
             registry,
             satay,
         ),
-        Some(kind) => Err(ValidationError::UnsupportedComponentType {
-            schema: schema_name.to_owned(),
-            kind: schema_type_wire(kind).to_owned(),
-        }),
-        None => Err(ValidationError::MissingComponentSchemaType {
-            schema: schema_name.to_owned(),
-        }),
+        Some(_) | None => {
+            unreachable!("validation should reject unsupported component schemas before lowering");
+        }
     }
 }
 
@@ -177,31 +172,24 @@ fn parse_string_enum(
     schema: &OasObjectSchema,
     context: &str,
     satay: &ValidatedSatay,
-) -> Result<Vec<EnumVariant>, ValidationError> {
-    let (schema_type, _) = schema_type_and_nullable(schema, context)?;
+) -> Vec<EnumVariant> {
+    let (schema_type, _) = validated_schema_type_and_nullable(schema, context);
 
     if let Some(kind) = schema_type
         && kind != OasSchemaType::String
     {
-        return Err(ValidationError::UnsupportedEnumType {
-            context: context.to_owned(),
-            kind: schema_type_wire(kind).to_owned(),
-        });
+        unreachable!("validation should reject unsupported enum types before lowering");
     }
 
     if schema.enum_values.is_empty() {
-        return Err(ValidationError::EmptyEnum {
-            context: context.to_owned(),
-        });
+        unreachable!("validation should reject empty enums before lowering");
     }
 
     let mut wire_names = Vec::with_capacity(schema.enum_values.len());
 
     for value in &schema.enum_values {
         let Some(value) = value.as_str() else {
-            return Err(ValidationError::NonStringEnumValue {
-                context: context.to_owned(),
-            });
+            unreachable!("validation should reject non-string enum values before lowering");
         };
         wire_names.push(value);
     }
@@ -232,7 +220,7 @@ fn parse_string_enum(
         });
     }
 
-    Ok(variants)
+    variants
 }
 
 fn parse_struct_fields(
@@ -248,9 +236,7 @@ fn parse_struct_fields(
     reject_keyword(schema.max_properties.is_some(), "maxProperties", &context)?;
 
     if schema.properties.is_empty() {
-        return Err(ValidationError::MissingObjectProperties {
-            schema: schema_name.to_owned(),
-        });
+        unreachable!("validation should reject object schemas without properties before lowering");
     }
 
     let mut used = BTreeSet::new();
@@ -370,7 +356,7 @@ fn parse_type_ref_base(
     }
 
     if !schema.enum_values.is_empty() {
-        let mut variants = parse_string_enum(schema, context, satay)?;
+        let mut variants = parse_string_enum(schema, context, satay);
         let default_empty_variant = variant_ident("");
         variants.retain(|v| !v.wire_name.is_empty() || v.rust_name != default_empty_variant);
         if variants.is_empty() {
@@ -394,20 +380,16 @@ fn parse_type_ref_base(
         Some(OasSchemaType::Number) => match schema.format.as_deref() {
             Some("float") => Ok(TypeRef::F32),
             Some("double") | None => Ok(TypeRef::F64),
-            Some(format) => Err(ValidationError::UnsupportedNumberFormat {
-                context: context.to_owned(),
-                format: format.to_owned(),
-            }),
+            Some(_) => {
+                unreachable!("validation should reject unsupported number formats before lowering");
+            }
         },
         Some(OasSchemaType::Boolean) => Ok(TypeRef::Bool),
         Some(OasSchemaType::Array) => {
-            let items =
-                schema
-                    .items
-                    .as_deref()
-                    .ok_or_else(|| ValidationError::MissingArrayItems {
-                        context: context.to_owned(),
-                    })?;
+            let items = schema
+                .items
+                .as_deref()
+                .expect("validation should require array items before lowering");
             let item_name_hint = type_name_hint.map(|name| format!("{name} item"));
             Ok(TypeRef::Array(Box::new(parse_type_ref(
                 items,
@@ -418,19 +400,25 @@ fn parse_type_ref_base(
             )?)))
         }
         Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => {
-            Err(ValidationError::InlineObjectSchema {
-                context: context.to_owned(),
-            })
+            unreachable!("validation should reject inline object schemas before lowering");
         }
-        Some(OasSchemaType::Object) => Err(ValidationError::UnsupportedMapObjectSchema {
-            context: context.to_owned(),
-        }),
-        Some(kind) => Err(ValidationError::UnsupportedSchemaType {
-            context: context.to_owned(),
-            kind: schema_type_wire(kind).to_owned(),
-        }),
-        None => Err(ValidationError::MissingSchemaType {
-            context: context.to_owned(),
-        }),
+        Some(OasSchemaType::Object) => {
+            unreachable!("validation should reject map object schemas before lowering");
+        }
+        Some(_) => {
+            unreachable!("validation should reject unsupported schema types before lowering");
+        }
+        None => {
+            unreachable!("validation should reject missing schema types before lowering");
+        }
     }
+}
+
+fn validated_schema_type_and_nullable(
+    schema: &OasObjectSchema,
+    context: &str,
+) -> (Option<OasSchemaType>, bool) {
+    schema_type_and_nullable(schema, context).unwrap_or_else(|error| {
+        unreachable!("validated schema type failed during lowering for {context}: {error:?}")
+    })
 }
