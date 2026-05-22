@@ -1,4 +1,5 @@
 pub(crate) mod constraint;
+mod index;
 mod operation;
 mod satay;
 mod schema;
@@ -25,7 +26,8 @@ pub(crate) fn validate_document<'a>(
         });
     }
 
-    let mut schemas = ValidatedSchemas::default();
+    let schema_index = index::index_document(&document)?;
+    let mut schemas = ValidatedSchemas::new(schema_index);
 
     schema::validate_components(&document, &mut schemas)?;
     operation::validate_operations(&document, &mut schemas)?;
