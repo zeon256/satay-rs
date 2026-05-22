@@ -23,13 +23,13 @@ pub(crate) fn lower_document(document: &ValidatedDocument<'_>) -> Result<Api, Va
     let operations = operation::parse_operations(document, &mut registry);
     let constrained_types = registry.finish(&mut components);
 
-    Ok(Api {
+    Ok(Api::new(
         server_url,
         api_key_security_schemes,
         components,
         constrained_types,
         operations,
-    })
+    ))
 }
 
 fn parse_server_url(spec: &OasSpec) -> String {
