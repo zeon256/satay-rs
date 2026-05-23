@@ -14,6 +14,10 @@ inputs:
     description: "Additional cache key"
     required: false
     default: ""
+  dylint-components:
+    description: "Rust components to install for Dylint toolchains (comma-separated)"
+    required: false
+    default: ""
 
 runs:
   using: "composite"
@@ -34,3 +38,18 @@ runs:
       uses: swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       with:
         key: ${{ inputs.cache-key }}
+
+    - name: Install Dylint toolchain components
+      if: ${{ inputs.dylint-components != '' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        components="${{ inputs.dylint-components }}"
+        components="${components//,/ }"
+
+        cargo dylint list | while read -r _ toolchain _; do
+          if [ -n "${toolchain:-}" ]; then
+            rustup component add --toolchain "$toolchain" $components
+          fi
+        done
