@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::{self, Command as ProcessCommand, ExitStatus};
 
 use argh::FromArgs;
-use tracing::{info, instrument};
+use tracing::{error, info, instrument};
 use tracing_subscriber::EnvFilter;
 
 /// Satay command line interface.
@@ -83,7 +83,7 @@ fn main() {
 
     let args = argh::from_env();
     if let Err(err) = run(args) {
-        tracing::error!("{err}");
+        error!("{err}");
         process::exit(1);
     }
 }

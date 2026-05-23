@@ -1,6 +1,7 @@
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::{Ident, LitStr, parse_quote};
+use tracing::info;
 
 use crate::model::{Api, Field, IntegerType, Operation, ParseAs, RangeScalar, TypeRef};
 
@@ -16,7 +17,7 @@ pub struct GeneratedFile {
 }
 
 pub(crate) fn render_api(api: &Api) -> Vec<GeneratedFile> {
-    tracing::info!(
+    info!(
         components = api.components.len(),
         operations = api.operations.len(),
         "rendering API"
@@ -64,7 +65,7 @@ pub(crate) fn render_api(api: &Api) -> Vec<GeneratedFile> {
         });
     }
 
-    tracing::info!(files = files.len(), "rendered API");
+    info!(files = files.len(), "rendered API");
     files
 }
 
