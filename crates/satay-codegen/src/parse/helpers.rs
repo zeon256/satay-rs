@@ -20,7 +20,7 @@ pub(super) fn schema_description(schema: &OasSchema) -> Option<String> {
         OasSchema::Boolean(_) => None,
         OasSchema::Object(object) => match object.as_ref() {
             ObjectOrReference::Object(schema) => optional_description(&schema.description),
-            ObjectOrReference::Ref { .. } => None,
+            ObjectOrReference::Ref { description, .. } => optional_description(description),
         },
     }
 }

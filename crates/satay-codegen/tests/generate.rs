@@ -115,6 +115,8 @@ components:
       description: A user record.
       required:
         - id
+        - code
+        - home_code
       properties:
         id:
           type: string
@@ -122,6 +124,15 @@ components:
         name:
           type: string
           description: Display name.
+        code:
+          $ref: '#/components/schemas/UserCode'
+        home_code:
+          $ref: '#/components/schemas/UserCode'
+          description: Home user code.
+    UserCode:
+      type: string
+      description: Reusable user code.
+      maxLength: 32
 "#,
     )
     .expect("generate descriptions fixture");
@@ -142,6 +153,16 @@ components:
     );
     assert!(types_rs.contents.contains("    /// Display name."));
     assert!(types_rs.contents.contains("    pub name: Option<String>,"));
+    assert!(
+        types_rs
+            .contents
+            .contains("    /// Reusable user code.\n    pub code: UserCode,")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("    /// Home user code.\n    pub home_code: UserCode,")
+    );
 
     let parts_rs = find_file(&files, "get_user/parts.rs");
     assert!(parts_rs.contents.contains("/// Fetch a user.\n#[derive"));

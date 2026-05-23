@@ -9,7 +9,7 @@ use super::super::reference::{
     object_schema, reject_composition, schema_ref, schema_ref_type_name, schema_type_and_nullable,
     schema_type_wire,
 };
-use super::super::resolve::ResolvedDocument;
+use super::super::resolve::{ResolvedDocument, refs::local_ref_name};
 use super::constraint::{parse_integer_type, parse_validation, reject_keyword};
 use super::satay::{
     ValidatedParseAs, ValidatedSataySchema, validate_component_enum_satay,
@@ -45,7 +45,13 @@ pub(super) fn validate_type_schema(
     allow_treat_error_as_none: bool,
 ) -> Result<ValidatedType, ValidationError> {
     if let Some(reference) = schema_ref(schema, context)? {
-        return Ok(ValidatedType::named(schema_ref_type_name(reference)?));
+        let description = match schema_description(schema) {
+            Some(description) => Some(description),
+            None => referenced_schema_description(document, reference)?,
+        };
+        let mut ty = ValidatedType::named(schema_ref_type_name(reference)?);
+        ty.description = description;
+        return Ok(ty);
     }
 
     let schema = object_schema(schema, context)?;
@@ -292,7 +298,7 @@ fn validate_struct_properties(
         let ty = validate_type_schema(document, property_schema, &property_context, true)?;
         fields.push(ValidatedField {
             wire_name: wire_name.clone(),
-            description: schema_description(property_schema),
+            description: ty.description.clone(),
             treat_error_as_none: ty.treat_error_as_none,
             ty,
             required: required.contains(wire_name),
@@ -300,6 +306,41 @@ fn validate_struct_properties(
     }
 
     Ok(fields)
+}
+
+fn referenced_schema_description(
+    document: &ResolvedDocument<'_>,
+    reference: &str,
+) -> Result<Option<String>, ValidationError> {
+    let mut visited = BTreeSet::new();
+    referenced_schema_description_inner(document, reference, &mut visited)
+}
+
+fn referenced_schema_description_inner(
+    document: &ResolvedDocument<'_>,
+    reference: &str,
+    visited: &mut BTreeSet<String>,
+) -> Result<Option<String>, ValidationError> {
+    if !visited.insert(reference.to_owned()) {
+        return Ok(None);
+    }
+
+    let name = local_ref_name(reference, "schemas")?;
+    let target = document
+        .spec
+        .components
+        .as_ref()
+        .and_then(|components| components.schemas.get(&name))
+        .ok_or_else(|| ValidationError::MissingJsonPointerToken { token: name })?;
+
+    if let Some(description) = schema_description(target) {
+        return Ok(Some(description));
+    }
+
+    let Some(reference) = schema_ref(target, "referenced schema description")? else {
+        return Ok(None);
+    };
+    referenced_schema_description_inner(document, reference, visited)
 }
 
 fn parse_required_set(schema: &OasObjectSchema) -> BTreeSet<String> {

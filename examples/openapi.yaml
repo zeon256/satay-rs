@@ -311,9 +311,11 @@ components:
 
         OriginCode:
           $ref: "#/components/schemas/BusStopCode"
+          description: Starting bus stop code for this bus service.
 
         DestinationCode:
           $ref: "#/components/schemas/BusStopCode"
+          description: Ending bus stop code for this bus service.
 
         AM_Peak_Freq:
           type: string
