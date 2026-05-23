@@ -331,7 +331,7 @@ fn referenced_schema_description_inner(
         .components
         .as_ref()
         .and_then(|components| components.schemas.get(&name))
-        .ok_or_else(|| ValidationError::MissingJsonPointerToken { token: name })?;
+        .ok_or(ValidationError::MissingJsonPointerToken { token: name })?;
 
     if let Some(description) = schema_description(target) {
         return Ok(Some(description));
