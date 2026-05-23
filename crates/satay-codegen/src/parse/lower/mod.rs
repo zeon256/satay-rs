@@ -1,4 +1,5 @@
 use oas3::spec::Spec as OasSpec;
+use tracing::debug;
 
 use super::registry::TypeRegistry;
 use super::validate::ValidatedDocument;
@@ -10,7 +11,7 @@ mod operation;
 mod schema;
 
 pub(crate) fn lower_document(document: &ValidatedDocument<'_>) -> Result<Api, ValidationError> {
-    tracing::debug!("lowering API from resolved document");
+    debug!("lowering API from resolved document");
 
     let spec = document.resolved.spec;
     let mut registry = TypeRegistry::default();

@@ -2,6 +2,7 @@ use oas3::spec::Spec as OasSpec;
 
 use crate::error::{ParseError, ValidationError};
 use crate::model::Api;
+use tracing::debug;
 
 mod helpers;
 mod lower;
@@ -19,7 +20,7 @@ pub(crate) struct Document {
 }
 
 pub(crate) fn parse_api(document: &Document) -> Result<Api, ValidationError> {
-    tracing::debug!("parsing API from document");
+    debug!("parsing API from document");
 
     let resolved = resolve::resolve_document(document)?;
     let validated = validate::validate_document(resolved)?;
