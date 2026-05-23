@@ -138,14 +138,23 @@ components:
     assert!(
         types_rs
             .contents
-            .contains("    /// Stable ID.\n    pub id: String,\n\n    /// Display name.")
+            .contains("    /// Stable ID.\n    pub id: String,")
     );
+    assert!(types_rs.contents.contains("    /// Display name."));
+    assert!(types_rs.contents.contains("    pub name: Option<String>,"));
 
     let parts_rs = find_file(&files, "get_user/parts.rs");
     assert!(parts_rs.contents.contains("/// Fetch a user.\n#[derive"));
-    assert!(parts_rs.contents.contains(
-        "    /// User identifier.\n    pub user_id: String,\n\n    /// Include detailed fields."
-    ));
+    assert!(
+        parts_rs
+            .contents
+            .contains("    /// User identifier.\n    pub user_id: String,")
+    );
+    assert!(
+        parts_rs
+            .contents
+            .contains("    /// Include detailed fields.\n    pub include_details:")
+    );
     assert!(
         parts_rs
             .contents

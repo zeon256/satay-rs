@@ -70,82 +70,10 @@ pub(crate) fn render_api(api: &Api) -> Vec<GeneratedFile> {
 
 fn format_file(file: syn::File) -> String {
     let code = prettyplease::unparse(&file);
-    let code = add_blank_lines_between_items(&code);
-    let code = add_blank_lines_between_impl_methods(&code);
-    let code = add_blank_lines_between_members(&code);
     let mut formatted = String::with_capacity(PREAMBLE.len() + code.len());
     formatted.push_str(PREAMBLE);
     formatted.push_str(&code);
     formatted
-}
-
-fn add_blank_lines_between_items(code: &str) -> String {
-    let mut result = String::with_capacity(code.len() + code.len() / 4);
-    let mut lines = code.lines().peekable();
-    while let Some(line) = lines.next() {
-        result.push_str(line);
-        result.push('\n');
-        if let Some(next) = lines.peek() {
-            let next_is_item = next.starts_with('#')
-                || next.starts_with("///")
-                || next.starts_with("pub ")
-                || next.starts_with("impl ")
-                || next.starts_with("use ");
-            let needs_blank = (line == "}" || line.ends_with(" {}")) && next_is_item
-                || line.starts_with("use ") && !next.starts_with("use ");
-            if needs_blank {
-                result.push('\n');
-            }
-        }
-    }
-    result
-}
-
-fn add_blank_lines_between_impl_methods(code: &str) -> String {
-    let mut result = String::with_capacity(code.len() + code.len() / 4);
-    let mut lines = code.lines().peekable();
-    while let Some(line) = lines.next() {
-        result.push_str(line);
-        result.push('\n');
-        let trimmed = line.trim_start();
-        let indent_len = line.len() - trimmed.len();
-        if indent_len == 4
-            && trimmed == "}"
-            && let Some(next) = lines.peek()
-        {
-            let next_trimmed = next.trim_start();
-            let next_indent_len = next.len() - next_trimmed.len();
-            let next_is_method = next_trimmed.starts_with("pub ")
-                || next_trimmed.starts_with("fn ")
-                || next_trimmed.starts_with("async fn ")
-                || next_trimmed.starts_with("#[")
-                || next_trimmed.starts_with("///");
-            if next_indent_len == 4 && next_is_method {
-                result.push('\n');
-            }
-        }
-    }
-    result
-}
-
-fn add_blank_lines_between_members(code: &str) -> String {
-    let mut result = String::with_capacity(code.len() + code.len() / 4);
-    let mut lines = code.lines().peekable();
-    while let Some(line) = lines.next() {
-        result.push_str(line);
-        result.push('\n');
-        let trimmed = line.trim_start();
-        let indent_len = line.len() - trimmed.len();
-        if indent_len == 4
-            && line.trim_end().ends_with(',')
-            && !trimmed.starts_with("//")
-            && let Some(next) = lines.peek()
-            && !next.trim_start().starts_with('}')
-        {
-            result.push('\n');
-        }
-    }
-    result
 }
 
 fn render_top_mod(api: &Api) -> syn::File {
@@ -410,64 +338,6 @@ mod tests {
     use crate::model::PathSegment;
     use crate::model::{Component, ComponentKind, HttpMethod, RequestBody, ResponseCase};
     use syn::{Fields, GenericArgument, Item, PathArguments, Type};
-
-    #[test]
-    fn add_blank_lines_between_items_inserts_line_after_closing_brace() {
-        let input = "pub struct Foo {\n    x: i32,\n}\npub struct Bar {\n    y: i32,\n}\n";
-        let result = add_blank_lines_between_items(input);
-        assert_eq!(
-            result,
-            "pub struct Foo {\n    x: i32,\n}\n\npub struct Bar {\n    y: i32,\n}\n"
-        );
-    }
-
-    #[test]
-    fn add_blank_lines_between_items_inserts_line_before_impl() {
-        let input = "pub struct Foo {\n    x: i32,\n}\nimpl Foo {\n    fn bar() {}\n}\n";
-        let result = add_blank_lines_between_items(input);
-        assert_eq!(
-            result,
-            "pub struct Foo {\n    x: i32,\n}\n\nimpl Foo {\n    fn bar() {}\n}\n"
-        );
-    }
-
-    #[test]
-    fn add_blank_lines_between_items_inserts_line_before_attribute() {
-        let input = "pub struct Foo {\n    x: i32,\n}\n#[derive(Clone)]\npub struct Bar {\n    y: i32,\n}\n";
-        let result = add_blank_lines_between_items(input);
-        assert_eq!(
-            result,
-            "pub struct Foo {\n    x: i32,\n}\n\n#[derive(Clone)]\npub struct Bar {\n    y: i32,\n}\n"
-        );
-    }
-
-    #[test]
-    fn add_blank_lines_between_items_does_not_insert_inside_function() {
-        let input = "pub fn foo() {\n    if true {}\n    let x = 1;\n}\n";
-        let result = add_blank_lines_between_items(input);
-        assert_eq!(result, input);
-    }
-
-    #[test]
-    fn add_blank_lines_between_impl_methods_inserts_after_method() {
-        let input = "impl Foo {\n    pub fn a(&self) {\n    }\n    pub fn b(&self) {\n    }\n}\n";
-        let result = add_blank_lines_between_impl_methods(input);
-        assert_eq!(
-            result,
-            "impl Foo {\n    pub fn a(&self) {\n    }\n\n    pub fn b(&self) {\n    }\n}\n"
-        );
-    }
-
-    #[test]
-    fn add_blank_lines_between_impl_methods_handles_method_attributes() {
-        let input =
-            "impl Foo {\n    fn a(&self) {\n    }\n    #[cfg(test)]\n    fn b(&self) {\n    }\n}\n";
-        let result = add_blank_lines_between_impl_methods(input);
-        assert_eq!(
-            result,
-            "impl Foo {\n    fn a(&self) {\n    }\n\n    #[cfg(test)]\n    fn b(&self) {\n    }\n}\n"
-        );
-    }
 
     #[test]
     fn render_file_exposes_struct_ast_without_source_comparison() {
