@@ -338,6 +338,7 @@ mod tests {
     use super::*;
     use crate::model::PathSegment;
     use crate::model::{Component, ComponentKind, HttpMethod, RequestBody, ResponseCase};
+    use quote::{ToTokens, quote};
     use syn::{Fields, GenericArgument, Item, PathArguments, Type};
 
     #[test]
@@ -440,6 +441,97 @@ mod tests {
                 .iter()
                 .any(|f| f.relative_path == "create_pet/json.rs")
         );
+    }
+
+    #[test]
+    fn rust_field_type_wraps_optional_and_treat_error_as_none_fields() {
+        assert_eq!(
+            rust_field_type(&TypeRef::String, true, false)
+                .to_token_stream()
+                .to_string(),
+            "String"
+        );
+        assert_eq!(
+            rust_field_type(&TypeRef::String, false, false)
+                .to_token_stream()
+                .to_string(),
+            "Option < String >"
+        );
+        assert_eq!(
+            rust_field_type(&TypeRef::String, true, true)
+                .to_token_stream()
+                .to_string(),
+            "Option < String >"
+        );
+        assert_eq!(
+            rust_field_type(&TypeRef::Option(Box::new(TypeRef::String)), true, false)
+                .to_token_stream()
+                .to_string(),
+            "Option < String >"
+        );
+    }
+
+    #[test]
+    fn input_builder_arguments_convert_strings_only() {
+        assert_eq!(
+            input_builder_arg_type(&TypeRef::String).to_string(),
+            "impl Into < String >"
+        );
+        assert_eq!(
+            input_builder_arg_type(&TypeRef::Integer(IntegerType::I32)).to_string(),
+            "i32"
+        );
+        assert_eq!(
+            input_builder_value(quote!(value), &TypeRef::String).to_string(),
+            "value . into ()"
+        );
+        assert_eq!(
+            input_builder_value(quote!(value), &TypeRef::Integer(IntegerType::I32)).to_string(),
+            "value"
+        );
+    }
+
+    #[test]
+    fn request_conversion_mode_matches_body_requirement() {
+        assert_eq!(
+            request_from_parts_expr(&operation_with_body(None))
+                .to_token_stream()
+                .to_string(),
+            "satay_runtime :: into_empty_request (parts)"
+        );
+        assert_eq!(
+            request_from_parts_expr(&operation_with_body(Some(true)))
+                .to_token_stream()
+                .to_string(),
+            "satay_runtime :: into_json_request (parts)"
+        );
+        assert_eq!(
+            request_from_parts_expr(&operation_with_body(Some(false)))
+                .to_token_stream()
+                .to_string(),
+            "satay_runtime :: into_optional_json_request (parts)"
+        );
+    }
+
+    fn operation_with_body(required: Option<bool>) -> Operation {
+        Operation {
+            fn_name: "create_pet".to_owned(),
+            description: None,
+            input_name: "CreatePetInput".to_owned(),
+            response_name: "CreatePetResponse".to_owned(),
+            method: HttpMethod::Post,
+            path: "/pets".to_owned(),
+            path_segments: vec![PathSegment::Literal("/pets".to_owned())],
+            parameters: vec![],
+            request_body: required.map(|required| RequestBody {
+                field_name: "body".to_owned(),
+                description: None,
+                content_type: "application/json".to_owned(),
+                ty: TypeRef::Named("Pet".to_owned()),
+                required,
+            }),
+            responses: vec![],
+        }
     }
 
     fn type_path_is(ty: &syn::Type, expected: &str) -> bool {

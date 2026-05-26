@@ -22,6 +22,87 @@ fn find_file<'a>(files: &'a [GeneratedFile], relative_path: &str) -> &'a Generat
         })
 }
 
+fn workspace_root() -> &'static Path {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("codegen crate has workspace root")
+}
+
+fn runtime_path_toml() -> String {
+    toml_string(
+        &workspace_root()
+            .join("crates/satay-runtime")
+            .to_string_lossy(),
+    )
+}
+
+fn run_temp_cargo(crate_dir: &Path, subcommand: &str, extra_args: &[&str], context: &str) {
+    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
+    prepare_temp_lock(crate_dir, &cargo, context);
+
+    let output = process::Command::new(&cargo)
+        .arg(subcommand)
+        .arg("--locked")
+        .arg("--offline")
+        .arg("--quiet")
+        .args(extra_args)
+        .current_dir(crate_dir)
+        .output()
+        .unwrap_or_else(|err| panic!("run cargo {subcommand} for {context}: {err}"));
+
+    if !output.status.success() {
+        panic!(
+            "{context} failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+fn prepare_temp_lock(crate_dir: &Path, cargo: &str, context: &str) {
+    let lock_path = crate_dir.join("Cargo.lock");
+    if !lock_path.exists() {
+        fs::copy(workspace_root().join("Cargo.lock"), &lock_path)
+            .expect("copy workspace Cargo.lock");
+    }
+
+    let output = process::Command::new(cargo)
+        .arg("generate-lockfile")
+        .arg("--offline")
+        .arg("--quiet")
+        .current_dir(crate_dir)
+        .output()
+        .unwrap_or_else(|err| panic!("prepare lockfile for {context}: {err}"));
+
+    if !output.status.success() {
+        panic!(
+            "{context} lockfile preparation failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let output = process::Command::new(cargo)
+        .arg("fetch")
+        .arg("--locked")
+        .arg("--quiet")
+        .current_dir(crate_dir)
+        .output()
+        .unwrap_or_else(|err| panic!("fetch dependencies for {context}: {err}"));
+
+    if !output.status.success() {
+        panic!(
+            "{context} dependency fetch failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
 #[test]
 fn simple_fixture_generates_expected_file_structure() {
     let files = satay_codegen::generate(SIMPLE).expect("generate simple fixture");
@@ -255,11 +336,7 @@ components:
     let crate_dir = temp.path();
     let generated_dir = crate_dir.join("src/generated");
 
-    let runtime_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("codegen crate has parent")
-        .join("satay-runtime");
-    let runtime_path = toml_string(&runtime_path.to_string_lossy());
+    let runtime_path = runtime_path_toml();
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
@@ -289,22 +366,7 @@ mod tests {
 "##;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
-    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
-    let output = process::Command::new(&cargo)
-        .arg("test")
-        .arg("--quiet")
-        .current_dir(crate_dir)
-        .output()
-        .expect("run cargo test for secured generated crate");
-
-    if !output.status.success() {
-        panic!(
-            "secured generated crate tests failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    run_temp_cargo(crate_dir, "test", &[], "secured generated crate tests");
 }
 
 #[test]
@@ -352,11 +414,7 @@ fn generated_simple_fixture_compiles_and_behaves() {
     let crate_dir = temp.path();
     let generated_dir = crate_dir.join("src/generated");
 
-    let runtime_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("codegen crate has parent")
-        .join("satay-runtime");
-    let runtime_path = toml_string(&runtime_path.to_string_lossy());
+    let runtime_path = runtime_path_toml();
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
@@ -464,22 +522,7 @@ mod tests {
 "##;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
-    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
-    let output = process::Command::new(&cargo)
-        .arg("test")
-        .arg("--quiet")
-        .current_dir(crate_dir)
-        .output()
-        .expect("run cargo test for generated crate");
-
-    if !output.status.success() {
-        panic!(
-            "generated crate tests failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    run_temp_cargo(crate_dir, "test", &[], "generated crate tests");
 }
 
 #[test]
@@ -516,11 +559,7 @@ fn generated_constrained_fixture_enforces_openapi_bounds() {
     let crate_dir = temp.path();
     let generated_dir = crate_dir.join("src/generated");
 
-    let runtime_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("codegen crate has parent")
-        .join("satay-runtime");
-    let runtime_path = toml_string(&runtime_path.to_string_lossy());
+    let runtime_path = runtime_path_toml();
 
     write_manifest(crate_dir, &runtime_path, true, false);
     write_generated_files(&generated_dir, &files);
@@ -599,39 +638,13 @@ mod tests {
 "##;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
-    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
-    let output = process::Command::new(&cargo)
-        .arg("test")
-        .arg("--quiet")
-        .current_dir(crate_dir)
-        .output()
-        .expect("run cargo test for constrained generated crate");
-
-    if !output.status.success() {
-        panic!(
-            "constrained generated crate tests failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-
-    let output = process::Command::new(cargo)
-        .arg("check")
-        .arg("--quiet")
-        .arg("--no-default-features")
-        .current_dir(crate_dir)
-        .output()
-        .expect("run cargo check for constrained generated crate without features");
-
-    if !output.status.success() {
-        panic!(
-            "constrained generated crate no-default check failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    run_temp_cargo(crate_dir, "test", &[], "constrained generated crate tests");
+    run_temp_cargo(
+        crate_dir,
+        "check",
+        &["--no-default-features"],
+        "constrained generated crate no-default check",
+    );
 }
 
 #[test]
@@ -913,11 +926,7 @@ components:
     let crate_dir = temp.path();
     let generated_dir = crate_dir.join("src/generated");
 
-    let runtime_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("codegen crate has parent")
-        .join("satay-runtime");
-    let runtime_path = toml_string(&runtime_path.to_string_lossy());
+    let runtime_path = runtime_path_toml();
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
@@ -981,22 +990,7 @@ mod tests {
 "##;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
-    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
-    let output = process::Command::new(&cargo)
-        .arg("test")
-        .arg("--quiet")
-        .current_dir(crate_dir)
-        .output()
-        .expect("run cargo test for parse-as generated crate");
-
-    if !output.status.success() {
-        panic!(
-            "parse-as generated crate tests failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    run_temp_cargo(crate_dir, "test", &[], "parse-as generated crate tests");
 }
 
 #[test]
@@ -1198,11 +1192,7 @@ fn generated_inline_enum_compiles_and_handles_unknown() {
     let crate_dir = temp.path();
     let generated_dir = crate_dir.join("src/generated");
 
-    let runtime_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .expect("codegen crate has parent")
-        .join("satay-runtime");
-    let runtime_path = toml_string(&runtime_path.to_string_lossy());
+    let runtime_path = runtime_path_toml();
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
@@ -1260,22 +1250,7 @@ mod tests {
 "##;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
-    let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
-    let output = process::Command::new(&cargo)
-        .arg("test")
-        .arg("--quiet")
-        .current_dir(crate_dir)
-        .output()
-        .expect("run cargo test for inline-enum generated crate");
-
-    if !output.status.success() {
-        panic!(
-            "inline-enum generated crate tests failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    run_temp_cargo(crate_dir, "test", &[], "inline-enum generated crate tests");
 }
 
 fn write_manifest(

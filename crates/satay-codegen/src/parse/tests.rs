@@ -41,6 +41,14 @@ mod tests {
             .unwrap_or_else(|| panic!("missing parameter {wire_name}"))
     }
 
+    fn api_key_rust_name<'a>(api: &'a Api, wire_name: &str) -> &'a str {
+        api.api_key_security_schemes
+            .iter()
+            .find(|scheme| scheme.wire_name == wire_name)
+            .map(|scheme| scheme.rust_name.as_str())
+            .unwrap_or_else(|| panic!("missing API key security scheme {wire_name}"))
+    }
+
     fn assert_literal_segment(segment: &PathSegment, expected: &str) {
         match segment {
             PathSegment::Literal(actual) => assert_eq!(actual, expected),
@@ -52,6 +60,224 @@ mod tests {
         match segment {
             PathSegment::Parameter(actual) => assert_eq!(actual, expected),
             other => panic!("expected parameter path segment {expected:?}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deduplicates_parameter_field_names_after_identifier_sanitization() {
+        let api = parse_valid(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /users:
+    get:
+      operationId: listUsers
+      parameters:
+        - name: user-id
+          in: query
+          schema:
+            type: string
+        - name: user_id
+          in: query
+          schema:
+            type: string
+      responses:
+        '204':
+          description: No content
+"#,
+        );
+
+        let operation = &api.operations[0];
+        assert_eq!(parameter(operation, "user-id").rust_name, "user_id");
+        assert_eq!(parameter(operation, "user_id").rust_name, "user_id_2");
+    }
+
+    #[test]
+    fn renames_request_body_field_when_parameter_uses_body() {
+        let api = parse_valid(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /users:
+    post:
+      operationId: createUser
+      parameters:
+        - name: body
+          in: query
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: string
+      responses:
+        '204':
+          description: No content
+"#,
+        );
+
+        let operation = &api.operations[0];
+        assert_eq!(parameter(operation, "body").rust_name, "body");
+        assert_eq!(
+            operation
+                .request_body
+                .as_ref()
+                .expect("request body")
+                .field_name,
+            "body_2"
+        );
+    }
+
+    #[test]
+    fn api_key_names_do_not_collide_with_builder_methods() {
+        let api = parse_valid(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  securitySchemes:
+    newKey:
+      type: apiKey
+      in: header
+      name: new
+    applyKey:
+      type: apiKey
+      in: header
+      name: apply
+    baseUrlKey:
+      type: apiKey
+      in: query
+      name: base_url
+    httpKey:
+      type: apiKey
+      in: query
+      name: http
+"#,
+        );
+
+        assert_eq!(api_key_rust_name(&api, "new"), "new_2");
+        assert_eq!(api_key_rust_name(&api, "apply"), "apply_2");
+        assert_eq!(api_key_rust_name(&api, "base_url"), "base_url_2");
+        assert_eq!(api_key_rust_name(&api, "http"), "http_2");
+    }
+
+    #[test]
+    fn lowers_inline_constrained_enum_and_range_schemas_to_ir() {
+        let api = parse_valid(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: search
+      responses:
+        '200':
+          description: Search result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Search'
+components:
+  schemas:
+    Search:
+      type: object
+      required:
+        - code
+        - state
+        - window
+      properties:
+        code:
+          type: string
+          minLength: 2
+          maxLength: 8
+        state:
+          type: string
+          enum:
+            - open
+            - closed
+        window:
+          type: string
+          minimum: 1
+          maximum: 60
+          x-satay:
+            parse-as: integer-range
+"#,
+        );
+
+        let search = component(&api, "Search");
+        match &search.kind {
+            ComponentKind::Struct(fields) => {
+                match &field(fields, "code").ty {
+                    TypeRef::Constrained { rust_name, inner } => {
+                        assert_eq!(rust_name, "SearchCode");
+                        assert_eq!(inner.as_ref(), &TypeRef::String);
+                    }
+                    other => panic!("expected constrained code field, got {other:?}"),
+                }
+                assert_eq!(
+                    field(fields, "state").ty,
+                    TypeRef::Named("SearchState".to_owned())
+                );
+                assert_eq!(
+                    field(fields, "window").ty,
+                    TypeRef::Range(RangeTypeRef {
+                        rust_name: "SearchWindow".to_owned(),
+                        scalar: RangeScalar::Integer(IntegerType::U8),
+                    })
+                );
+            }
+            other => panic!("expected Search struct, got {other:?}"),
+        }
+
+        let state = component(&api, "SearchState");
+        match &state.kind {
+            ComponentKind::Enum(variants) => {
+                assert_eq!(variants[0].rust_name, "Open");
+                assert_eq!(variants[1].rust_name, "Closed");
+            }
+            other => panic!("expected SearchState enum, got {other:?}"),
+        }
+
+        let window = component(&api, "SearchWindow");
+        match &window.kind {
+            ComponentKind::Range(range) => {
+                assert_eq!(range.scalar, RangeScalar::Integer(IntegerType::U8));
+            }
+            other => panic!("expected SearchWindow range, got {other:?}"),
+        }
+
+        assert_eq!(api.constrained_types.len(), 1);
+        assert_eq!(api.constrained_types[0].rust_name, "SearchCode");
+        match &api.constrained_types[0].validation {
+            Validation::String {
+                min_length,
+                max_length,
+                pattern,
+            } => {
+                assert_eq!(*min_length, Some(2));
+                assert_eq!(*max_length, Some(8));
+                assert_eq!(*pattern, None);
+            }
+            other => panic!("expected string validation, got {other:?}"),
         }
     }
 
