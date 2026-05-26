@@ -114,6 +114,13 @@ mod tests {
     use crate::model::IntegerType;
 
     #[test]
+    fn stable_suffix_is_deterministic() {
+        assert_eq!(stable_suffix(""), "CBF29CE484222325");
+        assert_eq!(stable_suffix("User name"), "B9537F8B37389455");
+        assert_ne!(stable_suffix("User name"), stable_suffix("user name"));
+    }
+
+    #[test]
     fn honors_reserved_names_when_allocating_generated_types() {
         let mut registry = TypeRegistry::default();
         registry.reserve("UserName".to_owned());

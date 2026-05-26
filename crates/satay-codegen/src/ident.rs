@@ -165,6 +165,30 @@ mod tests {
     }
 
     #[test]
+    fn recognizes_rust_keywords() {
+        for keyword in [
+            "as", "break", "const", "continue", "crate", "else", "enum", "extern", "false", "fn",
+            "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut", "pub", "ref",
+            "return", "self", "Self", "static", "struct", "super", "trait", "true", "type",
+            "unsafe", "use", "where", "while", "async", "await", "dyn", "abstract", "become",
+            "box", "do", "final", "macro", "override", "priv", "typeof", "unsized", "virtual",
+            "yield", "try",
+        ] {
+            assert!(
+                is_rust_keyword(keyword),
+                "expected {keyword} to be a keyword"
+            );
+        }
+
+        for non_keyword in ["Type", "self_", "async_", "satay"] {
+            assert!(
+                !is_rust_keyword(non_keyword),
+                "expected {non_keyword} not to be a keyword"
+            );
+        }
+    }
+
+    #[test]
     fn prefixes_identifiers_that_start_with_digits() {
         assert_eq!(type_ident("123 status"), "GeneratedType123Status");
         assert_eq!(field_ident("123 status"), "_123_status");

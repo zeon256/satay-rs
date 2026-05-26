@@ -9,6 +9,9 @@ mod tests {
     };
     use crate::parse::{parse_api, parse_document};
 
+    const INLINE_CONSTRAINED_ENUM_RANGE: &str =
+        include_str!("../../../../tests/fixtures/parse-inline-constrained-enum-range.yaml");
+
     fn parse_valid(spec: &str) -> Api {
         let document = parse_document(spec).expect("document parses");
         parse_api(&document).expect("OpenAPI validates")
@@ -179,49 +182,7 @@ components:
 
     #[test]
     fn lowers_inline_constrained_enum_and_range_schemas_to_ir() {
-        let api = parse_valid(
-            r#"
-openapi: 3.1.0
-info:
-  title: Test API
-  version: 1.0.0
-paths:
-  /search:
-    get:
-      operationId: search
-      responses:
-        '200':
-          description: Search result
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Search'
-components:
-  schemas:
-    Search:
-      type: object
-      required:
-        - code
-        - state
-        - window
-      properties:
-        code:
-          type: string
-          minLength: 2
-          maxLength: 8
-        state:
-          type: string
-          enum:
-            - open
-            - closed
-        window:
-          type: string
-          minimum: 1
-          maximum: 60
-          x-satay:
-            parse-as: integer-range
-"#,
-        );
+        let api = parse_valid(INLINE_CONSTRAINED_ENUM_RANGE);
 
         let search = component(&api, "Search");
         match &search.kind {
