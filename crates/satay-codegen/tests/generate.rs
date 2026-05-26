@@ -51,19 +51,19 @@ fn run_temp_cargo(crate_dir: &Path, subcommand: &str, extra_args: &[&str], conte
         .output()
         .unwrap_or_else(|err| panic!("run cargo {subcommand} for {context}: {err}"));
 
-    if !output.status.success() {
-        panic!(
-            "{context} failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    assert!(
+        output.status.success(),
+        "{context} failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 fn prepare_temp_lock(crate_dir: &Path, cargo: &str, context: &str) {
     let lock_path = crate_dir.join("Cargo.lock");
     if !lock_path.exists() {
+        // Seed resolved versions so offline lockfile generation does not need registry index data.
         fs::copy(workspace_root().join("Cargo.lock"), &lock_path)
             .expect("copy workspace Cargo.lock");
     }
@@ -76,14 +76,13 @@ fn prepare_temp_lock(crate_dir: &Path, cargo: &str, context: &str) {
         .output()
         .unwrap_or_else(|err| panic!("prepare lockfile for {context}: {err}"));
 
-    if !output.status.success() {
-        panic!(
-            "{context} lockfile preparation failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    assert!(
+        output.status.success(),
+        "{context} lockfile preparation failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let output = process::Command::new(cargo)
         .arg("fetch")
@@ -93,14 +92,13 @@ fn prepare_temp_lock(crate_dir: &Path, cargo: &str, context: &str) {
         .output()
         .unwrap_or_else(|err| panic!("fetch dependencies for {context}: {err}"));
 
-    if !output.status.success() {
-        panic!(
-            "{context} dependency fetch failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
-            output.status,
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    assert!(
+        output.status.success(),
+        "{context} dependency fetch failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
