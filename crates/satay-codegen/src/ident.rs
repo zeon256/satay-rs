@@ -151,3 +151,42 @@ fn is_rust_keyword(value: &str) -> bool {
             | "try"
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escapes_rust_keywords_for_types_and_values() {
+        assert_eq!(type_ident("type"), "Type");
+        assert_eq!(field_ident("type"), "type_");
+        assert_eq!(function_ident("async"), "async_");
+        assert_eq!(variant_ident("Self"), "Self_");
+    }
+
+    #[test]
+    fn prefixes_identifiers_that_start_with_digits() {
+        assert_eq!(type_ident("123 status"), "GeneratedType123Status");
+        assert_eq!(field_ident("123 status"), "_123_status");
+        assert_eq!(function_ident("404"), "_404");
+    }
+
+    #[test]
+    fn replaces_invalid_characters_and_uses_fallback_for_empty_names() {
+        assert_eq!(field_ident("$skip"), "skip");
+        assert_eq!(field_ident("user/id"), "user_id");
+        assert_eq!(field_ident(" user--id "), "user_id");
+        assert_eq!(field_ident(""), "field");
+        assert_eq!(type_ident(""), "GeneratedType");
+        assert_eq!(variant_ident(""), "Value");
+    }
+
+    #[test]
+    fn allocates_stable_duplicate_suffixes() {
+        let mut used = BTreeSet::new();
+
+        assert_eq!(unique_ident("body".to_owned(), &mut used), "body");
+        assert_eq!(unique_ident("body".to_owned(), &mut used), "body_2");
+        assert_eq!(unique_ident("body".to_owned(), &mut used), "body_3");
+    }
+}
