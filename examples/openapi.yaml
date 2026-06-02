@@ -223,6 +223,54 @@ paths:
                     SUN_FirstBus: "0620"
                     SUN_LastBus: "2349"
 
+  /BusStops:
+    get:
+      operationId: getBusStops
+      summary: Get bus stop details
+      description: >
+        Returns details of all bus stops in Singapore, including location and
+        road name.
+
+        The dataset is updated ad hoc.
+      security:
+        - accountKeyAuth: []
+      parameters:
+        - name: $skip
+          in: query
+          required: false
+          description: Number of records to skip for pagination.
+          schema:
+            type: integer
+            minimum: 0
+          example: 500
+
+        - name: accept
+          in: header
+          required: false
+          description: Optional response format header. JSON is the default.
+          schema:
+            type: string
+            enum:
+              - application/json
+              - application/atom+xml
+            default: application/json
+
+      responses:
+        "200":
+          description: Successful Bus Stops response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BusStopsResponse"
+              example:
+                odata.metadata: "https://datamall2.mytransport.sg/ltaodataservice/$metadata#BusStops"
+                value:
+                  - BusStopCode: "01219"
+                    RoadName: "Victoria St"
+                    Description: "Blk 9"
+                    Latitude: "1.296767"
+                    Longitude: "103.852979"
+
 components:
   securitySchemes:
     accountKeyAuth:
@@ -676,3 +724,55 @@ components:
           example: 1
           x-satay:
             parse-as: bool
+
+    BusStopsResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - odata.metadata
+        - value
+      properties:
+        odata.metadata:
+          type: string
+          format: uri
+          description: OData metadata URL.
+          example: "https://datamall2.mytransport.sg/ltaodataservice/$metadata#BusStops"
+
+        value:
+          type: array
+          description: Bus stop details.
+          items:
+            $ref: "#/components/schemas/BusStop"
+
+    BusStop:
+      type: object
+      additionalProperties: false
+      required:
+        - BusStopCode
+        - RoadName
+        - Description
+        - Latitude
+        - Longitude
+      properties:
+        BusStopCode:
+          $ref: "#/components/schemas/BusStopCode"
+        RoadName:
+          type: string
+          description: The name of the road where the bus stop is located.
+          example: "Orchard Road"
+        Description:
+          type: string
+          description: Landmarks next to the bus stop (if any) to aid in identifying this bus stop
+          example: "Hotel Grand Pacific"
+        Latitude:
+          type: string
+          description: The latitude coordinate of the bus stop.
+          example: "1.3154918333333334"
+          x-satay:
+            parse-as: f64
+        Longitude:
+          type: string
+          description: The longitude coordinate of the bus stop.
+          example: "103.9059125"
+          x-satay:
+            parse-as: f64
