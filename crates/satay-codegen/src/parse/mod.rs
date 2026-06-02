@@ -17,6 +17,7 @@ mod validate;
 #[derive(Debug)]
 pub(crate) struct Document {
     spec: OasSpec,
+    raw: yaml_serde::Value,
 }
 
 pub(crate) fn parse_api(document: &Document) -> Result<Api, ValidationError> {
@@ -28,7 +29,8 @@ pub(crate) fn parse_api(document: &Document) -> Result<Api, ValidationError> {
 }
 
 pub(crate) fn parse_document(spec: &str) -> Result<Document, ParseError> {
-    let spec = oas3::from_yaml(spec)?;
+    let raw: yaml_serde::Value = yaml_serde::from_str(spec)?;
+    let spec = yaml_serde::from_value(raw.clone())?;
 
-    Ok(Document { spec })
+    Ok(Document { spec, raw })
 }

@@ -1025,12 +1025,24 @@ components:
       type: object
       required:
         - timing
+        - referencedTiming
       properties:
         timing:
           type: string
           x-satay:
             treat-error-as-none: true
+        referencedTiming:
+          $ref: '#/components/schemas/Timing'
+          x-satay:
+            treat-error-as-none: true
         optionalTiming:
+          type: string
+    Timing:
+      type: object
+      required:
+        - value
+      properties:
+        value:
           type: string
 "#,
         );
@@ -1040,6 +1052,8 @@ components:
             ComponentKind::Struct(fields) => {
                 let timing = field(fields, "timing");
                 assert!(timing.treat_error_as_none);
+                let referenced_timing = field(fields, "referencedTiming");
+                assert!(referenced_timing.treat_error_as_none);
                 let optional_timing = field(fields, "optionalTiming");
                 assert!(!optional_timing.treat_error_as_none);
             }

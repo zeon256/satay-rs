@@ -4,7 +4,7 @@ This example generates code from `../openapi.yaml` at build time, builds a Sans-
 
 The example imports `reqwest` through `satay-reqwest`'s re-export, while keeping a direct `reqwest` dependency in `Cargo.toml` to enable the blocking feature. Reqwest's default feature set uses rustls for TLS.
 
-The OpenAPI document also demonstrates Satay's `x-satay.parse-as` extension for APIs that return typed values as strings and the `x-satay.treat-error-as-none` extension for fields where deserialization errors should produce `None` instead of failing. For example, bus stop codes become integers, coordinates become `f64`, arrival timestamps become `satay_runtime::OffsetDateTime`, and `NextBus`/`NextBus2`/`NextBus3` become `Option<BusArrivalTiming>` because the API may return empty values when no bus is available.
+The OpenAPI document also demonstrates Satay's `x-satay.parse-as` extension for APIs that return typed values as strings and the `x-satay.treat-error-as-none` extension for fields where deserialization errors should produce `None` instead of failing. For example, bus stop codes become integers, coordinates become `f64`, arrival timestamps become `satay_runtime::OffsetDateTime`, and `NextBus`/`NextBus2`/`NextBus3` become `Option<BusArrivalTiming>` because LTA returns empty string fields with `Monitored=0` when no vehicle is available.
 
 ```bash
 LTA_ACCOUNT_KEY=your-key cargo run -- 83139 15

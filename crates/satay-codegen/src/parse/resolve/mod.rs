@@ -16,6 +16,7 @@ pub(crate) mod refs;
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ResolvedDocument<'a> {
     pub(crate) spec: &'a OasSpec,
+    pub(crate) raw: &'a yaml_serde::Value,
 }
 
 pub(crate) fn resolve_document(
@@ -23,6 +24,7 @@ pub(crate) fn resolve_document(
 ) -> Result<ResolvedDocument<'_>, ValidationError> {
     let resolved = ResolvedDocument {
         spec: &document.spec,
+        raw: &document.raw,
     };
 
     validate_component_refs(&resolved)?;

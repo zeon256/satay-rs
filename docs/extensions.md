@@ -109,7 +109,9 @@ This generates `SingleDecker`, `DoubleDecker`, and `Bendy` variants with `serde(
 
 ## `treat-error-as-none`
 
-Use `x-satay.treat-error-as-none` on a struct field to make the generated field type `Option<T>`. When deserialization of the field's value fails, the field resolves to `None` instead of returning an error.
+Use `x-satay.treat-error-as-none` on a struct field to make the generated field type `Option<T>`.
+When deserialization of the field's value fails, the field resolves to `None` instead of returning an error.
+This can be applied to inline fields and to `$ref` fields.
 
 ```yaml
 BusServiceArrival:
@@ -126,7 +128,8 @@ BusServiceArrival:
         treat-error-as-none: true
 ```
 
-When `treat-error-as-none` is `true`, the generated Rust field becomes `Option<BusArrivalTiming>` with a custom deserializer that catches any error and returns `None`:
+When `treat-error-as-none` is `true`, the generated Rust field becomes `Option<T>` with a custom deserializer
+that catches any error and returns `None`:
 
 ```rust
 pub struct BusServiceArrival {
@@ -142,4 +145,6 @@ pub struct BusServiceArrival {
 }
 ```
 
-This is useful for APIs that return empty or malformed values in nested objects when data is unavailable, rather than omitting the field or returning `null`. The `treat-error-as-none` extension requires the generated crate's `json` feature.
+This is useful for APIs that return empty or malformed values in nested objects when data is unavailable,
+rather than omitting the field or returning `null`. The `treat-error-as-none` extension requires the generated
+crate's `json` feature.

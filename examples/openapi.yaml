@@ -1,11 +1,12 @@
 openapi: 3.1.0
 
 info:
-  title: LTA DataMall Bus API
+  title: LTA DataMall API
   version: "3.0"
   description: >
-    OpenAPI schema for LTA DataMall bus APIs.
-    Returns real-time bus arrival information, bus service details, and bus route details.
+    OpenAPI schema for LTA DataMall APIs.
+    Returns real-time bus arrival information, bus service details, bus route details,
+    and taxi availability data.
 
 servers:
   - url: https://datamall2.mytransport.sg/ltaodataservice
@@ -270,6 +271,54 @@ paths:
                     Description: "Blk 9"
                     Latitude: "1.296767"
                     Longitude: "103.852979"
+
+  /Taxi-Availability:
+    get:
+      operationId: getTaxiAvailability
+      summary: Get taxi availability
+      description: >
+        Returns location coordinates of all Taxis that are currently available for
+        hire. Does not include "Hired" or "Busy" Taxis.
+
+        The dataset is updated every 1 minute.
+      security:
+        - accountKeyAuth: []
+      parameters:
+        - name: $skip
+          in: query
+          required: false
+          description: Number of records to skip for pagination.
+          schema:
+            type: integer
+            minimum: 0
+          example: 500
+
+        - name: accept
+          in: header
+          required: false
+          description: Optional response format header. JSON is the default.
+          schema:
+            type: string
+            enum:
+              - application/json
+              - application/atom+xml
+            default: application/json
+
+      responses:
+        "200":
+          description: Successful Taxi Availability response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaxiAvailabilityResponse"
+              example:
+                odata.metadata: "https://datamall2.mytransport.sg/ltaodataservice/$metadata#Taxi-Availability"
+                value:
+                  - Latitude: 1.35667
+                    Longitude: 103.93314
+                  - Latitude: 1.33126
+                    Longitude: 103.84929
+
 
 components:
   securitySchemes:
@@ -572,16 +621,25 @@ components:
 
         NextBus:
           $ref: "#/components/schemas/BusArrivalTiming"
+          description: >
+            First arrival slot. LTA returns empty string fields with Monitored=0
+            when no vehicle is available.
           x-satay:
             treat-error-as-none: true
 
         NextBus2:
           $ref: "#/components/schemas/BusArrivalTiming"
+          description: >
+            Second arrival slot. LTA returns empty string fields with Monitored=0
+            when no vehicle is available.
           x-satay:
             treat-error-as-none: true
 
         NextBus3:
           $ref: "#/components/schemas/BusArrivalTiming"
+          description: >
+            Third arrival slot. LTA returns empty string fields with Monitored=0
+            when no vehicle is available.
           x-satay:
             treat-error-as-none: true
 
@@ -627,9 +685,11 @@ components:
       properties:
         OriginCode:
           $ref: "#/components/schemas/BusStopCode"
+          description: Starting bus stop code for this bus service.
 
         DestinationCode:
           $ref: "#/components/schemas/BusStopCode"
+          description: Ending bus stop code for this bus service.
 
         EstimatedArrival:
           type: string
@@ -776,3 +836,40 @@ components:
           example: "103.9059125"
           x-satay:
             parse-as: f64
+
+    TaxiAvailabilityResponse:
+      type: object
+      additionalProperties: false
+      required:
+        - odata.metadata
+        - value
+      properties:
+        odata.metadata:
+          type: string
+          format: uri
+          description: OData metadata URL.
+          example: "https://datamall2.mytransport.sg/ltaodataservice/$metadata#Taxi-Availability"
+
+        value:
+          type: array
+          description: Location coordinates of taxis currently available for hire.
+          items:
+            $ref: "#/components/schemas/Coordinates"
+
+    Coordinates:
+      type: object
+      additionalProperties: false
+      required:
+        - Latitude
+        - Longitude
+      properties:
+        Latitude:
+          type: number
+          format: double
+          description: Latitude location coordinates.
+          example: 1.35667
+        Longitude:
+          type: number
+          format: double
+          description: Longitude location coordinates.
+          example: 103.93314

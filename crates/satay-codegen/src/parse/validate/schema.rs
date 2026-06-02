@@ -295,7 +295,15 @@ fn validate_struct_properties(
 
     for (wire_name, property_schema) in &schema.properties {
         let property_context = format!("property `{schema_name}.{wire_name}`");
-        let ty = validate_type_schema(document, property_schema, &property_context, true)?;
+        let mut ty = validate_type_schema(document, property_schema, &property_context, true)?;
+        if !ty.treat_error_as_none && schema_ref(property_schema, &property_context)?.is_some() {
+            ty.treat_error_as_none = ref_property_treat_error_as_none(
+                document.raw,
+                schema_name,
+                wire_name,
+                &property_context,
+            )?;
+        }
         fields.push(ValidatedField {
             wire_name: wire_name.clone(),
             description: ty.description.clone(),
@@ -306,6 +314,44 @@ fn validate_struct_properties(
     }
 
     Ok(fields)
+}
+
+fn ref_property_treat_error_as_none(
+    raw: &yaml_serde::Value,
+    schema_name: &str,
+    wire_name: &str,
+    context: &str,
+) -> Result<bool, ValidationError> {
+    let Some(property) = raw
+        .get("components")
+        .and_then(|value| value.get("schemas"))
+        .and_then(|value| value.get(schema_name))
+        .and_then(|value| value.get("properties"))
+        .and_then(|value| value.get(wire_name))
+    else {
+        return Ok(false);
+    };
+
+    let Some(satay) = property.get("x-satay") else {
+        return Ok(false);
+    };
+    let satay = satay
+        .as_mapping()
+        .ok_or_else(|| ValidationError::ExpectedObjectField {
+            context: context.to_owned(),
+            field: "x-satay",
+        })?;
+
+    let Some(value) = satay.get("treat-error-as-none") else {
+        return Ok(false);
+    };
+
+    value
+        .as_bool()
+        .ok_or_else(|| ValidationError::InvalidBooleanKeyword {
+            context: context.to_owned(),
+            keyword: "treat-error-as-none",
+        })
 }
 
 fn referenced_schema_description(
