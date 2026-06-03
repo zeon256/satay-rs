@@ -6,9 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::{self, Command as ProcessCommand, ExitStatus};
 
 use argh::FromArgs;
+use satay_codegen::RootModule;
 use tracing::{error, info, instrument};
 use tracing_subscriber::EnvFilter;
-use satay_codegen::RootModule;
 
 /// Satay command line interface.
 #[derive(Debug, FromArgs)]
