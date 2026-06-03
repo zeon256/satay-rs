@@ -45,7 +45,7 @@ Generate Rust code from an OpenAPI document:
 satay generate --input openapi.yaml --output src/generated --rustfmt
 ```
 
-If `--output` ends in `.rs`, Satay writes that file. Otherwise it writes `mod.rs` inside the output directory.
+By default Satay writes `mod.rs` at the root of the output directory. Use `--lib` to emit `lib.rs` instead when generating a standalone crate root.
 
 Then use the generated action API with whichever transport you want. With the `satay-reqwest` adapter, the call site can stay compact:
 

@@ -8,6 +8,7 @@ use std::process::{self, Command as ProcessCommand, ExitStatus};
 use argh::FromArgs;
 use tracing::{error, info, instrument};
 use tracing_subscriber::EnvFilter;
+use satay_codegen::RootModule;
 
 /// Satay command line interface.
 #[derive(Debug, FromArgs)]
@@ -38,6 +39,10 @@ struct GenerateCommand {
     /// run rustfmt on each generated file.
     #[argh(switch)]
     rustfmt: bool,
+
+    /// write the root module as `lib.rs` instead of `mod.rs`.
+    #[argh(switch)]
+    lib: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -91,19 +96,31 @@ fn main() {
 #[instrument(err)]
 fn run(args: Args) -> Result<(), Error> {
     match args.command {
-        CliCommand::Generate(command) => generate(&command.input, &command.output, command.rustfmt),
+        CliCommand::Generate(command) => generate(
+            &command.input,
+            &command.output,
+            command.rustfmt,
+            command.lib,
+        ),
     }
 }
 
-#[instrument(fields(input = %input.display(), output = %output.display(), rustfmt = rustfmt), err)]
-fn generate(input: &Path, output: &Path, rustfmt: bool) -> Result<(), Error> {
+#[instrument(fields(input = %input.display(), output = %output.display(), rustfmt = rustfmt, lib = lib), err)]
+fn generate(input: &Path, output: &Path, rustfmt: bool, lib: bool) -> Result<(), Error> {
     info!("reading input file");
     let spec = fs::read_to_string(input).map_err(|source| Error::ReadInput {
         path: input.to_owned(),
         source,
     })?;
     info!("generating client code");
-    let files = satay_codegen::generate(&spec)?;
+    let options = satay_codegen::GenerateOptions {
+        root_module: if lib {
+            RootModule::LibRs
+        } else {
+            RootModule::ModRs
+        },
+    };
+    let files = satay_codegen::generate_with(&spec, options)?;
 
     let mut rustfmt_files = vec![];
 
