@@ -7,7 +7,8 @@ use http::header::{self, CONTENT_TYPE, HeaderName, HeaderValue};
 #[cfg(feature = "json")]
 use serde::de;
 use time::format_description::well_known::Rfc3339;
-pub use time::{OffsetDateTime, Time};
+use time::Month;
+pub use time::{Date, OffsetDateTime, Time};
 
 use tracing::{debug, instrument};
 
@@ -67,6 +68,12 @@ pub enum ParseTimeError {
 
     #[error("time is outside valid HHMM range")]
     ComponentRange,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ParseDateError {
+    #[error("date must be in YYYY-MM-DD format")]
+    InvalidFormat,
 }
 
 pub trait Action {
@@ -200,6 +207,60 @@ pub fn format_offset_datetime(value: &OffsetDateTime) -> String {
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }
 
+pub fn format_date(value: &Date) -> String {
+    format!(
+        "{:04}-{:02}-{:02}",
+        value.year(),
+        u8::from(value.month()),
+        value.day()
+    )
+}
+
+pub fn parse_date(value: &str) -> Result<Date, ParseDateError> {
+    let value = value.trim().as_bytes();
+    if value.len() != 10 || value[4] != b'-' || value[7] != b'-' {
+        return Err(ParseDateError::InvalidFormat);
+    }
+
+    for (index, byte) in value.iter().enumerate() {
+        if matches!(index, 4 | 7) {
+            if *byte != b'-' {
+                return Err(ParseDateError::InvalidFormat);
+            }
+        } else if !byte.is_ascii_digit() {
+            return Err(ParseDateError::InvalidFormat);
+        }
+    }
+
+    let year = parse_date_year(&value[0..4])?;
+    let month = parse_date_u8(&value[5..7])?;
+    let day = parse_date_u8(&value[8..10])?;
+    let month = Month::try_from(month).map_err(|_| ParseDateError::InvalidFormat)?;
+    Date::from_calendar_date(year, month, day).map_err(|_| ParseDateError::InvalidFormat)
+}
+
+fn parse_date_year(bytes: &[u8]) -> Result<i32, ParseDateError> {
+    let mut value = 0i32;
+    for byte in bytes {
+        value = value
+            .checked_mul(10)
+            .and_then(|value| value.checked_add(i32::from(*byte - b'0')))
+            .ok_or(ParseDateError::InvalidFormat)?;
+    }
+    Ok(value)
+}
+
+fn parse_date_u8(bytes: &[u8]) -> Result<u8, ParseDateError> {
+    let mut value = 0u16;
+    for byte in bytes {
+        value = value
+            .checked_mul(10)
+            .and_then(|value| value.checked_add(u16::from(*byte - b'0')))
+            .ok_or(ParseDateError::InvalidFormat)?;
+    }
+    u8::try_from(value).map_err(|_| ParseDateError::InvalidFormat)
+}
+
 pub fn parse_time(value: &str) -> Result<Time, ParseTimeError> {
     let value = value.trim();
     let bytes = value.as_bytes();
@@ -305,7 +366,7 @@ pub mod serde_string {
     use serde::de::Error as DeError;
     use time::format_description::well_known::Rfc3339;
 
-    use crate::{OffsetDateTime, Time};
+    use crate::{Date, OffsetDateTime, Time};
 
     macro_rules! string_from_str_module {
         ($module:ident, $ty:ty) => {
@@ -522,6 +583,55 @@ pub mod serde_string {
                 {
                     super::deserialize(deserializer).map(Some)
                 }
+            }
+        }
+    }
+
+    pub mod as_date {
+        use serde::Deserialize;
+        use serde::de::Error as DeError;
+
+        use super::*;
+
+        pub fn serialize<S>(value: &Date, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            serializer.serialize_str(&crate::format_date(value))
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Date, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            let value = <String as Deserialize>::deserialize(deserializer)?;
+            crate::parse_date(&value).map_err(DeError::custom)
+        }
+
+        pub mod option {
+            use serde::Deserialize;
+            use serde::de::Error as DeError;
+
+            use super::*;
+
+            pub fn serialize<S>(value: &Option<Date>, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                match value {
+                    Some(value) => super::serialize(value, serializer),
+                    None => serializer.serialize_none(),
+                }
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Date>, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let value = <Option<String> as Deserialize>::deserialize(deserializer)?;
+                value
+                    .map(|value| crate::parse_date(&value).map_err(DeError::custom))
+                    .transpose()
             }
         }
     }
@@ -863,6 +973,35 @@ mod tests {
         assert_eq!(format_time(&time), "0620");
         assert_eq!(parse_time("6:20"), Err(ParseTimeError::InvalidFormat));
         assert_eq!(parse_time("2400"), Err(ParseTimeError::ComponentRange));
+    }
+
+    #[test]
+    fn parses_and_formats_date_strings() {
+        let date = parse_date("2024-07-16").unwrap();
+        assert_eq!(
+            date,
+            Date::from_calendar_date(2024, Month::July, 16).unwrap()
+        );
+        assert_eq!(format_date(&date), "2024-07-16");
+        assert_eq!(parse_date("2024-7-16"), Err(ParseDateError::InvalidFormat));
+        assert_eq!(parse_date("not-a-date"), Err(ParseDateError::InvalidFormat));
+    }
+
+    #[cfg(all(feature = "serde", feature = "json"))]
+    #[test]
+    fn serde_string_date_round_trips() {
+        #[derive(serde::Deserialize, serde::Serialize)]
+        struct Value {
+            #[serde(with = "crate::serde_string::as_date")]
+            day: Date,
+        }
+
+        let date = Date::from_calendar_date(2024, Month::July, 16).unwrap();
+        let encoded = serde_json::to_value(Value { day: date }).unwrap();
+        assert_eq!(encoded, serde_json::json!({ "day": "2024-07-16" }));
+
+        let decoded = serde_json::from_value::<Value>(encoded).unwrap();
+        assert_eq!(decoded.day, date);
     }
 
     #[test]

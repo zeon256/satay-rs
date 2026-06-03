@@ -207,6 +207,7 @@ pub fn parse_as_rust_type(parse_as: ParseAs) -> syn::Type {
         ParseAs::F32 => parse_quote!(f32),
         ParseAs::F64 => parse_quote!(f64),
         ParseAs::Bool => parse_quote!(bool),
+        ParseAs::Date => parse_quote!(satay_runtime::Date),
         ParseAs::OffsetDateTime => parse_quote!(satay_runtime::OffsetDateTime),
         ParseAs::Time => parse_quote!(satay_runtime::Time),
         ParseAs::IntegerRange | ParseAs::NumberRange => {
@@ -228,6 +229,7 @@ pub fn parse_as_string_serde_module(parse_as: ParseAs) -> &'static str {
         ParseAs::F32 => "satay_runtime::serde_string::as_f32",
         ParseAs::F64 => "satay_runtime::serde_string::as_f64",
         ParseAs::Bool => "satay_runtime::serde_string::as_bool",
+        ParseAs::Date => "satay_runtime::serde_string::as_date",
         ParseAs::OffsetDateTime => "satay_runtime::serde_string::as_offset_datetime",
         ParseAs::Time => "satay_runtime::serde_string::as_time",
         ParseAs::IntegerRange | ParseAs::NumberRange => {
@@ -249,6 +251,7 @@ pub fn parse_as_integer_serde_module(parse_as: ParseAs) -> &'static str {
         | ParseAs::I64
         | ParseAs::F32
         | ParseAs::F64
+        | ParseAs::Date
         | ParseAs::OffsetDateTime
         | ParseAs::Time
         | ParseAs::IntegerRange
