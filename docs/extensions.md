@@ -27,6 +27,11 @@ ReadingDay:
   x-satay:
     parse-as: date
 
+ReadingAt:
+  type: string
+  x-satay:
+    parse-as: naive-datetime
+
 FirstBus:
   type: [string, "null"]
   x-satay:
@@ -54,6 +59,9 @@ pub struct Bus {
     #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_date"))]
     pub reading_day: satay_runtime::Date,
 
+    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_naive_datetime"))]
+    pub reading_at: satay_runtime::PrimitiveDateTime,
+
     #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_time::option"))]
     pub first_bus: Option<satay_runtime::Time>,
 
@@ -63,7 +71,7 @@ pub struct Bus {
 ```
 
 
-The wire format stays a string: serde deserializes from a JSON string and serializes back to one. Supported string-backed `parse-as` values are `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`, `date`, `offset-datetime`, and `time`. Float parsing uses `fast-float`; `date` generates `satay_runtime::Date` and expects `YYYY-MM-DD` values such as `2024-07-16`; optional query parameters become `Option<satay_runtime::Date>` and encode with `satay_runtime::format_date`. `offset-datetime` generates `satay_runtime::OffsetDateTime`; `time` generates `satay_runtime::Time` and expects `HHMM` values such as `0620` or `2352`. Nullable `time` fields generate `Option<satay_runtime::Time>` and treat an empty string as `None`. `bool` also supports integer schemas, accepting `1`, `0`, `"1"`, `"0"`, `true`, and `false`; integer-backed bool fields serialize as `1` or `0`.
+The wire format stays a string: serde deserializes from a JSON string and serializes back to one. Supported string-backed `parse-as` values are `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`, `date`, `naive-datetime`, `offset-datetime`, and `time`. Float parsing uses `fast-float`; `date` generates `satay_runtime::Date` and expects `YYYY-MM-DD` values such as `2024-07-16`; optional query parameters become `Option<satay_runtime::Date>` and encode with `satay_runtime::format_date`. `naive-datetime` generates `satay_runtime::PrimitiveDateTime` and expects `YYYY-MM-DDTHH:mm:ss` values such as `2024-07-16T23:59:00`; optional query parameters encode with `satay_runtime::format_naive_datetime`. `offset-datetime` generates `satay_runtime::OffsetDateTime`; `time` generates `satay_runtime::Time` and expects `HHMM` values such as `0620` or `2352`. Nullable `time` fields generate `Option<satay_runtime::Time>` and treat an empty string as `None`. `bool` also supports integer schemas, accepting `1`, `0`, `"1"`, `"0"`, `true`, and `false`; integer-backed bool fields serialize as `1` or `0`.
 
 ## `integer-type`
 

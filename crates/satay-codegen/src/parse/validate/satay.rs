@@ -193,6 +193,24 @@ mod tests {
     }
 
     #[test]
+    fn validates_parse_as_naive_datetime_for_string_schema() {
+        let schema = schema_with_satay(json!({ "parse-as": "naive-datetime" }));
+
+        let validated = validate_type_satay(
+            &schema,
+            Some(OasSchemaType::String),
+            "parameter `date`",
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(
+            validated.parse_as,
+            Some(ValidatedParseAs::ParsedString(ParseAs::NaiveDateTime))
+        );
+    }
+
+    #[test]
     fn allows_bool_parse_as_for_integer_schema() {
         let schema = schema_with_satay(json!({ "parse-as": "bool" }));
 

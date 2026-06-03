@@ -22,7 +22,7 @@ Satay targets OpenAPI 3.1.x and a small, typed subset.
 - Repeated query parameters for array query values.
 - Optional fields and optional request bodies.
 - `serde` derives and field renames behind the generated crate's `serde` feature.
-- Satay-specific `x-satay.parse-as` hints for string fields whose wire values should become stronger Rust types (`date`, `offset-datetime`, `time`, numeric primitives, and others).
+- Satay-specific `x-satay.parse-as` hints for string fields whose wire values should become stronger Rust types (`date`, `naive-datetime`, `offset-datetime`, `time`, numeric primitives, and others).
 - Satay-specific `x-satay.integer-type` hints for overriding inferred Rust integer primitives.
 - Satay-specific `x-satay.enum-variants` hints for naming generated Rust enum variants.
 - Satay-specific `x-satay.treat-error-as-none` hints for struct fields where deserialization errors should produce `None` instead of failing.
