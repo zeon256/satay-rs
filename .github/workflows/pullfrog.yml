@@ -29,8 +29,8 @@ jobs:
         uses: pullfrog/pullfrog@6e29c33e6b35d21948e4c86da2789498c43b2820 # v0.1.18
         with:
           prompt: ${{ inputs.prompt }}
-          model: opencode-go/glm-5.1
         env:
+          PULLFROG_MODEL: opencode-go/glm-5.1
           # add at least one provider API key
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
