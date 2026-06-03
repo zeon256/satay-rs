@@ -8,7 +8,7 @@ use http::header::{self, CONTENT_TYPE, HeaderName, HeaderValue};
 use serde::de;
 use time::format_description::well_known::Rfc3339;
 use time::Month;
-pub use time::{Date, OffsetDateTime, Time};
+pub use time::{Date, OffsetDateTime, PrimitiveDateTime, Time};
 
 use tracing::{debug, instrument};
 
@@ -73,6 +73,12 @@ pub enum ParseTimeError {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ParseDateError {
     #[error("date must be in YYYY-MM-DD format")]
+    InvalidFormat,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ParseNaiveDateTimeError {
+    #[error("datetime must be in YYYY-MM-DDTHH:mm:ss format")]
     InvalidFormat,
 }
 
@@ -261,6 +267,49 @@ fn parse_date_u8(bytes: &[u8]) -> Result<u8, ParseDateError> {
     u8::try_from(value).map_err(|_| ParseDateError::InvalidFormat)
 }
 
+pub fn format_naive_datetime(value: &PrimitiveDateTime) -> String {
+    format!(
+        "{}T{:02}:{:02}:{:02}",
+        format_date(&value.date()),
+        value.hour(),
+        value.minute(),
+        value.second()
+    )
+}
+
+pub fn parse_naive_datetime(value: &str) -> Result<PrimitiveDateTime, ParseNaiveDateTimeError> {
+    let value = value.trim();
+    let bytes = value.as_bytes();
+    if bytes.len() != 19
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes[10] != b'T'
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+    {
+        return Err(ParseNaiveDateTimeError::InvalidFormat);
+    }
+
+    for (index, byte) in bytes.iter().enumerate() {
+        if matches!(index, 4 | 7 | 10 | 13 | 16) {
+            continue;
+        }
+        if !byte.is_ascii_digit() {
+            return Err(ParseNaiveDateTimeError::InvalidFormat);
+        }
+    }
+
+    let date = parse_date(&value[0..10]).map_err(|_| ParseNaiveDateTimeError::InvalidFormat)?;
+    let hour = parse_date_u8(&bytes[11..13]).map_err(|_| ParseNaiveDateTimeError::InvalidFormat)?;
+    let minute =
+        parse_date_u8(&bytes[14..16]).map_err(|_| ParseNaiveDateTimeError::InvalidFormat)?;
+    let second =
+        parse_date_u8(&bytes[17..19]).map_err(|_| ParseNaiveDateTimeError::InvalidFormat)?;
+    let time =
+        Time::from_hms(hour, minute, second).map_err(|_| ParseNaiveDateTimeError::InvalidFormat)?;
+    Ok(PrimitiveDateTime::new(date, time))
+}
+
 pub fn parse_time(value: &str) -> Result<Time, ParseTimeError> {
     let value = value.trim();
     let bytes = value.as_bytes();
@@ -366,7 +415,7 @@ pub mod serde_string {
     use serde::de::Error as DeError;
     use time::format_description::well_known::Rfc3339;
 
-    use crate::{Date, OffsetDateTime, Time};
+    use crate::{Date, OffsetDateTime, PrimitiveDateTime, Time};
 
     macro_rules! string_from_str_module {
         ($module:ident, $ty:ty) => {
@@ -631,6 +680,60 @@ pub mod serde_string {
                 let value = <Option<String> as Deserialize>::deserialize(deserializer)?;
                 value
                     .map(|value| crate::parse_date(&value).map_err(DeError::custom))
+                    .transpose()
+            }
+        }
+    }
+
+    pub mod as_naive_datetime {
+        use serde::Deserialize;
+        use serde::de::Error as DeError;
+
+        use super::*;
+
+        pub fn serialize<S>(value: &PrimitiveDateTime, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            serializer.serialize_str(&crate::format_naive_datetime(value))
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<PrimitiveDateTime, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            let value = <String as Deserialize>::deserialize(deserializer)?;
+            crate::parse_naive_datetime(&value).map_err(DeError::custom)
+        }
+
+        pub mod option {
+            use serde::Deserialize;
+            use serde::de::Error as DeError;
+
+            use super::*;
+
+            pub fn serialize<S>(
+                value: &Option<PrimitiveDateTime>,
+                serializer: S,
+            ) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                match value {
+                    Some(value) => super::serialize(value, serializer),
+                    None => serializer.serialize_none(),
+                }
+            }
+
+            pub fn deserialize<'de, D>(
+                deserializer: D,
+            ) -> Result<Option<PrimitiveDateTime>, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let value = <Option<String> as Deserialize>::deserialize(deserializer)?;
+                value
+                    .map(|value| crate::parse_naive_datetime(&value).map_err(DeError::custom))
                     .transpose()
             }
         }
@@ -985,6 +1088,40 @@ mod tests {
         assert_eq!(format_date(&date), "2024-07-16");
         assert_eq!(parse_date("2024-7-16"), Err(ParseDateError::InvalidFormat));
         assert_eq!(parse_date("not-a-date"), Err(ParseDateError::InvalidFormat));
+    }
+
+    #[test]
+    fn parses_and_formats_naive_datetime_strings() {
+        let datetime = parse_naive_datetime("2024-07-16T23:59:00").unwrap();
+        assert_eq!(datetime.hour(), 23);
+        assert_eq!(datetime.minute(), 59);
+        assert_eq!(datetime.second(), 0);
+        assert_eq!(format_naive_datetime(&datetime), "2024-07-16T23:59:00");
+        assert_eq!(
+            parse_naive_datetime("2024-07-16T23:59"),
+            Err(ParseNaiveDateTimeError::InvalidFormat)
+        );
+        assert_eq!(
+            parse_naive_datetime("2024-07-16 23:59:00"),
+            Err(ParseNaiveDateTimeError::InvalidFormat)
+        );
+    }
+
+    #[cfg(all(feature = "serde", feature = "json"))]
+    #[test]
+    fn serde_string_naive_datetime_round_trips() {
+        #[derive(serde::Deserialize, serde::Serialize)]
+        struct Value {
+            #[serde(with = "crate::serde_string::as_naive_datetime")]
+            at: PrimitiveDateTime,
+        }
+
+        let at = parse_naive_datetime("2024-07-16T23:59:00").unwrap();
+        let encoded = serde_json::to_value(Value { at }).unwrap();
+        assert_eq!(encoded, serde_json::json!({ "at": "2024-07-16T23:59:00" }));
+
+        let decoded = serde_json::from_value::<Value>(encoded).unwrap();
+        assert_eq!(decoded.at, at);
     }
 
     #[cfg(all(feature = "serde", feature = "json"))]

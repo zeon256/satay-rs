@@ -276,6 +276,9 @@ fn constrained_value_expr(base: syn::Expr, inner: &TypeRef) -> syn::Expr {
 fn parsed_value_expr(base: syn::Expr, parse_as: ParseAs) -> syn::Expr {
     match parse_as {
         ParseAs::Date => parse_quote!(&satay_runtime::format_date(&#base)),
+        ParseAs::NaiveDateTime => {
+            parse_quote!(&satay_runtime::format_naive_datetime(&#base))
+        }
         ParseAs::OffsetDateTime => {
             parse_quote!(&satay_runtime::format_offset_datetime(&#base))
         }

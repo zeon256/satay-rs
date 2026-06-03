@@ -849,6 +849,36 @@ paths:
     }
 
     #[test]
+    fn lowers_naive_datetime_parse_as_on_query_parameters() {
+        let api = parse_valid(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /psi:
+    get:
+      operationId: psi
+      parameters:
+        - name: date
+          in: query
+          schema:
+            type: string
+            x-satay:
+              parse-as: naive-datetime
+      responses:
+        '204':
+          description: No content
+"#,
+        );
+
+        let date = parameter(&api.operations[0], "date");
+        assert_eq!(date.ty, TypeRef::ParsedString(ParseAs::NaiveDateTime));
+        assert!(!date.required);
+    }
+
+    #[test]
     fn rejects_parameters_that_reference_nullable_aliases() {
         let err = parse_invalid(
             r#"
