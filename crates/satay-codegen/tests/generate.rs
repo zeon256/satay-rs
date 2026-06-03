@@ -1095,7 +1095,11 @@ paths:
     .expect("generate parse-as date fixture");
 
     let parts_rs = find_file(&files, "psi/parts.rs");
-    assert!(parts_rs.contents.contains("pub date: Option<satay_runtime::Date>"));
+    assert!(
+        parts_rs
+            .contents
+            .contains("pub date: Option<satay_runtime::Date>")
+    );
     assert!(
         parts_rs
             .contents
@@ -1126,7 +1130,12 @@ mod tests {
 "##;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
-    run_temp_cargo(crate_dir, "test", &[], "parse-as date generated crate tests");
+    run_temp_cargo(
+        crate_dir,
+        "test",
+        &[],
+        "parse-as date generated crate tests",
+    );
 }
 
 #[test]
