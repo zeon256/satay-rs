@@ -2,8 +2,13 @@ name: Quality Checks
 
 on:
   pull_request:
-    paths-ignore:
-      - "**/*.md"
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "**/build.rs"
+      - "tests/**"
+      - ".github/actions/setup-rust/**"
 
 permissions:
   contents: read
