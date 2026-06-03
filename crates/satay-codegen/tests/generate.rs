@@ -1069,6 +1069,67 @@ mod tests {
 }
 
 #[test]
+fn x_satay_parse_as_date_generates_query_parameter_encoding() {
+    let files = satay_codegen::generate(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /psi:
+    get:
+      operationId: psi
+      parameters:
+        - name: date
+          in: query
+          schema:
+            type: string
+            x-satay:
+              parse-as: date
+      responses:
+        '204':
+          description: No content
+"#,
+    )
+    .expect("generate parse-as date fixture");
+
+    let parts_rs = find_file(&files, "psi/parts.rs");
+    assert!(parts_rs.contents.contains("pub date: Option<satay_runtime::Date>"));
+    assert!(
+        parts_rs
+            .contents
+            .contains("satay_runtime::format_date(&value)")
+    );
+
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+
+    let runtime_path = runtime_path_toml();
+
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::*;
+
+    #[test]
+    fn encodes_optional_date_query_parameter() {
+        let day = satay_runtime::parse_date("2024-07-16").unwrap();
+        let parts = psi_parts(PsiInput::new().date(day)).expect("request parts");
+        assert_eq!(parts.uri, "/psi?date=2024-07-16");
+    }
+}
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    run_temp_cargo(crate_dir, "test", &[], "parse-as date generated crate tests");
+}
+
+#[test]
 fn openapi_30_documents_are_rejected() {
     let err = satay_codegen::generate(
         r#"
