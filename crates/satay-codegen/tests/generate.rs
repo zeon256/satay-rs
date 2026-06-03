@@ -139,6 +139,8 @@ fn simple_fixture_generates_expected_file_structure() {
     assert!(mod_rs.contents.contains("pub mod get_user;"));
     assert!(mod_rs.contents.contains("pub mod update_user;"));
 
+    assert!(!files.iter().any(|file| file.relative_path == "lib.rs"));
+
     assert!(!files.iter().any(|file| file.relative_path == "client.rs"));
     let api_rs = find_file(&files, "api.rs");
     assert!(api_rs.contents.contains("pub struct Api"));
@@ -179,6 +181,24 @@ fn simple_fixture_generates_expected_file_structure() {
     let json = find_file(&files, "update_user/json.rs");
     assert!(json.contents.contains("pub fn encode_update_user"));
     assert!(json.contents.contains("pub fn decode_update_user_response"));
+}
+
+#[test]
+fn lib_root_module_option_emits_lib_rs_instead_of_mod_rs() {
+    use satay_codegen::{GenerateOptions, RootModule};
+    let options = GenerateOptions {
+        root_module: RootModule::LibRs,
+    };
+    let files = satay_codegen::generate_with(SIMPLE, options).expect("generate simple fixture");
+
+    let lib_rs = find_file(&files, "lib.rs");
+    assert!(lib_rs.contents.contains("pub const SERVER_URL"));
+    assert!(!files.iter().any(|file| file.relative_path == "mod.rs"));
+    assert!(
+        files
+            .iter()
+            .any(|file| file.relative_path == "get_user/mod.rs")
+    );
 }
 
 #[test]
