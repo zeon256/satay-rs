@@ -76,6 +76,11 @@ fn parse_operation(
 ) -> Result<SatayOperation, ValidationError> {
     let fn_name = function_ident(&operation.operation_id);
     let type_prefix = type_ident(&operation.operation_id);
+    let input_name = registry.reserve_preferred_type_name([format!("{type_prefix}Input")]);
+    let response_name = registry.reserve_preferred_type_name([
+        format!("{type_prefix}Response"),
+        format!("{type_prefix}OperationResponse"),
+    ]);
 
     let mut parameters = operation
         .parameters
@@ -101,8 +106,8 @@ fn parse_operation(
     Ok(SatayOperation {
         fn_name,
         description: operation.description.clone(),
-        input_name: format!("{type_prefix}Input"),
-        response_name: format!("{type_prefix}Response"),
+        input_name,
+        response_name,
         method: operation.method,
         path: operation.path.clone(),
         path_segments: operation.path_segments.clone(),

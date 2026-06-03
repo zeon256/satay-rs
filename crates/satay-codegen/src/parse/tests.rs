@@ -449,6 +449,49 @@ components:
     }
 
     #[test]
+    fn response_name_collision_uses_operation_response_suffix() {
+        let api = parse_valid(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /psi:
+    get:
+      operationId: psi
+      responses:
+        '200':
+          description: PSI readings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PsiResponse'
+components:
+  schemas:
+    PsiResponse:
+      type: object
+      required:
+        - value
+      properties:
+        value:
+          type: integer
+"#,
+        );
+
+        component(&api, "PsiResponse");
+
+        assert_eq!(api.operations.len(), 1);
+        let operation = &api.operations[0];
+        assert_eq!(operation.input_name, "PsiInput");
+        assert_eq!(operation.response_name, "PsiOperationResponse");
+        assert_eq!(
+            operation.responses[0].body,
+            Some(TypeRef::Named("PsiResponse".to_owned()))
+        );
+    }
+
+    #[test]
     fn lifts_inline_constraints_into_generated_types() {
         let api = parse_valid(
             r#"

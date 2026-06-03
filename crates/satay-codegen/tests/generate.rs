@@ -9,6 +9,32 @@ const SIMPLE: &str = include_str!("../../../tests/fixtures/simple.yaml");
 const PETSTORE_MINIMAL: &str = include_str!("../../../tests/fixtures/petstore-minimal.yaml");
 const CONSTRAINED: &str = include_str!("../../../tests/fixtures/constrained.yaml");
 const INLINE_ENUM: &str = include_str!("../../../tests/fixtures/inline-enum.yaml");
+const RESPONSE_NAME_COLLISION: &str = r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /psi:
+    get:
+      operationId: psi
+      responses:
+        '200':
+          description: PSI readings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PsiResponse'
+components:
+  schemas:
+    PsiResponse:
+      type: object
+      required:
+        - value
+      properties:
+        value:
+          type: integer
+"#;
 
 fn find_file<'a>(files: &'a [GeneratedFile], relative_path: &str) -> &'a GeneratedFile {
     files
@@ -521,6 +547,57 @@ mod tests {
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(crate_dir, "test", &[], "generated crate tests");
+}
+
+#[test]
+fn generated_response_name_collision_compiles_and_decodes() {
+    let files =
+        satay_codegen::generate(RESPONSE_NAME_COLLISION).expect("generate collision fixture");
+
+    let parts = find_file(&files, "psi/parts.rs");
+    assert!(parts.contents.contains("pub enum PsiOperationResponse"));
+    assert!(parts.contents.contains("Ok(PsiResponse)"));
+    assert!(!parts.contents.contains("pub enum PsiResponse"));
+
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+
+    let runtime_path = runtime_path_toml();
+
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::*;
+
+    #[test]
+    fn decodes_nonrecursive_collision_response() {
+        let expected = PsiResponse { value: 42 };
+        let manual = PsiOperationResponse::Ok(expected.clone());
+        assert_eq!(manual, PsiOperationResponse::Ok(expected));
+
+        let response = satay_runtime::ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: br#"{"value":42}"#.to_vec(),
+        };
+        let decoded = PsiAction::decode(response).expect("decoded response");
+
+        assert_eq!(decoded, PsiOperationResponse::Ok(PsiResponse { value: 42 }));
+    }
+}
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    run_temp_cargo(
+        crate_dir,
+        "test",
+        &[],
+        "response collision generated crate tests",
+    );
 }
 
 #[test]

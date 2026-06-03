@@ -19,6 +19,26 @@ impl TypeRegistry {
         self.used_names.insert(rust_name);
     }
 
+    pub(crate) fn reserve_preferred_type_name(
+        &mut self,
+        candidates: impl IntoIterator<Item = String>,
+    ) -> String {
+        let mut last_candidate = None;
+
+        for candidate in candidates {
+            if !self.used_names.contains(&candidate) {
+                self.used_names.insert(candidate.clone());
+                return candidate;
+            }
+            last_candidate = Some(candidate);
+        }
+
+        unique_ident(
+            last_candidate.expect("reserve_preferred_type_name requires at least one candidate"),
+            &mut self.used_names,
+        )
+    }
+
     pub(crate) fn constrained_ref(
         &mut self,
         type_name_hint: &str,
@@ -146,6 +166,21 @@ mod tests {
             }
             other => panic!("expected constrained ref, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn reserve_preferred_type_name_uses_first_available_candidate() {
+        let mut registry = TypeRegistry::default();
+        registry.reserve("PsiResponse".to_owned());
+
+        let allocated = registry.reserve_preferred_type_name([
+            "PsiResponse".to_owned(),
+            "PsiOperationResponse".to_owned(),
+        ]);
+        let next = registry.reserve_preferred_type_name(["PsiOperationResponse".to_owned()]);
+
+        assert_eq!(allocated, "PsiOperationResponse");
+        assert_eq!(next, "PsiOperationResponse_2");
     }
 
     #[test]
