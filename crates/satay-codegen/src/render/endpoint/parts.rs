@@ -277,12 +277,12 @@ fn parsed_value_expr(base: syn::Expr, parse_as: ParseAs) -> syn::Expr {
     match parse_as {
         ParseAs::Date => parse_quote!(&satay_runtime::format_date(#base)),
         ParseAs::NaiveDateTime => {
-            parse_quote!(&satay_runtime::format_naive_datetime(&#base))
+            parse_quote!(&satay_runtime::format_naive_datetime(#base))
         }
         ParseAs::OffsetDateTime => {
-            parse_quote!(&satay_runtime::format_offset_datetime(&#base))
+            parse_quote!(&satay_runtime::format_offset_datetime(#base))
         }
-        ParseAs::Time => parse_quote!(&satay_runtime::format_time(&#base)),
+        ParseAs::Time => parse_quote!(&satay_runtime::format_time(#base)),
         ParseAs::U8
         | ParseAs::U16
         | ParseAs::U32
