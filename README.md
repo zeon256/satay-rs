@@ -6,9 +6,8 @@
     <td>
       <h1>Satay</h1>
       <p>
-        <a href="https://crates.io/crates/satay"><img src="https://img.shields.io/crates/v/satay" alt="Crates.io"></a>
-        <a href="https://crates.io/crates/satay"><img src="https://img.shields.io/crates/d/satay" alt="Crates.io Downloads"></a>
-        <a href="https://docs.rs/satay"><img src="https://img.shields.io/docsrs/satay" alt="Docs.rs"></a>
+        <a href="https://crates.io/crates/satay-cli"><img src="https://img.shields.io/crates/d/satay-cli" alt="Crates.io Downloads"></a>
+        <a href="https://docs.rs/satay-codegen"><img src="https://img.shields.io/docsrs/satay-codegen" alt="Docs.rs"></a>
         <a href="#license"><img src="https://img.shields.io/badge/license-Apache--2.0%2FMIT-blue" alt="License"></a>
         <a href="https://blog.rust-lang.org/2025/02/20/Rust-1.88.0/"><img src="https://img.shields.io/badge/MSRV-1.88.0-orange" alt="MSRV"></a>
         <a href="https://doc.rust-lang.org/edition-guide/rust-2024/"><img src="https://img.shields.io/badge/Rust-2024-blue" alt="Rust Edition"></a>
