@@ -3,8 +3,12 @@ name = "satay-ureq"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Ureq adapter for Satay generated actions"
+repository = "https://github.com/zeon256/satay-rs"
+homepage = "https://github.com/zeon256/satay-rs"
+documentation = "https://docs.rs/satay-ureq"
 
 [dependencies]
-satay-runtime = { path = "../satay-runtime" }
+satay-runtime.workspace = true
 ureq = "3"
 thiserror.workspace = true

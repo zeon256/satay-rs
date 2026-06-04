@@ -3,6 +3,10 @@ name = "satay-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "CLI for generating Rust clients from OpenAPI 3.1 documents"
+repository = "https://github.com/zeon256/satay-rs"
+homepage = "https://github.com/zeon256/satay-rs"
+documentation = "https://github.com/zeon256/satay-rs#readme"
 
 [[bin]]
 name = "satay"
@@ -10,7 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 argh.workspace = true
-satay-codegen = { path = "../satay-codegen" }
+satay-codegen.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

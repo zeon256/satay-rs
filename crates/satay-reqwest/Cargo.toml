@@ -3,12 +3,16 @@ name = "satay-reqwest"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "Reqwest adapter for Satay generated actions"
+repository = "https://github.com/zeon256/satay-rs"
+homepage = "https://github.com/zeon256/satay-rs"
+documentation = "https://docs.rs/satay-reqwest"
 
 [features]
 default = []
 blocking = ["reqwest/blocking"]
 
 [dependencies]
-satay-runtime = { path = "../satay-runtime" }
+satay-runtime.workspace = true
 reqwest = { version = "0.13.3", default-features = false }
 thiserror.workspace = true
