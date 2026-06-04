@@ -31,10 +31,10 @@
 
 ## Quick Start
 
-Install the CLI from a checkout of this repository:
+Install the CLI from crates.io:
 
 ```bash
-cargo install --path crates/satay-cli
+cargo install satay-cli
 satay --help
 ```
 

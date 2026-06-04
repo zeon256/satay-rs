@@ -1,0 +1,26 @@
+[workspace]
+# Update the workspace changelog with changes from all crates.
+changelog_update = true
+# Path to the changelog file.
+changelog_path = "CHANGELOG.md"
+# Publish to crates.io and create a git release for each crate.
+git_release_enable = true
+# Create a git tag for each crate.
+git_tag_enable = true
+# Use the default release name format: `<crate>-v<version>`.
+git_tag_name = "{{ package }}-v{{ version }}"
+
+[[package]]
+name = "satay-runtime"
+
+[[package]]
+name = "satay-codegen"
+
+[[package]]
+name = "satay-reqwest"
+
+[[package]]
+name = "satay-ureq"
+
+[[package]]
+name = "satay-cli"
