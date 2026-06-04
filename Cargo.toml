@@ -19,7 +19,7 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-argh = "0.1"
+argh = "0.1.19"
 fast-float2 = "0.2"
 http = "1"
 oas3 = { version = "0.22", features = ["yaml-spec"] }
