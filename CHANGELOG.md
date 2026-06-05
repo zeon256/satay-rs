@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.1.3...satay-codegen-v0.1.4) - 2026-06-05
+
+### Other
+
+- Revert "fix(codegen): parse i64 minimum properly"
+
 ## [0.1.3](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.1.2...satay-codegen-v0.1.3) - 2026-06-05
 
 ### Fixed
