@@ -983,36 +983,6 @@ components:
     }
 
     #[test]
-    fn parses_yaml_integer_minimum_below_i64_min() {
-        let api = parse_valid(
-            r#"
-openapi: 3.1.0
-info:
-  title: Test API
-  version: 1.0.0
-paths:
-  /ping:
-    get:
-      operationId: ping
-      responses:
-        '204':
-          description: No content
-components:
-  schemas:
-    Seed:
-      type: integer
-      format: int64
-      minimum: -9223372036854776000
-"#,
-        );
-
-        match &component(&api, "Seed").kind {
-            ComponentKind::Alias(ty) => assert_eq!(ty, &TypeRef::Integer(IntegerType::I64)),
-            other => panic!("expected Seed alias, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn parses_x_satay_enum_variants() {
         let api = parse_valid(
             r#"

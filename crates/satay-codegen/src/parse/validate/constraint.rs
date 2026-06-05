@@ -396,16 +396,12 @@ fn tighter_float_maximum(
 }
 
 fn json_integer(value: &Number, context: &str) -> Result<i128, ValidationError> {
-    if let Some(value) = value.as_i128() {
-        return Ok(value);
+    if let Some(value) = value.as_i64() {
+        return Ok(i128::from(value));
     }
-
-    if value.as_u128().is_some() {
-        return Err(ValidationError::ExpectedInteger {
-            context: context.to_owned(),
-        });
+    if let Some(value) = value.as_u64() {
+        return Ok(i128::from(value));
     }
-
     let Some(value) = value.as_f64() else {
         return Err(ValidationError::ExpectedInteger {
             context: context.to_owned(),
