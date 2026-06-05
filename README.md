@@ -22,6 +22,10 @@
 > [!WARNING]
 > Satay is work in progress and currently prioritizes generating `lta-rs` clients with good ergonomics and validation. Support for other OpenAPI specs will grow as the supported subset becomes explicit and tested.
 
+## Motivation
+
+I've been bitten by the sans-io bug after I used [rusty-s3](https://github.com/paolobarbolini/rusty-s3) and got so inspired by it that I told myself that all SDK clients that I am gonna make will be sans-io. After maintaining [lta-rs](httpps://github.com/lta-rs/lta-rs) with multiple different implementation for blocking, async, different client backends, sans-io approach is the most reasonable one. This will significantly reduce maintainence time as well as bugs cos we no longer have to depend on those backends! Another reason why I started this project is because there isn't any OpenAPI generator for Rust that generates adequately high quality Rust code that is nice to use from a DX perspective and I want to change that.
+
 ## Features
 
 - Generates from OpenAPI 3.1 documents
