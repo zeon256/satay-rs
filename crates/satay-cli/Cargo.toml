@@ -7,6 +7,7 @@ description = "CLI for generating Rust clients from OpenAPI 3.1 documents"
 repository = "https://github.com/zeon256/satay-rs"
 homepage = "https://github.com/zeon256/satay-rs"
 documentation = "https://github.com/zeon256/satay-rs#readme"
+rust-version.workspace = true
 
 [[bin]]
 name = "satay"
