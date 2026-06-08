@@ -258,36 +258,62 @@
   @apply size-2 rounded-full;
 }
 
-.feature-card {
-  @apply rounded-2xl border border-border/50 bg-card/55 p-6 backdrop-blur-sm transition-colors hover:border-terracotta/30 hover:bg-card/75;
+.surface-card {
+  @apply relative isolate flex h-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-card/55 transition-colors hover:border-terracotta/30 hover:bg-card/75;
+
+  --card-art-size: 76%;
+  --card-art-bleed-x: 12%;
+  --card-art-bleed-y: 12%;
+  --card-art-opacity: 0.13;
+  --card-art-opacity-hover: 0.2;
 }
 
-.user-card {
-  @apply relative flex h-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-card/55 transition-colors hover:border-terracotta/30 hover:bg-card/75;
+.surface-card--cta {
+  @apply border-dashed border-terracotta/25 bg-card/35 hover:border-terracotta/45 hover:bg-card/45;
 }
 
-.user-card-content {
+.surface-card--feature {
+  --card-art-size: 26%;
+  --card-art-bleed-x: 3%;
+  --card-art-bleed-y: 3%;
+  --card-art-opacity: 0.11;
+  --card-art-opacity-hover: 0.16;
+}
+
+.card-body {
   @apply relative z-10 flex h-full flex-col p-6;
 }
 
-.user-card-art {
-  @apply pointer-events-none absolute inset-0 overflow-hidden;
+.card-art {
+  @apply pointer-events-none absolute inset-0;
 }
 
-.user-card-bg-image {
-  @apply absolute inset-0 h-full w-full object-contain object-right object-bottom opacity-[0.14] transition-opacity duration-300 select-none;
+.card-art-well {
+  @apply absolute right-0 bottom-0 flex items-end justify-end opacity-[var(--card-art-opacity)] transition-opacity duration-300;
+  width: var(--card-art-size);
+  aspect-ratio: 1;
+  transform: translate(var(--card-art-bleed-x), var(--card-art-bleed-y));
 }
 
-.user-card:hover .user-card-bg-image {
-  @apply opacity-[0.2];
+.surface-card:hover .card-art-well {
+  opacity: var(--card-art-opacity-hover);
 }
 
-.user-card-bg-mark {
-  @apply text-terracotta/10 absolute right-6 bottom-2 font-mono text-[clamp(5rem,40%,9rem)] leading-none font-bold tracking-tighter uppercase select-none;
+.card-art-icon {
+  @apply text-terracotta block h-full w-full shrink-0;
 }
 
-.user-card-submit {
-  @apply border-dashed border-terracotta/25 bg-card/35 p-0 hover:border-terracotta/45 hover:bg-card/45;
+.card-art-image {
+  @apply block h-full w-full object-contain object-right object-bottom;
+}
+
+.card-art-well--mark {
+  container-type: size;
+}
+
+.card-art-mark {
+  @apply text-terracotta/12 font-mono leading-[0.85] font-bold tracking-tighter uppercase select-none;
+  font-size: 72cqmin;
 }
 
 .user-card-title {

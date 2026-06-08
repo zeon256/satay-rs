@@ -280,12 +280,16 @@ const features = [
             features.map((feature, index) => {
               const Icon = feature.icon
               return (
-                <article class="feature-card animate-rise" style={`animation-delay: ${650 + index * 75}ms`}>
-                  <div class="bg-terracotta/15 text-terracotta mb-4 inline-flex size-10 items-center justify-center rounded-xl">
-                    <Icon className="size-5" />
+                <article class="surface-card surface-card--feature animate-rise" style={`animation-delay: ${650 + index * 75}ms`}>
+                  <div class="card-art" aria-hidden="true">
+                    <div class="card-art-well">
+                      <Icon className="card-art-icon" weight="thin" />
+                    </div>
                   </div>
-                  <h3 class="font-heading mb-2 text-xl font-semibold">{feature.title}</h3>
-                  <p class="text-cream-muted text-sm leading-relaxed" set:html={feature.body} />
+                  <div class="card-body">
+                    <h3 class="font-heading mb-2 text-xl font-semibold">{feature.title}</h3>
+                    <p class="text-cream-muted text-sm leading-relaxed" set:html={feature.body} />
+                  </div>
                 </article>
               )
             })
@@ -308,25 +312,27 @@ const features = [
           {
             satayUsers.map((user, index) => (
               <article
-                class="user-card animate-rise"
+                class="surface-card animate-rise"
                 style={`animation-delay: ${700 + index * 75}ms`}
               >
-                <div class="user-card-art" aria-hidden="true">
-                  {
-                    user.logo ? (
-                      <img
-                        src={user.logo}
-                        alt=""
-                        class="user-card-bg-image"
-                        loading="lazy"
-                        decoding="async"
-                      />
-                    ) : (
-                      <span class="user-card-bg-mark">{user.name.slice(0, 2)}</span>
-                    )
-                  }
+                <div class="card-art" aria-hidden="true">
+                  <div class:list={["card-art-well", !user.logo && "card-art-well--mark"]}>
+                    {
+                      user.logo ? (
+                        <img
+                          src={user.logo}
+                          alt=""
+                          class="card-art-image"
+                          loading="lazy"
+                          decoding="async"
+                        />
+                      ) : (
+                        <span class="card-art-mark">{user.name.slice(0, 2)}</span>
+                      )
+                    }
+                  </div>
                 </div>
-                <div class="user-card-content">
+                <div class="card-body">
                   <h3 class="font-heading text-xl font-semibold">
                     <a
                       href={user.href}
@@ -362,8 +368,8 @@ const features = [
             ))
           }
 
-          <article class="user-card user-card-submit animate-rise" style="animation-delay: 775ms">
-            <div class="user-card-content">
+          <article class="surface-card surface-card--cta animate-rise" style="animation-delay: 775ms">
+            <div class="card-body">
               <div class="bg-terracotta/15 text-terracotta mb-4 inline-flex size-10 items-center justify-center rounded-xl">
                 <UsersThreeIcon className="size-5" />
               </div>
