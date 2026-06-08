@@ -1,36 +1,45 @@
-# Astro + React + TypeScript + shadcn/ui
+# Satay website
 
-This is a template for a new Astro project with React, TypeScript, and shadcn/ui.
+Marketing site for [Satay](https://github.com/zeon256/satay-rs), built with Astro, React, TypeScript, and Tailwind CSS.
 
-## Adding components
-
-To add components to your app, run the following command:
+## Development
 
 ```bash
-npx shadcn@latest add button
+bun install
+bun run dev
 ```
 
-This will place the ui components in the `src/components` directory.
+## Scripts
 
-## Using components
+- `bun run dev` — local dev server
+- `bun run build` — production build
+- `bun run preview` — preview production build
+- `bun run typecheck` — Astro + TypeScript check
+- `bun run lint` — oxlint
+- `bun run format` — oxfmt
 
-To use the components in your app, import them in an `.astro` file:
+## Adding a project to "Built with Satay"
 
-```astro
----
-import { Button } from "@/components/ui/button"
----
+Projects shown on the landing page are listed in [`src/data/users.ts`](src/data/users.ts).
 
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width" />
-    <title>Astro App</title>
-  </head>
-  <body>
-    <div class="grid h-screen place-items-center content-center">
-      <Button>Button</Button>
-    </div>
-  </body>
-</html>
+1. Fork [zeon256/satay-rs](https://github.com/zeon256/satay-rs).
+2. Add an entry to the `satayUsers` array in `website/src/data/users.ts`:
+
+```ts
+{
+  name: "your-crate",
+  description: "One sentence about what your project does.",
+  href: "https://github.com/you/your-crate",
+  repo: "https://github.com/you/your-crate",
+  logo: "/users/your-crate.webp", // optional — site path or absolute URL
+  logoAlt: "your-crate logo", // optional
+  crates: "https://crates.io/crates/your-crate", // optional
+  docs: "https://docs.rs/your-crate", // optional
+},
 ```
+
+3. **Optional logo:** add a square image (`.webp`, `.png`, or `.svg`, ideally ~128×128) to `public/users/your-crate.webp` and set the `logo` field to `/users/your-crate.webp`. Projects without a logo show a two-letter monogram instead.
+
+4. Open a pull request against `main`.
+
+The site also links directly to the GitHub editor for that file so contributors can submit from the landing page.

@@ -137,9 +137,9 @@
 .delay-150 {
   animation-delay: 150ms;
 }
- .delay-175 {
-   animation-delay: 175ms;
- }
+.delay-175 {
+  animation-delay: 175ms;
+}
 .delay-200 {
   animation-delay: 200ms;
 }
@@ -154,6 +154,9 @@
 }
 .delay-600 {
   animation-delay: 600ms;
+}
+.delay-650 {
+  animation-delay: 650ms;
 }
 .delay-700 {
   animation-delay: 700ms;
@@ -211,13 +214,13 @@
 .meta-sep {
   @apply text-border/70;
 }
- .stat-row {
-   @apply flex flex-wrap items-center gap-2;
- }
+.stat-row {
+  @apply flex flex-wrap items-center gap-2;
+}
 
- .stat-pill {
-   @apply inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card/45 px-3 py-1.5 text-xs font-medium text-cream-muted tabular-nums transition-colors hover:border-terracotta/35 hover:bg-card/70 hover:text-cream;
- }
+.stat-pill {
+  @apply inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card/45 px-3 py-1.5 text-xs font-medium text-cream-muted tabular-nums transition-colors hover:border-terracotta/35 hover:bg-card/70 hover:text-cream;
+}
 
 .terminal-header {
   @apply flex items-center gap-1.5 border-b border-border/50 bg-charcoal/60 px-4 py-2.5;
@@ -229,6 +232,34 @@
 
 .feature-card {
   @apply rounded-2xl border border-border/50 bg-card/55 p-6 backdrop-blur-sm transition-colors hover:border-terracotta/30 hover:bg-card/75;
+}
+
+.user-card {
+  @apply flex h-full flex-col rounded-2xl border border-border/50 bg-card/55 p-6 backdrop-blur-sm transition-colors hover:border-terracotta/30 hover:bg-card/75;
+}
+
+.user-card-logo {
+  @apply mb-4 size-10 rounded-xl border border-border/50 bg-charcoal/40 object-contain p-1.5 shadow-sm shadow-black/20;
+}
+
+.user-card-mark {
+  @apply bg-terracotta/15 text-terracotta mb-4 inline-flex size-10 items-center justify-center rounded-xl font-mono text-xs font-semibold uppercase tracking-tight;
+}
+
+.user-card-submit {
+  @apply border-dashed border-terracotta/25 bg-card/35 hover:border-terracotta/45;
+}
+
+.user-card-title {
+  @apply font-heading text-xl font-semibold tracking-tight transition-colors hover:text-terracotta;
+}
+
+.user-card-links {
+  @apply mt-auto flex flex-wrap items-center gap-x-4 gap-y-2 pt-5 text-sm;
+}
+
+.user-card-link {
+  @apply inline-flex items-center gap-1.5 text-cream-muted transition-colors hover:text-cream;
 }
 
 .footer-link {

@@ -41,14 +41,20 @@ async function fetchCrateDownloads(crate: string): Promise<number | null> {
   }
 }
 
-async function fetchGithubStars(owner: string, repo: string): Promise<number | null> {
+async function fetchGithubStars(
+  owner: string,
+  repo: string
+): Promise<number | null> {
   try {
-    const response = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
-      headers: {
-        Accept: "application/vnd.github+json",
-        "User-Agent": USER_AGENT,
-      },
-    })
+    const response = await fetch(
+      `https://api.github.com/repos/${owner}/${repo}`,
+      {
+        headers: {
+          Accept: "application/vnd.github+json",
+          "User-Agent": USER_AGENT,
+        },
+      }
+    )
 
     if (!response.ok) return null
 
