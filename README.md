@@ -98,7 +98,7 @@ let request: http::Request<Vec<u8>> = action.request()?;
 let response = satay_runtime::ResponseParts { status, headers, body };
 let decoded = generated::GetBusArrivalAction::decode(response)?;
 ```
-
+ 
 ## What It Generates
 
 - Rust structs, string enums, primitive aliases, and constrained newtypes from `components.schemas`.
