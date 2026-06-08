@@ -12,12 +12,26 @@ bun run dev
 ## Scripts
 
 - `bun run dev` — local dev server
-- `bun run build` — production build (set `SITE_URL` for absolute Open Graph URLs)
+- `bun run build` — production build
 - `bun run og` — regenerate `public/og.png` from `public/og.svg` (requires `rsvg-convert`)
 - `bun run preview` — preview production build
 - `bun run typecheck` — Astro + TypeScript check
 - `bun run lint` — oxlint
 - `bun run format` — oxfmt
+
+## Open Graph and `SITE_URL`
+
+The layout emits Open Graph and Twitter Card meta tags, plus a canonical URL. The share image is `public/og.png` (source: `public/og.svg`).
+
+For production builds, set `SITE_URL` to the public origin of the deployed site (no trailing slash). Astro uses it for `og:url`, `og:image`, and the canonical link — crawlers need those as absolute URLs.
+
+```bash
+SITE_URL=https://satay.example.com bun run build
+```
+
+If `SITE_URL` is unset, the build falls back to the page origin (for example `http://localhost:4321` during local builds). That is fine for dev, but set `SITE_URL` in your deploy environment so link previews resolve correctly.
+
+Defaults for title, description, and image alt text live in [`src/lib/seo.ts`](src/lib/seo.ts). Per-page overrides can be passed as props to the layout.
 
 ## Adding a project to "Built with Satay"
 
