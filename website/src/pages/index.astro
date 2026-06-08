@@ -18,6 +18,8 @@ import {
   UsersThreeIcon,
   WarningIcon,
   GlobeHemisphereEastIcon,
+  XCircleIcon,
+  CheckCircleIcon,
 } from "@phosphor-icons/react"
 
 const GITHUB_URL = "https://github.com/zeon256/satay-rs"
@@ -27,6 +29,39 @@ const INSTALL_CMD = "cargo install satay-cli"
 const GENERATE_CMD = "satay generate --input openapi.yaml --output src/generated --rustfmt"
 
 const { crateDownloads, githubStars } = await fetchProjectStats()
+
+const sectionLinks = [
+  { href: "#origin", label: "Origin" },
+  { href: "#why-sans-io", label: "sans-IO" },
+  { href: "#features", label: "Features" },
+  { href: "#users", label: "Users" },
+  { href: "#how-it-works", label: "How it works" },
+]
+
+const sansIoContrast = [
+  {
+    title: "Without sans-IO",
+    points: [
+      "Async, blocking, and WASM each need their own client code path",
+      "Security and feature changes in reqwest, hyper, or ureq become your release work",
+      "Swapping transports means refactoring the client internals",
+      "Tests often need real HTTP or heavy mocks around the whole stack",
+    ],
+    icon: XCircleIcon,
+    variant: "without" as const,
+  },
+  {
+    title: "With Satay",
+    points: [
+      "One generated surface for building requests and decoding responses",
+      "Transport adapters are thin and optional. Your app keeps the HTTP client",
+      "Backend updates stay at the edge. Regenerate when the spec changes, not when reqwest bumps",
+      "Unit tests can build requests and decode responses without the network",
+    ],
+    icon: CheckCircleIcon,
+    variant: "with" as const,
+  },
+]
 
 const features = [
   {
@@ -54,50 +89,66 @@ const features = [
 ---
 
 <Layout>
-  <div class="relative flex min-h-svh flex-col overflow-x-clip">
+  <div id="top" class="relative flex min-h-svh flex-col overflow-x-clip">
     <div class="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
       <div class="bg-terracotta/12 absolute -top-28 right-[8%] size-72 rounded-full blur-3xl"></div>
       <div class="bg-ember/10 absolute bottom-[18%] -left-20 size-64 rounded-full blur-3xl"></div>
       <div class="skewer-diagonal absolute inset-0"></div>
     </div>
 
-    <header
-      class="animate-rise relative z-10 mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-5 md:px-10"
-    >
-      <a href="/" class="group flex items-center gap-3">
-        <img
-          src="/logo.webp"
-          alt=""
-          width="36"
-          height="36"
-          class="size-9 rounded-lg shadow-md shadow-black/40 transition-transform group-hover:scale-[1.03]"
-        />
-        <span class="font-heading text-lg font-semibold tracking-tight">Satay</span>
-      </a>
-      <nav class="flex items-center gap-1 sm:gap-2">
-        <a href={DOCS_URL} target="_blank" rel="noreferrer" class="btn-ghost">
-          <BookOpenIcon className="size-4" />
-          <span class="hidden sm:inline">Docs</span>
-        </a>
-        <a href={GITHUB_URL} target="_blank" rel="noreferrer" class="btn-ghost">
-          <GithubLogoIcon className="size-4" />
-          <span class="hidden sm:inline">GitHub</span>
-        </a>
-      </nav>
-    </header>
+    <div class="site-chrome animate-rise fixed inset-x-0 top-0 z-50">
+      <aside class="site-banner" role="note">
+        <div class="site-banner-inner">
+          <WarningIcon className="text-ember size-3.5 shrink-0" />
+          <p class="text-cream-muted min-w-0 text-xs leading-snug">
+            <span class="text-cream font-medium">Work in progress.</span>
+            Focused on lta-rs-style clients for now.
+          </p>
+        </div>
+      </aside>
 
-    <main class="relative z-10 mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 pb-20 md:px-10">
-      <div
-        class="border-ember/25 bg-ember/8 animate-rise delay-100 mb-10 flex items-start gap-3 rounded-2xl border px-4 py-3.5 backdrop-blur-sm"
-        role="note"
-      >
-        <WarningIcon className="text-ember mt-0.5 size-5 shrink-0" />
-        <p class="text-cream-muted text-sm leading-relaxed">
-          <span class="text-cream font-medium">Work in progress.</span>
-          We're focused on lta-rs-style clients right now: ergonomics that feel good in real code, validation that matches the spec. Other OpenAPI shapes come next, once we nail down what's supported and have tests to prove it.
-        </p>
-      </div>
+      <header class="site-header">
+        <div class="site-header-inner">
+          <a href="#top" class="group flex shrink-0 items-center gap-3">
+            <img
+              src="/logo.webp"
+              alt=""
+              width="36"
+              height="36"
+              class="size-9 rounded-lg shadow-md shadow-black/40 transition-transform group-hover:scale-[1.03]"
+            />
+            <span class="font-heading text-lg font-semibold tracking-tight">Satay</span>
+          </a>
 
+          <div class="header-nav-cluster">
+            <nav class="header-section-nav" aria-label="Page sections">
+              {
+                sectionLinks.map((link) => (
+                  <a href={link.href} class="header-section-link">
+                    {link.label}
+                  </a>
+                ))
+              }
+            </nav>
+
+            <div class="header-nav-divider" aria-hidden="true"></div>
+
+            <nav class="header-external-nav" aria-label="External links">
+              <a href={DOCS_URL} target="_blank" rel="noreferrer" class="btn-ghost">
+                <BookOpenIcon className="size-4" />
+                <span class="hidden sm:inline">Docs</span>
+              </a>
+              <a href={GITHUB_URL} target="_blank" rel="noreferrer" class="btn-ghost">
+                <GithubLogoIcon className="size-4" />
+                <span class="hidden sm:inline">GitHub</span>
+              </a>
+            </nav>
+          </div>
+        </div>
+      </header>
+    </div>
+
+    <main class="main-with-fixed-chrome relative z-10 mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 pb-20 md:px-10">
       <div class="grid items-center gap-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)] lg:gap-16">
         <section class="flex flex-col gap-8">
           <p class="meta-row animate-rise delay-150" aria-label="Project metadata">
@@ -185,7 +236,7 @@ const features = [
         </section>
       </div>
 
-      <section class="animate-rise delay-550 mt-24" id="origin">
+      <section class="section-anchor animate-rise delay-550 mt-24" id="origin">
         <div class="grid gap-10 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-start lg:gap-16">
           <div class="space-y-6">
             <div class="space-y-3">
@@ -264,14 +315,69 @@ const features = [
         </div>
       </section>
 
-      <section class="animate-rise delay-600 mt-24">
+      <section class="section-anchor animate-rise delay-575 mt-24" id="why-sans-io">
+        <div class="mb-10 max-w-2xl space-y-3">
+          <p class="text-terracotta text-xs font-medium tracking-[0.24em] uppercase">Why sans-IO</p>
+          <h2 class="font-heading text-3xl font-semibold tracking-tight md:text-4xl">
+            Maintain the API, not the HTTP client
+          </h2>
+          <p class="text-cream-muted text-base leading-relaxed">
+            Most OpenAPI clients bundle a transport. Your SDK ends up tracking reqwest releases, TLS changes, and
+            separate async, blocking, and WASM code paths. Satay generates the API layer only. You send the requests
+            yourself.
+          </p>
+        </div>
+
+        <div class="grid gap-4 sm:grid-cols-2">
+          {
+            sansIoContrast.map((side, index) => {
+              const Icon = side.icon
+              return (
+                <article
+                  class:list={["contrast-card animate-rise", side.variant === "with" && "contrast-card--with"]}
+                  style={`animation-delay: ${600 + index * 75}ms`}
+                >
+                  <div class="card-body">
+                    <div class="mb-5 flex items-center gap-3">
+                      <div
+                        class:list={[
+                          "inline-flex size-10 items-center justify-center rounded-xl",
+                          side.variant === "with" ? "bg-terracotta/15 text-terracotta" : "bg-cream/5 text-cream-muted",
+                        ]}
+                      >
+                        <Icon className="size-5" weight={side.variant === "with" ? "fill" : "regular"} />
+                      </div>
+                      <h3 class="font-heading text-xl font-semibold">{side.title}</h3>
+                    </div>
+                    <ul class="contrast-list">
+                      {side.points.map((point) => (
+                        <li class="contrast-list-item">
+                          <span class="contrast-list-marker" aria-hidden="true"></span>
+                          <span>{point}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </article>
+              )
+            })
+          }
+        </div>
+
+        <p class="text-cream-muted mt-8 max-w-2xl text-base leading-relaxed">
+          You maintain only the OpenAPI spec. Satay turns it into typed Rust. When the API changes, update the spec and
+          regenerate. Your HTTP client stays separate.
+        </p>
+      </section>
+
+      <section class="section-anchor animate-rise delay-600 mt-24" id="features">
         <div class="mb-10 max-w-2xl space-y-3">
           <p class="text-terracotta text-xs font-medium tracking-[0.24em] uppercase">Features</p>
           <h2 class="font-heading text-3xl font-semibold tracking-tight md:text-4xl">
             Rust you can read, not template soup
           </h2>
           <p class="text-cream-muted text-base leading-relaxed">
-            One codegen output. Plug in reqwest, ureq, hyper, or your own client without keeping separate async, blocking, and WASM backends in sync (Haha get it? Nvm).
+            Builders, decoders, and validation newtypes from your OpenAPI spec.
           </p>
         </div>
 
@@ -297,7 +403,7 @@ const features = [
         </div>
       </section>
 
-      <section class="animate-rise delay-650 mt-24" id="users">
+      <section class="section-anchor animate-rise delay-650 mt-24" id="users">
         <div class="mb-10 max-w-2xl space-y-3">
           <p class="text-terracotta text-xs font-medium tracking-[0.24em] uppercase">Built with Satay</p>
           <h2 class="font-heading text-3xl font-semibold tracking-tight md:text-4xl">
@@ -392,7 +498,10 @@ const features = [
         </div>
       </section>
 
-      <section class="animate-rise delay-700 mt-24 grid gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:items-start">
+      <section
+        class="section-anchor animate-rise delay-700 mt-24 grid gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:items-start"
+        id="how-it-works"
+      >
         <div class="space-y-5">
           <p class="text-terracotta text-xs font-medium tracking-[0.24em] uppercase">How it works</p>
           <h2 class="font-heading text-3xl font-semibold tracking-tight md:text-4xl">
