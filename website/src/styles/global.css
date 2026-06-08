@@ -162,6 +162,9 @@
 .delay-500 {
   animation-delay: 500ms;
 }
+.delay-550 {
+  animation-delay: 550ms;
+}
 .delay-600 {
   animation-delay: 600ms;
 }
@@ -285,6 +288,34 @@
 
 .user-card-link {
   @apply inline-flex items-center gap-1.5 text-cream-muted transition-colors hover:text-cream;
+}
+
+.origin-entry {
+  @apply rounded-2xl border border-terracotta/25 bg-card/55 p-6 backdrop-blur-sm;
+}
+
+.origin-headword {
+  @apply font-heading text-[1.75rem] font-semibold tracking-tight text-cream;
+}
+
+.origin-pronunciation {
+  @apply font-mono text-sm text-cream-muted;
+}
+
+.origin-gloss {
+  @apply text-cream-muted mt-4 border-l-2 border-terracotta/40 pl-4 text-base leading-relaxed italic;
+}
+
+.origin-metaphor-list {
+  @apply space-y-4;
+}
+
+.origin-metaphor-item {
+  @apply flex gap-4;
+}
+
+.origin-metaphor-marker {
+  @apply bg-terracotta/80 mt-1.5 size-2 shrink-0 rounded-full shadow-[0_0_10px_var(--ember-glow)];
 }
 
 .footer-link {

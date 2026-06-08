@@ -15,6 +15,9 @@
       <p>
         satay is a Rust OpenAPI client generator for <a href="https://fasterthanli.me/articles/the-case-for-sans-io">sans-io</a> clients. It generates typed request builders, response decoders, and validation <a href="https://rust-unofficial.github.io/patterns/patterns/behavioural/newtype.html">newtypes</a> from OpenAPI constraints while leaving HTTP, WebSocket, tests, WASM, and other transports under your application's control.
       </p>
+      <p>
+        Named after <strong>sate</strong> /ˈsɑː.teɪ/, the Malay and Indonesian word for meat threaded on a skewer and grilled.
+      </p>
     </td>
   </tr>
 </table>

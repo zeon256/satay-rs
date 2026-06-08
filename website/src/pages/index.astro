@@ -17,6 +17,7 @@ import {
   StarIcon,
   UsersThreeIcon,
   WarningIcon,
+  GlobeHemisphereEastIcon,
 } from "@phosphor-icons/react"
 
 const GITHUB_URL = "https://github.com/zeon256/satay-rs"
@@ -183,6 +184,85 @@ const features = [
           />
         </section>
       </div>
+
+      <section class="animate-rise delay-550 mt-24" id="origin">
+        <div class="grid gap-10 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-start lg:gap-16">
+          <div class="space-y-6">
+            <div class="space-y-3">
+              <p class="text-terracotta text-xs font-medium tracking-[0.24em] uppercase">Origin</p>
+              <h2 class="font-heading text-3xl font-semibold tracking-tight md:text-4xl">
+                Named for the skewer, not the sauce
+              </h2>
+            </div>
+
+            <article class="origin-entry" aria-label="Dictionary entry for sate">
+              <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <p class="origin-headword">sate</p>
+                <p class="origin-pronunciation">/ˈsɑː.teɪ/</p>
+                <p class="origin-pronunciation italic">n.</p>
+                <p class="origin-pronunciation">(Malay, Indonesian)</p>
+              </div>
+              <p class="origin-gloss">
+                a skewer; meat (or other food) cut into pieces, threaded onto a skewer, and grilled.
+              </p>
+            </article>
+
+            <div class="text-cream-muted space-y-4 text-base leading-relaxed">
+              <p>
+                English <strong class="text-cream font-medium">satay</strong> comes from the Malay and Indonesian word
+                <strong class="text-cream font-medium">sate</strong>, which refers to both the skewer and the dish.
+                Street vendors thread marinated pieces onto bamboo sticks, grill them over charcoal, and serve them with
+                peanut sauce. The name caught on abroad as the dish spread across Southeast Asia.
+              </p>
+            </div>
+          </div>
+
+          <div class="space-y-6 lg:pt-12">
+            <div class="bg-terracotta/15 text-terracotta inline-flex size-10 items-center justify-center rounded-xl">
+              <GlobeHemisphereEastIcon className="size-5" />
+            </div>
+            <p class="text-cream-muted text-base leading-relaxed">
+              Satay-rs leans into that image. OpenAPI describes the pieces: schemas, operations, constraints. Codegen
+              threads them into typed request builders and response decoders. Your application picks the transport and
+              sends them through. The skewer is the sans-io boundary. The pieces stay the same no matter which grill you
+              use.
+            </p>
+
+            <ol class="origin-metaphor-list" aria-label="How the skewer metaphor maps to Satay">
+              <li class="origin-metaphor-item">
+                <span class="origin-metaphor-marker" aria-hidden="true"></span>
+                <div>
+                  <p class="text-cream font-medium">OpenAPI spec</p>
+                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">The marinated pieces: schemas, operations, constraints.</p>
+                </div>
+              </li>
+              <li class="origin-metaphor-item">
+                <span class="origin-metaphor-marker" aria-hidden="true"></span>
+                <div>
+                  <p class="text-cream font-medium">Codegen</p>
+                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">Threads them into builders and decoders you can read.</p>
+                </div>
+              </li>
+              <li class="origin-metaphor-item">
+                <span class="origin-metaphor-marker" aria-hidden="true"></span>
+                <div>
+                  <p class="text-cream font-medium">Your transport</p>
+                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">
+                    reqwest, ureq, hyper, tests, WASM, WebSocket, or your own client.
+                  </p>
+                </div>
+              </li>
+              <li class="origin-metaphor-item">
+                <span class="origin-metaphor-marker" aria-hidden="true"></span>
+                <div>
+                  <p class="text-cream font-medium">Sans-io boundary</p>
+                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">The skewer itself. Same pieces, different grill.</p>
+                </div>
+              </li>
+            </ol>
+          </div>
+        </div>
+      </section>
 
       <section class="animate-rise delay-600 mt-24">
         <div class="mb-10 max-w-2xl space-y-3">
