@@ -1,0 +1,226 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-serif/500.css";
+@import "@fontsource/ibm-plex-serif/600.css";
+@import "@fontsource/iosevka/400.css";
+@import "@fontsource/iosevka/500.css";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --charcoal: oklch(0.19 0.012 35);
+  --terracotta: oklch(0.52 0.11 42);
+  --terracotta-deep: oklch(0.38 0.08 40);
+  --cream: oklch(0.94 0.025 88);
+  --cream-muted: oklch(0.78 0.03 80);
+  --ember: oklch(0.66 0.2 48);
+  --ember-glow: oklch(0.66 0.2 48 / 35%);
+  --wood: oklch(0.42 0.06 55);
+
+  --background: var(--charcoal);
+  --foreground: var(--cream);
+  --card: oklch(0.24 0.025 38);
+  --card-foreground: var(--cream);
+  --popover: oklch(0.22 0.02 36);
+  --popover-foreground: var(--cream);
+  --primary: var(--ember);
+  --primary-foreground: oklch(0.16 0.02 35);
+  --secondary: var(--terracotta-deep);
+  --secondary-foreground: var(--cream);
+  --muted: oklch(0.26 0.02 38);
+  --muted-foreground: var(--cream-muted);
+  --accent: var(--terracotta);
+  --accent-foreground: var(--cream);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.94 0.025 88 / 10%);
+  --input: oklch(0.94 0.025 88 / 12%);
+  --ring: var(--ember);
+  --radius: 0.875rem;
+}
+
+@theme inline {
+  --font-sans: "IBM Plex Sans", sans-serif;
+  --font-heading: "IBM Plex Serif", serif;
+  --font-mono: "Iosevka", ui-monospace, monospace;
+  --color-charcoal: var(--charcoal);
+  --color-terracotta: var(--terracotta);
+  --color-terracotta-deep: var(--terracotta-deep);
+  --color-cream: var(--cream);
+  --color-cream-muted: var(--cream-muted);
+  --color-ember: var(--ember);
+  --color-wood: var(--wood);
+  --color-sidebar-ring: var(--ring);
+  --color-sidebar-border: var(--border);
+  --color-sidebar-accent-foreground: var(--accent-foreground);
+  --color-sidebar-accent: var(--accent);
+  --color-sidebar-primary-foreground: var(--primary-foreground);
+  --color-sidebar-primary: var(--primary);
+  --color-sidebar-foreground: var(--foreground);
+  --color-sidebar: var(--card);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply scroll-smooth font-sans;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes logo-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-2deg);
+  }
+  50% {
+    transform: translateY(-10px) rotate(1deg);
+  }
+}
+
+.animate-rise {
+  animation: rise 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-logo-float {
+  animation: logo-float 6s ease-in-out infinite;
+}
+
+.delay-100 {
+  animation-delay: 100ms;
+}
+.delay-150 {
+  animation-delay: 150ms;
+}
+.delay-200 {
+  animation-delay: 200ms;
+}
+.delay-300 {
+  animation-delay: 300ms;
+}
+.delay-400 {
+  animation-delay: 400ms;
+}
+.delay-500 {
+  animation-delay: 500ms;
+}
+.delay-600 {
+  animation-delay: 600ms;
+}
+.delay-700 {
+  animation-delay: 700ms;
+}
+.delay-800 {
+  animation-delay: 800ms;
+}
+
+.grain-overlay::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 40;
+  opacity: 0.04;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 128px 128px;
+}
+
+.skewer-diagonal {
+  background: linear-gradient(
+    145deg,
+    oklch(0.66 0.2 48 / 5%) 0%,
+    transparent 40%,
+    oklch(0.52 0.11 42 / 6%) 62%,
+    transparent 82%
+  );
+}
+
+.btn {
+  @apply inline-flex h-11 items-center justify-center gap-2 rounded-xl border px-5 text-sm font-semibold transition-all focus-visible:ring-2 focus-visible:ring-ember/50 focus-visible:outline-none active:translate-y-px;
+}
+
+.btn-primary {
+  @apply border-ember/30 bg-ember text-primary-foreground shadow-lg shadow-ember/20 hover:bg-ember/90;
+}
+
+.btn-outline {
+  @apply border-border/70 bg-card/40 text-cream backdrop-blur-sm hover:border-cream/20 hover:bg-card/70;
+}
+
+.btn-ghost {
+  @apply inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium text-cream-muted transition-colors hover:bg-cream/5 hover:text-cream;
+}
+
+.terminal-block {
+  @apply overflow-hidden rounded-2xl border border-border/60 bg-card/75 shadow-inner shadow-black/25 backdrop-blur-sm;
+}
+
+.meta-row {
+  @apply flex cursor-default flex-wrap items-center gap-x-2 gap-y-1 text-[0.7rem] font-medium tracking-[0.2em] text-cream-muted uppercase select-none;
+}
+
+.meta-sep {
+  @apply text-border/70;
+}
+
+.terminal-header {
+  @apply flex items-center gap-1.5 border-b border-border/50 bg-charcoal/60 px-4 py-2.5;
+}
+
+.terminal-dot {
+  @apply size-2 rounded-full;
+}
+
+.feature-card {
+  @apply rounded-2xl border border-border/50 bg-card/55 p-6 backdrop-blur-sm transition-colors hover:border-terracotta/30 hover:bg-card/75;
+}
+
+.footer-link {
+  @apply inline-flex items-center gap-1.5 text-cream-muted transition-colors hover:text-cream;
+}

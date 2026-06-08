@@ -1,0 +1,27 @@
+name: Website
+
+on:
+  pull_request:
+    paths:
+      - "website/**"
+      - ".github/workflows/website.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: oven-sh/setup-bun@4a1e2676d81e4366139920e4253161469a0937ab # v2.0.2
+        with:
+          bun-version-file: website/.bun-version
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Build
+        run: bun run build

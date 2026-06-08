@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "endOfLine": "lf",
+  "semi": false,
+  "singleQuote": false,
+  "tabWidth": 2,
+  "trailingComma": "es5",
+  "printWidth": 80,
+  "sortTailwindcss": {
+    "stylesheet": "src/styles/global.css",
+    "functions": ["cn", "cva"]
+  },
+  "sortPackageJson": false,
+  "ignorePatterns": [
+    "node_modules/",
+    "coverage/",
+    ".pnpm-store/",
+    "pnpm-lock.yaml",
+    "package-lock.json",
+    "yarn.lock"
+  ]
+}
