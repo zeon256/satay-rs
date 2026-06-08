@@ -137,6 +137,9 @@
 .delay-150 {
   animation-delay: 150ms;
 }
+ .delay-175 {
+   animation-delay: 175ms;
+ }
 .delay-200 {
   animation-delay: 200ms;
 }
@@ -208,6 +211,13 @@
 .meta-sep {
   @apply text-border/70;
 }
+ .stat-row {
+   @apply flex flex-wrap items-center gap-2;
+ }
+
+ .stat-pill {
+   @apply inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card/45 px-3 py-1.5 text-xs font-medium text-cream-muted tabular-nums transition-colors hover:border-terracotta/35 hover:bg-card/70 hover:text-cream;
+ }
 
 .terminal-header {
   @apply flex items-center gap-1.5 border-b border-border/50 bg-charcoal/60 px-4 py-2.5;
