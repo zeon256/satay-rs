@@ -24,7 +24,7 @@ export function CopyButton({ value, label = "Copy command" }: CopyButtonProps) {
       type="button"
       onClick={handleCopy}
       aria-label={label}
-      className="inline-flex size-9 shrink-0 items-center justify-center rounded-xl border border-border/50 text-cream-muted transition-colors hover:bg-cream/5 hover:text-cream focus-visible:ring-2 focus-visible:ring-ember/60 focus-visible:outline-none"
+      className="inline-flex size-9 shrink-0 items-center justify-center rounded-none border border-border/50 text-cream-muted transition-colors hover:bg-cream/5 hover:text-cream focus-visible:ring-2 focus-visible:ring-ember/60 focus-visible:outline-none"
     >
       {copied ? (
         <CheckIcon className="size-4 text-ember" />

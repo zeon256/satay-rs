@@ -1,12 +1,12 @@
 export const SITE_TITLE = "Satay: sans-IO OpenAPI clients for Rust"
 
 export const SITE_DESCRIPTION =
-  "Satay generates sans-IO OpenAPI clients for Rust: request builders, response decoders, and validation newtypes. You pick the HTTP stack."
+  "Generate OpenAPI 3.1 clients for Rust without baking in reqwest or ureq. Satay writes request builders and response decoders; you send the HTTP."
 
 export const OG_IMAGE_PATH = "/og.png"
 
 export const OG_IMAGE_ALT =
-  "Satay — OpenAPI clients without picking a transport"
+  "Satay: OpenAPI clients without picking a transport"
 
 export function absoluteUrl(
   path: string,

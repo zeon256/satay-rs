@@ -6,8 +6,29 @@
 @import "@fontsource/ibm-plex-sans/600.css";
 @import "@fontsource/ibm-plex-serif/500.css";
 @import "@fontsource/ibm-plex-serif/600.css";
-@import "@fontsource/iosevka/400.css";
-@import "@fontsource/iosevka/500.css";
+@font-face {
+  font-family: "Iosevka";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/iosevka-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Iosevka";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/fonts/iosevka-latin-600-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Iosevka";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/fonts/iosevka-latin-700-normal.woff2") format("woff2");
+}
 @import "@arborium/arborium/themes/base.css";
 @import "@arborium/arborium/themes/kanagawa-dragon.css";
 
@@ -41,7 +62,7 @@
   --border: oklch(0.94 0.025 88 / 10%);
   --input: oklch(0.94 0.025 88 / 12%);
   --ring: var(--ember);
-  --radius: 0.875rem;
+  --radius: 0;
 }
 
 @theme inline {
@@ -218,7 +239,7 @@
 }
 
 .btn {
-  @apply inline-flex h-11 items-center justify-center gap-2 rounded-xl border px-5 text-sm font-semibold transition-all focus-visible:ring-2 focus-visible:ring-ember/50 focus-visible:outline-none active:translate-y-px;
+  @apply inline-flex h-11 items-center justify-center gap-2 rounded-none border px-5 text-sm font-semibold transition-all focus-visible:ring-2 focus-visible:ring-ember/50 focus-visible:outline-none active:translate-y-px;
 }
 
 .btn-primary {
@@ -230,7 +251,7 @@
 }
 
 .btn-ghost {
-  @apply inline-flex h-9 items-center gap-2 rounded-lg px-3 text-sm font-medium text-cream-muted transition-colors hover:bg-cream/5 hover:text-cream;
+  @apply inline-flex h-9 items-center gap-2 rounded-none px-3 text-sm font-medium text-cream-muted transition-colors hover:bg-cream/5 hover:text-cream;
 }
 
 .site-chrome {
@@ -281,7 +302,7 @@
 }
 
 .header-section-link {
-  @apply inline-flex h-9 shrink-0 items-center rounded-lg px-2 text-xs font-medium text-cream-muted transition-colors hover:bg-cream/5 hover:text-cream sm:px-2.5 sm:text-sm;
+  @apply inline-flex h-9 shrink-0 items-center rounded-none px-2 text-xs font-medium text-cream-muted transition-colors hover:bg-cream/5 hover:text-cream sm:px-2.5 sm:text-sm;
 }
 
 .section-anchor {
@@ -291,7 +312,7 @@
 }
 
 .terminal-block {
-  @apply overflow-hidden rounded-2xl border border-border/60 bg-card/75 shadow-inner shadow-black/25 backdrop-blur-sm;
+  @apply overflow-hidden rounded-none border border-border/60 bg-card/75 shadow-inner shadow-black/25 backdrop-blur-sm;
 }
 
 .meta-row {
@@ -331,7 +352,7 @@
 }
 
 .code-panel {
-  @apply overflow-hidden rounded-2xl border;
+  @apply overflow-hidden rounded-none border;
   border-color: oklch(0.52 0.11 42 / 42%);
   background: var(--arb-bg-dark);
 }
@@ -347,7 +368,7 @@
 }
 
 .transport-tabs {
-  @apply overflow-hidden rounded-2xl border;
+  @apply overflow-hidden rounded-none border;
   border-color: oklch(0.52 0.11 42 / 42%);
   background: var(--arb-bg-dark);
 }
@@ -357,7 +378,7 @@
 }
 
 .transport-tab-list {
-  @apply flex gap-1.5 overflow-x-auto border-b p-2;
+  @apply flex overflow-x-auto border-b;
   border-color: oklch(0.94 0.025 88 / 10%);
   background: oklch(0.19 0.012 35 / 78%);
   scrollbar-width: none;
@@ -368,7 +389,7 @@
 }
 
 .transport-tab-label {
-  @apply min-w-28 shrink-0 cursor-pointer rounded-xl border border-transparent px-3 py-2 text-cream-muted transition-colors select-none hover:border-cream/10 hover:bg-cream/5 hover:text-cream;
+  @apply flex min-w-28 flex-1 cursor-pointer flex-col justify-center border-r border-border/10 px-4 py-3 text-cream-muted transition-colors select-none last:border-r-0 hover:bg-cream/5 hover:text-cream;
 }
 
 .transport-tab-label-main {
@@ -390,9 +411,9 @@
   ~ .transport-tab-panels
   .transport-tab-panel--reqwest-blocking,
 #transport-tab-ureq:checked ~ .transport-tab-panels .transport-tab-panel--ureq,
-#transport-tab-manual:checked
+#transport-tab-diy:checked
   ~ .transport-tab-panels
-  .transport-tab-panel--manual {
+  .transport-tab-panel--diy {
   display: block;
 }
 
@@ -403,10 +424,11 @@
   ~ .transport-tab-list
   [for="transport-tab-reqwest-blocking"],
 #transport-tab-ureq:checked ~ .transport-tab-list [for="transport-tab-ureq"],
-#transport-tab-manual:checked
+#transport-tab-diy:checked
   ~ .transport-tab-list
-  [for="transport-tab-manual"] {
-  @apply border-terracotta/35 bg-terracotta/10 text-cream;
+  [for="transport-tab-diy"] {
+  @apply border-terracotta/25 bg-terracotta/12 text-cream;
+  box-shadow: inset 0 -2px 0 var(--terracotta);
 }
 
 #transport-tab-reqwest:checked
@@ -421,9 +443,9 @@
   ~ .transport-tab-list
   [for="transport-tab-ureq"]
   .transport-tab-label-meta,
-#transport-tab-manual:checked
+#transport-tab-diy:checked
   ~ .transport-tab-list
-  [for="transport-tab-manual"]
+  [for="transport-tab-diy"]
   .transport-tab-label-meta {
   @apply text-terracotta opacity-100;
 }
@@ -437,9 +459,9 @@
 #transport-tab-ureq:focus-visible
   ~ .transport-tab-list
   [for="transport-tab-ureq"],
-#transport-tab-manual:focus-visible
+#transport-tab-diy:focus-visible
   ~ .transport-tab-list
-  [for="transport-tab-manual"] {
+  [for="transport-tab-diy"] {
   outline: 2px solid oklch(0.66 0.2 48 / 70%);
   outline-offset: 2px;
 }
@@ -454,7 +476,7 @@
 }
 
 .compare-point-card {
-  @apply rounded-2xl border border-border/45 bg-charcoal/35 p-5;
+  @apply rounded-none border border-border/50 bg-card/55 p-5;
 }
 
 .test-example-shell {
@@ -478,7 +500,7 @@
 }
 
 .stat-pill {
-  @apply inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card/45 px-3 py-1.5 text-xs font-medium text-cream-muted tabular-nums transition-colors hover:border-terracotta/35 hover:bg-card/70 hover:text-cream;
+  @apply inline-flex items-center gap-1.5 rounded-none border border-border/60 bg-card/45 px-3 py-1.5 text-xs font-medium text-cream-muted tabular-nums transition-colors hover:border-terracotta/35 hover:bg-card/70 hover:text-cream;
 }
 
 .terminal-header {
@@ -486,11 +508,11 @@
 }
 
 .terminal-dot {
-  @apply size-2 rounded-full;
+  @apply size-2 rounded-none;
 }
 
 .surface-card {
-  @apply relative isolate flex h-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-card/55 transition-colors hover:border-terracotta/30 hover:bg-card/75;
+  @apply relative isolate flex h-full flex-col overflow-hidden rounded-none border border-border/50 bg-card/55 transition-colors hover:border-terracotta/30 hover:bg-card/75;
 
   --card-art-size: 76%;
   --card-art-bleed-x: 12%;
@@ -560,7 +582,7 @@
 }
 
 .origin-entry {
-  @apply rounded-2xl border border-terracotta/25 bg-card/55 p-6 backdrop-blur-sm;
+  @apply rounded-none border border-terracotta/25 bg-card/55 p-6 backdrop-blur-sm;
 }
 
 .origin-headword {
@@ -584,11 +606,11 @@
 }
 
 .origin-metaphor-marker {
-  @apply mt-1.5 size-2 shrink-0 rounded-full bg-terracotta/80 shadow-[0_0_10px_var(--ember-glow)];
+  @apply mt-1.5 size-2 shrink-0 rounded-none bg-terracotta/80 shadow-[0_0_10px_var(--ember-glow)];
 }
 
 .contrast-card {
-  @apply relative isolate flex h-full flex-col overflow-hidden rounded-2xl border border-border/50 bg-card/45;
+  @apply relative isolate flex h-full flex-col overflow-hidden rounded-none border border-border/50 bg-card/45;
 }
 
 .contrast-card--with {
@@ -604,7 +626,7 @@
 }
 
 .contrast-list-marker {
-  @apply mt-2 size-1.5 shrink-0 rounded-full bg-cream-muted/35;
+  @apply mt-2 size-1.5 shrink-0 rounded-none bg-cream-muted/35;
 }
 
 .contrast-card--with .contrast-list-marker {

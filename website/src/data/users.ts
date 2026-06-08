@@ -23,7 +23,7 @@ export const satayUsers: SatayUser[] = [
   {
     name: "InfiniteUnion/nea-rs",
     description:
-      "A type-safe, sans-IO Rust client for Singapore NEA real-time weather & environmental APIs.",
+      "Type-safe, sans-IO Rust client for Singapore NEA weather and environmental APIs.",
     href: "https://github.com/InfiniteUnion/nea-rs",
     repo: "https://github.com/InfiniteUnion/nea-rs",
     logo: "/users/nea-rs.webp",

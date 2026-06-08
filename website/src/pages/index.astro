@@ -101,8 +101,8 @@ fn via_ureq(account_key: String) -> Result<(), Error> {
 }`,
   },
   {
-    id: "manual",
-    label: "manual",
+    id: "diy",
+    label: "DIY",
     meta: "sans-IO",
     code: `use generated::{Api, BusServiceNumber, GetBusArrivalAction};
 use satay_runtime::ResponseParts;
@@ -220,16 +220,16 @@ const sectionLinks = [
 
 const comparisonPoints = [
   {
-    title: "Action is the boundary",
-    body: "The generated builder knows the path, query, headers, validation, and response enum. The adapter only executes the resulting <code class=\"code-inline\">http::Request</code>.",
+    title: "The action stops at HTTP",
+    body: "The generated builder knows the path, query, headers, validation, and response enum. The adapter just runs the resulting <code class=\"code-inline\">http::Request</code>.",
   },
   {
     title: "Runtime stays outside",
-    body: "Async reqwest awaits, blocking reqwest returns directly, ureq uses its agent, and manual transports can drive the raw request/response boundary.",
+    body: "Async reqwest awaits. Blocking reqwest returns. ureq uses its agent. A manual transport can drive the raw request/response boundary.",
   },
   {
-    title: "Backends can change",
-    body: "Adding ureq, hyper, tests, WASM, or another adapter does not mean regenerating a transport-owned SDK.",
+    title: "Swap backends freely",
+    body: "Add ureq, hyper, a test harness, or WASM without regenerating a transport-owned SDK.",
   },
 ]
 
@@ -237,10 +237,10 @@ const sansIoContrast = [
   {
     title: "Without sans-IO",
     points: [
-      "Async, blocking, and WASM each need their own client code path",
-      "Security and feature changes in reqwest, hyper, or ureq become your release work",
-      "Swapping transports means refactoring the client internals",
-      "Tests often need real HTTP or heavy mocks around the whole stack",
+      "Async, blocking, and WASM often fork into separate client code",
+      "A reqwest or hyper bump can become a release for your SDK",
+      "Changing transports usually means refactoring client internals",
+      "Tests tend to need real HTTP or mocks around the whole stack",
     ],
     icon: XCircleIcon,
     variant: "without" as const,
@@ -248,10 +248,10 @@ const sansIoContrast = [
   {
     title: "With Satay",
     points: [
-      "One generated surface for building requests and decoding responses",
-      "Transport adapters are thin and optional. Your app keeps the HTTP client",
-      "Backend updates stay at the edge. Regenerate when the spec changes, not when reqwest bumps",
-      "Unit tests can build requests and decode responses without the network",
+      "One generated API for building requests and decoding responses",
+      "Transport adapters are optional and thin; your app keeps its HTTP client",
+      "Regenerate when the OpenAPI spec changes, not when reqwest bumps",
+      "Unit tests can build requests and decode fixture responses offline",
     ],
     icon: CheckCircleIcon,
     variant: "with" as const,
@@ -261,22 +261,22 @@ const sansIoContrast = [
 const features = [
   {
     title: "sans-IO first",
-    body: "Actions build plain <code class=\"code-inline\">http::Request</code> values. Send them with reqwest, ureq, hyper, tests, WASM, or whatever you already run.",
+    body: "Actions build plain <code class=\"code-inline\">http::Request</code> values. Send them with reqwest, ureq, hyper, a test harness, WASM, or whatever you already use.",
     icon: PlugsIcon,
   },
   {
     title: "Validation newtypes",
-    body: "String, number, integer, and array constraints from the spec become nutype newtypes. Bounds narrow to <code class=\"code-inline\">u8</code> when the maximum allows it.",
+    body: "String, number, integer, and array constraints from the spec become nutype newtypes. A max of 255 becomes <code class=\"code-inline\">u8</code> instead of a bare integer.",
     icon: ShieldCheckIcon,
   },
   {
     title: "OpenAPI 3.1",
-    body: "Reads the spec into a normalized IR, then emits structs, enums, builders, and decoders as ordinary Rust you can edit.",
+    body: "The spec is parsed into a normalized IR, then emitted as structs, enums, builders, and decoders you can read and edit.",
     icon: CodeIcon,
   },
   {
     title: "Optional adapters",
-    body: "Stay IO-free, or pull in <code class=\"code-inline\">satay-reqwest</code> and <code class=\"code-inline\">satay-ureq</code> when you want a short <code class=\"code-inline\">send_with</code> call site.",
+    body: "Stay IO-free, or add <code class=\"code-inline\">satay-reqwest</code> / <code class=\"code-inline\">satay-ureq</code> for a one-line <code class=\"code-inline\">send_with</code> call site.",
     icon: GitBranchIcon,
   },
 ]
@@ -286,8 +286,8 @@ const features = [
 <Layout>
   <div id="top" class="relative flex min-h-svh flex-col overflow-x-clip">
     <div class="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
-      <div class="bg-terracotta/12 absolute -top-28 right-[8%] size-72 rounded-full blur-3xl"></div>
-      <div class="bg-ember/10 absolute bottom-[18%] -left-20 size-64 rounded-full blur-3xl"></div>
+      <div class="bg-terracotta/12 absolute -top-28 right-[8%] size-72 rounded-none blur-3xl"></div>
+      <div class="bg-ember/10 absolute bottom-[18%] -left-20 size-64 rounded-none blur-3xl"></div>
       <div class="skewer-diagonal absolute inset-0"></div>
     </div>
 
@@ -310,7 +310,7 @@ const features = [
               alt="Satay"
               width="36"
               height="36"
-              class="size-9 rounded-lg shadow-md shadow-black/40 transition-transform group-hover:scale-[1.03]"
+              class="size-9 rounded-none shadow-md shadow-black/40 transition-transform group-hover:scale-[1.03]"
             />
             <span class="font-heading text-lg font-semibold tracking-tight">Satay</span>
           </a>
@@ -381,8 +381,8 @@ const features = [
               <span class="text-terracotta block">without HTTP lock-in</span>
             </h1>
             <p class="text-cream-muted max-w-xl text-base leading-relaxed text-pretty md:text-lg">
-              Satay turns an OpenAPI 3.1 spec into typed request builders, response decoders, and validation newtypes.
-              It gives you the <code class="code-inline">http::Request</code>; your app decides how to send it.
+              Satay reads an OpenAPI 3.1 spec and writes Rust for building requests and decoding responses.
+              You get the <code class="code-inline">http::Request</code>. Your app sends it.
             </p>
           </div>
 
@@ -416,13 +416,13 @@ const features = [
 
         <section class="animate-rise delay-500 relative flex items-center justify-center">
           <div
-            class="bg-terracotta-deep/25 absolute inset-[12%] rounded-[2.5rem] blur-3xl"
+            class="bg-terracotta-deep/25 absolute inset-[12%] rounded-none blur-3xl"
             aria-hidden="true"
           >
           </div>
           <img
             src="/logo.webp"
-            alt="Satay logo: cubes on a skewer, standing in for OpenAPI, codegen, and transport adapters"
+            alt="Satay logo: cubes on a skewer"
             width="480"
             height="480"
             fetchpriority="high"
@@ -433,13 +433,13 @@ const features = [
 
       <section class="section-anchor animate-rise delay-550 mt-24" id="compare">
         <div class="section-intro">
-          <p class="section-label">One action, four send paths</p>
+          <p class="section-label">Same action, different transports</p>
           <h2 class="font-heading text-3xl font-semibold tracking-tight text-balance md:text-4xl">
-            The operation stays the same
+            One operation, many ways to send it
           </h2>
           <p class="text-cream-muted text-base leading-relaxed">
-            Satay generates typed actions for the API operation. Async reqwest, blocking reqwest, ureq, and custom
-            transports are just different ways to send that action.
+            Satay generates a typed action for each API operation. Async reqwest, blocking reqwest, ureq, and a custom
+            client all start from the same action.
           </p>
         </div>
 
@@ -496,12 +496,11 @@ const features = [
         <div class="section-intro">
           <p class="section-label">Why sans-IO</p>
           <h2 class="font-heading text-3xl font-semibold tracking-tight text-balance md:text-4xl">
-            Maintain the API, not the HTTP client
+            Keep the API layer, swap the HTTP client
           </h2>
           <p class="text-cream-muted text-base leading-relaxed">
-            Most OpenAPI clients bundle a transport. Your SDK ends up tracking reqwest releases, TLS changes, and
-            separate async, blocking, and WASM code paths. Satay generates the API layer only. You send the requests
-            yourself.
+            Most OpenAPI clients ship with a transport baked in. Your SDK ends up tracking reqwest releases, TLS changes,
+            and separate async, blocking, and WASM paths. Satay generates the API layer only. You send the requests.
           </p>
         </div>
 
@@ -518,7 +517,7 @@ const features = [
                     <div class="mb-5 flex items-center gap-3">
                       <div
                         class:list={[
-                          "inline-flex size-10 items-center justify-center rounded-xl",
+                          "inline-flex size-10 items-center justify-center rounded-none",
                           side.variant === "with" ? "bg-terracotta/15 text-terracotta" : "bg-cream/5 text-cream-muted",
                         ]}
                       >
@@ -542,20 +541,19 @@ const features = [
         </div>
 
         <p class="text-cream-muted mt-8 max-w-2xl text-base leading-relaxed">
-          You maintain only the OpenAPI spec. Satay turns it into typed Rust. When the API changes, update the spec and
-          regenerate. Your HTTP client stays separate.
+          You maintain the OpenAPI spec. Satay emits typed Rust. When the API changes, update the spec and regenerate.
+          The HTTP client stays separate.
         </p>
 
         <div class="test-example-shell animate-rise mt-12" style="animation-delay: 725ms">
           <div class="test-example-copy">
             <p class="section-label">Tests</p>
             <h3 class="font-heading text-2xl font-semibold tracking-tight text-balance md:text-3xl">
-              Unit-test the client without running HTTP
+              Test the client without HTTP
             </h3>
             <p class="text-cream-muted text-base leading-relaxed">
-              Because actions expose request construction and response decoding as plain functions, tests can assert the
-              outgoing request and decode fixture responses. No live server, no reqwest mock, no async runtime just to
-              check client behavior.
+              Actions expose request construction and response decoding as plain functions. Tests can assert the outgoing
+              request and feed fixture bytes through the decoder. No live server, no reqwest mock, no async runtime.
             </p>
             <a href={REQWEST_EXAMPLE_TEST_URL} target="_blank" rel="noreferrer" class="test-example-link">
               <GithubLogoIcon className="size-4" />
@@ -579,9 +577,9 @@ const features = [
               Your library does not need to depend on an HTTP backend
             </h3>
             <p class="text-cream-muted text-base leading-relaxed">
-              In a generated client crate like <code class="code-inline">nea-rs</code>, the public library depends on
-              Satay runtime, <code class="code-inline">http</code>, and serialization pieces. Reqwest only appears in
-              dev-dependencies for examples and tests.
+              In a generated client crate like <code class="code-inline">nea-rs</code>, the library depends on Satay
+              runtime, <code class="code-inline">http</code>, and serialization. Reqwest shows up in dev-dependencies
+              for examples and tests.
             </p>
             <a href={NEA_CARGO_TOML_URL} target="_blank" rel="noreferrer" class="test-example-link">
               <GithubLogoIcon className="size-4" />
@@ -603,11 +601,8 @@ const features = [
         <div class="section-intro">
           <p class="section-label">Features</p>
           <h2 class="font-heading text-3xl font-semibold tracking-tight text-balance md:text-4xl">
-            Rust you can read, not template soup
+            Generated Rust you can read
           </h2>
-          <p class="text-cream-muted text-base leading-relaxed">
-            Builders, decoders, and validation newtypes from your OpenAPI spec.
-          </p>
         </div>
 
         <div class="grid gap-4 sm:grid-cols-2">
@@ -639,7 +634,7 @@ const features = [
             In the wild
           </h2>
           <p class="text-cream-muted text-base leading-relaxed">
-            Open-source API clients built with Satay. Got one? Send a PR.
+            Open-source clients using Satay. Missing yours? Send a PR.
           </p>
         </div>
 
@@ -705,7 +700,7 @@ const features = [
 
           <article class="surface-card surface-card--cta animate-rise" style="animation-delay: 775ms">
             <div class="card-body">
-              <div class="bg-terracotta/15 text-terracotta mb-4 inline-flex size-10 items-center justify-center rounded-xl">
+              <div class="bg-terracotta/15 text-terracotta mb-4 inline-flex size-10 items-center justify-center rounded-none">
                 <UsersThreeIcon className="size-5" />
               </div>
               <h3 class="font-heading text-xl font-semibold">Add your project</h3>
@@ -734,7 +729,7 @@ const features = [
         <div class="space-y-5">
           <p class="section-label">How it works</p>
           <h2 class="font-heading text-3xl font-semibold tracking-tight text-balance md:text-4xl">
-            Generate the client. Send it yourself.
+            Generate the client, send it yourself
           </h2>
           <ol class="text-cream-muted space-y-4 text-sm leading-relaxed">
             <li class="flex gap-3">
@@ -748,7 +743,8 @@ const features = [
             <li class="flex gap-3">
               <span class="text-ember font-heading text-lg leading-none">03</span>
               <span>
-                Send that request with reqwest, ureq, hyper, or your own client, then decode the response with the generated action types.
+                Send the request with reqwest, ureq, hyper, or your own client, then decode the response with the
+                generated types.
               </span>
             </li>
           </ol>
@@ -800,14 +796,13 @@ const features = [
           </div>
 
           <div class="space-y-6 lg:pt-12">
-            <div class="bg-terracotta/15 text-terracotta inline-flex size-10 items-center justify-center rounded-xl">
+            <div class="bg-terracotta/15 text-terracotta inline-flex size-10 items-center justify-center rounded-none">
               <GlobeHemisphereEastIcon className="size-5" />
             </div>
             <p class="text-cream-muted text-base leading-relaxed">
-              Satay-rs leans into that image. OpenAPI describes the pieces: schemas, operations, constraints. Codegen
-              threads them into typed request builders and response decoders. Your application picks the transport and
-              sends them through. The skewer is the sans-IO boundary. The pieces stay the same no matter which grill you
-              use.
+              The name is the metaphor. OpenAPI holds the pieces: schemas, operations, constraints. Codegen threads them
+              into request builders and response decoders. Your app picks the transport. The skewer is the sans-IO
+              boundary; the pieces do not change when you swap grills.
             </p>
 
             <ol class="origin-metaphor-list" aria-label="How the skewer metaphor maps to Satay">
@@ -815,7 +810,7 @@ const features = [
                 <span class="origin-metaphor-marker" aria-hidden="true"></span>
                 <div>
                   <p class="text-cream font-medium">OpenAPI spec</p>
-                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">The marinated pieces: schemas, operations, constraints.</p>
+                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">Schemas, operations, and constraints.</p>
                 </div>
               </li>
               <li class="origin-metaphor-item">
@@ -830,7 +825,7 @@ const features = [
                 <div>
                   <p class="text-cream font-medium">Your transport</p>
                   <p class="text-cream-muted mt-1 text-sm leading-relaxed">
-                    reqwest, ureq, hyper, tests, WASM, WebSocket, or your own client.
+                    reqwest, ureq, hyper, a test harness, WASM, or your own client.
                   </p>
                 </div>
               </li>
@@ -838,7 +833,7 @@ const features = [
                 <span class="origin-metaphor-marker" aria-hidden="true"></span>
                 <div>
                   <p class="text-cream font-medium">sans-IO boundary</p>
-                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">The skewer itself. Same pieces, different grill.</p>
+                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">The skewer. Same pieces, different grill.</p>
                 </div>
               </li>
             </ol>
