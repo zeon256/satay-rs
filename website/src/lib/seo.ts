@@ -5,9 +5,14 @@ export const SITE_DESCRIPTION =
 
 export const OG_IMAGE_PATH = "/og.png"
 
-export const OG_IMAGE_ALT = "Satay — OpenAPI clients without picking a transport"
+export const OG_IMAGE_ALT =
+  "Satay — OpenAPI clients without picking a transport"
 
-export function absoluteUrl(path: string, site: URL | string | undefined, fallbackOrigin: string): string {
+export function absoluteUrl(
+  path: string,
+  site: URL | string | undefined,
+  fallbackOrigin: string
+): string {
   if (site) {
     return new URL(path, site).href
   }

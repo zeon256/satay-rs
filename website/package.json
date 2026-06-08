@@ -18,6 +18,9 @@
     "og": "rsvg-convert -w 1200 -h 630 public/og.svg -o public/og.png"
   },
   "dependencies": {
+    "@arborium/arborium": "^2.18.0",
+    "@arborium/rust": "^2.18.0",
+    "@arborium/toml": "^2.18.0",
     "@astrojs/react": "^5",
     "@fontsource/ibm-plex-sans": "^5.2.8",
     "@fontsource/ibm-plex-serif": "^5.2.7",

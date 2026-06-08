@@ -2,6 +2,7 @@
 import Layout from "@/layouts/main.astro"
 import { CopyButton } from "@/components/landing/CopyButton"
 import { satayUsers, USERS_FILE_PATH, USERS_SUBMISSION_URL } from "@/data/users"
+import { highlightRust, highlightToml } from "@/lib/highlight"
 import { fetchProjectStats, formatDownloads, formatStars } from "@/lib/stats"
 import {
   ArrowSquareOutIcon,
@@ -25,17 +26,211 @@ import {
 const GITHUB_URL = "https://github.com/zeon256/satay-rs"
 const CRATES_URL = "https://crates.io/crates/satay-cli"
 const DOCS_URL = "https://docs.rs/satay-codegen"
+const REQWEST_EXAMPLE_TEST_URL = `${GITHUB_URL}/blob/main/examples/reqwest/src/main.rs#L35-L74`
+const NEA_CARGO_TOML_URL = "https://github.com/InfiniteUnion/nea-rs/blob/main/Cargo.toml"
 const INSTALL_CMD = "cargo install satay-cli"
 const GENERATE_CMD = "satay generate --input openapi.yaml --output src/generated --rustfmt"
 
-const { crateDownloads, githubStars } = await fetchProjectStats()
+const transportExamples = [
+  {
+    id: "reqwest",
+    label: "reqwest",
+    meta: "async",
+    code: `use generated::{Api, BusServiceNumber};
+use satay_reqwest::{reqwest, ReqwestActionExt};
+
+type Error = Box<dyn std::error::Error>;
+
+async fn via_reqwest(account_key: String) -> Result<(), Error> {
+    let api = Api::new().account_key(account_key);
+    let action = api
+        .get_bus_arrival(83139)
+        .service_no(BusServiceNumber::try_new("15")?);
+
+    let _response = action
+        .send_with(&reqwest::Client::new())
+        .await?;
+
+    Ok(())
+}`,
+  },
+  {
+    id: "reqwest-blocking",
+    label: "reqwest",
+    meta: "blocking",
+    code: `use generated::{Api, BusServiceNumber};
+use satay_reqwest::{reqwest, ReqwestBlockingActionExt};
+
+type Error = Box<dyn std::error::Error>;
+
+fn via_reqwest_blocking(account_key: String) -> Result<(), Error> {
+    let api = Api::new().account_key(account_key);
+    let action = api
+        .get_bus_arrival(83139)
+        .service_no(BusServiceNumber::try_new("15")?);
+
+    let _response = action
+        .send_with(&reqwest::blocking::Client::new())?;
+
+    Ok(())
+}`,
+  },
+  {
+    id: "ureq",
+    label: "ureq",
+    meta: "blocking",
+    code: `use generated::{Api, BusServiceNumber};
+use satay_ureq::{ureq, UreqActionExt};
+
+type Error = Box<dyn std::error::Error>;
+
+fn via_ureq(account_key: String) -> Result<(), Error> {
+    let api = Api::new().account_key(account_key);
+    let action = api
+        .get_bus_arrival(83139)
+        .service_no(BusServiceNumber::try_new("15")?);
+
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .build()
+        .into();
+
+    let _response = action.send_with(&agent)?;
+
+    Ok(())
+}`,
+  },
+  {
+    id: "manual",
+    label: "manual",
+    meta: "sans-IO",
+    code: `use generated::{Api, BusServiceNumber, GetBusArrivalAction};
+use satay_runtime::ResponseParts;
+
+type Error = Box<dyn std::error::Error>;
+
+struct RawResponse {
+    status: http::StatusCode,
+    headers: http::HeaderMap,
+    body: Vec<u8>,
+}
+
+async fn via_custom_transport(account_key: String) -> Result<(), Error> {
+    let api = Api::new().account_key(account_key);
+    let action = api
+        .get_bus_arrival(83139)
+        .service_no(BusServiceNumber::try_new("15")?);
+
+    let request: http::Request<Vec<u8>> = action.request()?;
+    let response = send_over_my_transport(request).await?;
+
+    let _decoded = GetBusArrivalAction::decode(ResponseParts {
+        status: response.status,
+        headers: response.headers,
+        body: response.body,
+    })?;
+
+    Ok(())
+}
+
+async fn send_over_my_transport(
+    _request: http::Request<Vec<u8>>,
+) -> Result<RawResponse, Error> {
+    todo!("use your HTTP client, WASM fetch, queue, or test harness")
+}`,
+  },
+] as const
+
+const testingExampleCode = `use generated::{
+    Api, BusServiceNumber, GetBusArrivalAction,
+    GetBusArrivalResponse,
+};
+
+type Error = Box<dyn std::error::Error>;
+
+#[test]
+fn tests_the_api_without_http() -> Result<(), Error> {
+    let api = Api::new().base_url("").account_key("test-key");
+    let action = api
+        .get_bus_arrival(83139)
+        .service_no(BusServiceNumber::try_new("15")?);
+
+    let request = action.request()?;
+    assert_eq!(request.method(), http::Method::GET);
+    assert_eq!(request.uri().path(), "/v3/BusArrival");
+    assert_eq!(request.headers()["AccountKey"], "test-key");
+
+    let query = request.uri().query().unwrap_or_default();
+    assert!(query.contains("BusStopCode=83139"));
+    assert!(query.contains("ServiceNo=15"));
+
+    let response = GetBusArrivalAction::decode(
+        satay_runtime::ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: br#"{
+                "odata.metadata": "https://datamall2.mytransport.sg/ltaodataservice/v3/BusArrival",
+                "BusStopCode": "83139",
+                "Services": []
+            }"#,
+        },
+    )?;
+
+    let GetBusArrivalResponse::Ok(arrival) = response else {
+        panic!("expected 200 OK bus arrival response");
+    };
+    assert_eq!(arrival.bus_stop_code, 83139);
+    assert!(arrival.services.is_empty());
+    Ok(())
+}`
+
+const neaCargoTomlCode = `# library API: no reqwest, ureq, hyper, or TLS backend
+[dependencies]
+satay-runtime = { version = "0.1.2", default-features = false }
+nutype = { version = "0.7", features = ["serde", "regex"] }
+regex = "1"
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+http = "1"`
+
+const [
+  { crateDownloads, githubStars },
+  highlightedTransportExamples,
+  testingExampleHtml,
+  neaCargoTomlHtml,
+] = await Promise.all([
+  fetchProjectStats(),
+  Promise.all(
+    transportExamples.map(async (example) => ({
+      ...example,
+      html: await highlightRust(example.code),
+    })),
+  ),
+  highlightRust(testingExampleCode),
+  highlightToml(neaCargoTomlCode),
+])
 
 const sectionLinks = [
-  { href: "#origin", label: "Origin" },
+  { href: "#compare", label: "Compare" },
   { href: "#why-sans-io", label: "sans-IO" },
   { href: "#features", label: "Features" },
   { href: "#users", label: "Users" },
   { href: "#how-it-works", label: "How it works" },
+]
+
+const comparisonPoints = [
+  {
+    title: "Action is the boundary",
+    body: "The generated builder knows the path, query, headers, validation, and response enum. The adapter only executes the resulting <code class=\"code-inline\">http::Request</code>.",
+  },
+  {
+    title: "Runtime stays outside",
+    body: "Async reqwest awaits, blocking reqwest returns directly, ureq uses its agent, and manual transports can drive the raw request/response boundary.",
+  },
+  {
+    title: "Backends can change",
+    body: "Adding ureq, hyper, tests, WASM, or another adapter does not mean regenerating a transport-owned SDK.",
+  },
 ]
 
 const sansIoContrast = [
@@ -112,7 +307,7 @@ const features = [
           <a href="#top" class="group flex shrink-0 items-center gap-3">
             <img
               src="/logo.webp"
-              alt=""
+              alt="Satay"
               width="36"
               height="36"
               class="size-9 rounded-lg shadow-md shadow-black/40 transition-transform group-hover:scale-[1.03]"
@@ -180,14 +375,14 @@ const features = [
 
           <div class="animate-rise delay-200 space-y-5">
             <h1
-              class="font-heading text-[2.75rem] leading-[1.02] font-semibold tracking-tight md:text-6xl lg:text-[4.25rem]"
+              class="font-heading text-[2.75rem] leading-[1.02] font-semibold tracking-tight text-balance md:text-6xl lg:text-[4.25rem]"
             >
-              OpenAPI clients
-              <span class="text-terracotta block">without picking a transport</span>
+              Rust OpenAPI clients
+              <span class="text-terracotta block">without HTTP lock-in</span>
             </h1>
-            <p class="text-cream-muted max-w-xl text-base leading-relaxed md:text-lg">
-              Satay turns a spec into request builders, response decoders, and validation newtypes. You send the
-              <code class="code-inline">http::Request</code> with reqwest, ureq, hyper, or whatever you already run.
+            <p class="text-cream-muted max-w-xl text-base leading-relaxed text-pretty md:text-lg">
+              Satay turns an OpenAPI 3.1 spec into typed request builders, response decoders, and validation newtypes.
+              It gives you the <code class="code-inline">http::Request</code>; your app decides how to send it.
             </p>
           </div>
 
@@ -203,7 +398,7 @@ const features = [
           </div>
 
           <div class="animate-rise delay-400 w-full max-w-lg space-y-2">
-            <p class="text-cream-muted text-[0.7rem] font-medium tracking-[0.22em] uppercase">Quick start</p>
+            <p class="section-label text-cream-muted">Quick start</p>
             <div class="terminal-block">
               <div class="terminal-header">
                 <span class="terminal-dot bg-terracotta/80"></span>
@@ -236,89 +431,71 @@ const features = [
         </section>
       </div>
 
-      <section class="section-anchor animate-rise delay-550 mt-24" id="origin">
-        <div class="grid gap-10 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-start lg:gap-16">
-          <div class="space-y-6">
-            <div class="space-y-3">
-              <p class="text-terracotta text-xs font-medium tracking-[0.24em] uppercase">Origin</p>
-              <h2 class="font-heading text-3xl font-semibold tracking-tight md:text-4xl">
-                Named for the skewer, not the sauce
-              </h2>
+      <section class="section-anchor animate-rise delay-550 mt-24" id="compare">
+        <div class="section-intro">
+          <p class="section-label">One action, four send paths</p>
+          <h2 class="font-heading text-3xl font-semibold tracking-tight text-balance md:text-4xl">
+            The operation stays the same
+          </h2>
+          <p class="text-cream-muted text-base leading-relaxed">
+            Satay generates typed actions for the API operation. Async reqwest, blocking reqwest, ureq, and custom
+            transports are just different ways to send that action.
+          </p>
+        </div>
+
+        <div class="code-compare-grid" aria-label="Transport examples">
+          <div class="transport-tabs">
+            {
+              highlightedTransportExamples.map((example, index) => (
+                <input
+                  class="transport-tab-input"
+                  type="radio"
+                  name="transport-example"
+                  id={`transport-tab-${example.id}`}
+                  checked={index === 0}
+                />
+              ))
+            }
+
+            <div class="transport-tab-list" role="tablist" aria-label="Transport choices">
+              {
+                highlightedTransportExamples.map((example) => (
+                  <label class="transport-tab-label" for={`transport-tab-${example.id}`} role="tab">
+                    <span class="transport-tab-label-main">{example.label}</span>
+                    <span class="transport-tab-label-meta">{example.meta}</span>
+                  </label>
+                ))
+              }
             </div>
 
-            <article class="origin-entry" aria-label="Dictionary entry for sate">
-              <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <p class="origin-headword">sate</p>
-                <p class="origin-pronunciation">/ˈsɑː.teɪ/</p>
-                <p class="origin-pronunciation italic">n.</p>
-                <p class="origin-pronunciation">(Malay, Indonesian)</p>
-              </div>
-              <p class="origin-gloss">
-                a skewer; meat (or other food) cut into pieces, threaded onto a skewer, and grilled.
-              </p>
-            </article>
-
-            <div class="text-cream-muted space-y-4 text-base leading-relaxed">
-              <p>
-                English <strong class="text-cream font-medium">satay</strong> comes from the Malay and Indonesian word
-                <strong class="text-cream font-medium">sate</strong>, which refers to both the skewer and the dish.
-                Street vendors thread marinated pieces onto bamboo sticks, grill them over charcoal, and serve them with
-                peanut sauce. The name caught on abroad as the dish spread across Southeast Asia.
-              </p>
+            <div class="transport-tab-panels">
+              {
+                highlightedTransportExamples.map((example) => (
+                  <article class:list={["transport-tab-panel", `transport-tab-panel--${example.id}`]}>
+                    <pre class="code-compare-pre"><code class="highlight-code language-rust" set:html={example.html} /></pre>
+                  </article>
+                ))
+              }
             </div>
           </div>
+        </div>
 
-          <div class="space-y-6 lg:pt-12">
-            <div class="bg-terracotta/15 text-terracotta inline-flex size-10 items-center justify-center rounded-xl">
-              <GlobeHemisphereEastIcon className="size-5" />
-            </div>
-            <p class="text-cream-muted text-base leading-relaxed">
-              Satay-rs leans into that image. OpenAPI describes the pieces: schemas, operations, constraints. Codegen
-              threads them into typed request builders and response decoders. Your application picks the transport and
-              sends them through. The skewer is the sans-IO boundary. The pieces stay the same no matter which grill you
-              use.
-            </p>
-
-            <ol class="origin-metaphor-list" aria-label="How the skewer metaphor maps to Satay">
-              <li class="origin-metaphor-item">
-                <span class="origin-metaphor-marker" aria-hidden="true"></span>
-                <div>
-                  <p class="text-cream font-medium">OpenAPI spec</p>
-                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">The marinated pieces: schemas, operations, constraints.</p>
-                </div>
-              </li>
-              <li class="origin-metaphor-item">
-                <span class="origin-metaphor-marker" aria-hidden="true"></span>
-                <div>
-                  <p class="text-cream font-medium">Codegen</p>
-                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">Threads them into builders and decoders you can read.</p>
-                </div>
-              </li>
-              <li class="origin-metaphor-item">
-                <span class="origin-metaphor-marker" aria-hidden="true"></span>
-                <div>
-                  <p class="text-cream font-medium">Your transport</p>
-                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">
-                    reqwest, ureq, hyper, tests, WASM, WebSocket, or your own client.
-                  </p>
-                </div>
-              </li>
-              <li class="origin-metaphor-item">
-                <span class="origin-metaphor-marker" aria-hidden="true"></span>
-                <div>
-                  <p class="text-cream font-medium">sans-IO boundary</p>
-                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">The skewer itself. Same pieces, different grill.</p>
-                </div>
-              </li>
-            </ol>
-          </div>
+        <div class="compare-point-grid">
+          {
+            comparisonPoints.map((point) => (
+              <article class="compare-point-card">
+                <h3 class="font-heading text-lg font-semibold tracking-tight">{point.title}</h3>
+                <p class="text-cream-muted mt-2 text-sm leading-relaxed" set:html={point.body} />
+              </article>
+            ))
+          }
         </div>
       </section>
 
       <section class="section-anchor animate-rise delay-575 mt-24" id="why-sans-io">
-        <div class="mb-10 max-w-2xl space-y-3">
-          <p class="text-terracotta text-xs font-medium tracking-[0.24em] uppercase">Why sans-IO</p>
-          <h2 class="font-heading text-3xl font-semibold tracking-tight md:text-4xl">
+        <div class="section-intro">
+          <p class="section-label">Why sans-IO</p>
+          <h2 class="font-heading text-3xl font-semibold tracking-tight text-balance md:text-4xl">
             Maintain the API, not the HTTP client
           </h2>
           <p class="text-cream-muted text-base leading-relaxed">
@@ -368,12 +545,64 @@ const features = [
           You maintain only the OpenAPI spec. Satay turns it into typed Rust. When the API changes, update the spec and
           regenerate. Your HTTP client stays separate.
         </p>
+
+        <div class="test-example-shell animate-rise mt-12" style="animation-delay: 725ms">
+          <div class="test-example-copy">
+            <p class="section-label">Tests</p>
+            <h3 class="font-heading text-2xl font-semibold tracking-tight text-balance md:text-3xl">
+              Unit-test the client without running HTTP
+            </h3>
+            <p class="text-cream-muted text-base leading-relaxed">
+              Because actions expose request construction and response decoding as plain functions, tests can assert the
+              outgoing request and decode fixture responses. No live server, no reqwest mock, no async runtime just to
+              check client behavior.
+            </p>
+            <a href={REQWEST_EXAMPLE_TEST_URL} target="_blank" rel="noreferrer" class="test-example-link">
+              <GithubLogoIcon className="size-4" />
+              View in reqwest example
+              <ArrowSquareOutIcon className="size-3.5" />
+            </a>
+          </div>
+
+          <article class="code-panel">
+            <div class="code-panel-bar">
+              <span class="code-panel-filename">test.rs</span>
+            </div>
+            <pre class="code-compare-pre"><code class="highlight-code language-rust" set:html={testingExampleHtml} /></pre>
+          </article>
+        </div>
+
+        <div class="test-example-shell animate-rise mt-14" style="animation-delay: 800ms">
+          <div class="test-example-copy">
+            <p class="section-label">Library dependencies</p>
+            <h3 class="font-heading text-2xl font-semibold tracking-tight text-balance md:text-3xl">
+              Your library does not need to depend on an HTTP backend
+            </h3>
+            <p class="text-cream-muted text-base leading-relaxed">
+              In a generated client crate like <code class="code-inline">nea-rs</code>, the public library depends on
+              Satay runtime, <code class="code-inline">http</code>, and serialization pieces. Reqwest only appears in
+              dev-dependencies for examples and tests.
+            </p>
+            <a href={NEA_CARGO_TOML_URL} target="_blank" rel="noreferrer" class="test-example-link">
+              <GithubLogoIcon className="size-4" />
+              View nea-rs Cargo.toml
+              <ArrowSquareOutIcon className="size-3.5" />
+            </a>
+          </div>
+
+          <article class="code-panel">
+            <div class="code-panel-bar">
+              <span class="code-panel-filename">Cargo.toml</span>
+            </div>
+            <pre class="code-compare-pre"><code class="highlight-code language-toml" set:html={neaCargoTomlHtml} /></pre>
+          </article>
+        </div>
       </section>
 
       <section class="section-anchor animate-rise delay-600 mt-24" id="features">
-        <div class="mb-10 max-w-2xl space-y-3">
-          <p class="text-terracotta text-xs font-medium tracking-[0.24em] uppercase">Features</p>
-          <h2 class="font-heading text-3xl font-semibold tracking-tight md:text-4xl">
+        <div class="section-intro">
+          <p class="section-label">Features</p>
+          <h2 class="font-heading text-3xl font-semibold tracking-tight text-balance md:text-4xl">
             Rust you can read, not template soup
           </h2>
           <p class="text-cream-muted text-base leading-relaxed">
@@ -404,9 +633,9 @@ const features = [
       </section>
 
       <section class="section-anchor animate-rise delay-650 mt-24" id="users">
-        <div class="mb-10 max-w-2xl space-y-3">
-          <p class="text-terracotta text-xs font-medium tracking-[0.24em] uppercase">Built with Satay</p>
-          <h2 class="font-heading text-3xl font-semibold tracking-tight md:text-4xl">
+        <div class="section-intro">
+          <p class="section-label">Built with Satay</p>
+          <h2 class="font-heading text-3xl font-semibold tracking-tight text-balance md:text-4xl">
             In the wild
           </h2>
           <p class="text-cream-muted text-base leading-relaxed">
@@ -503,8 +732,8 @@ const features = [
         id="how-it-works"
       >
         <div class="space-y-5">
-          <p class="text-terracotta text-xs font-medium tracking-[0.24em] uppercase">How it works</p>
-          <h2 class="font-heading text-3xl font-semibold tracking-tight md:text-4xl">
+          <p class="section-label">How it works</p>
+          <h2 class="font-heading text-3xl font-semibold tracking-tight text-balance md:text-4xl">
             Generate the client. Send it yourself.
           </h2>
           <ol class="text-cream-muted space-y-4 text-sm leading-relaxed">
@@ -535,6 +764,85 @@ const features = [
           </div>
           <pre class="terminal-pre"><code class="text-cream-muted"><span class="text-cream-muted/60">$</span> {GENERATE_CMD}
 <span class="text-cream-muted/60">$</span> satay --help</code></pre>
+        </div>
+      </section>
+
+      <section class="section-anchor animate-rise delay-700 mt-24" id="origin">
+        <div class="grid gap-10 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-start lg:gap-16">
+          <div class="space-y-6">
+            <div class="space-y-3">
+              <p class="section-label">Origin</p>
+              <h2 class="font-heading text-3xl font-semibold tracking-tight text-balance md:text-4xl">
+                Named for the skewer, not the sauce
+              </h2>
+            </div>
+
+            <article class="origin-entry" aria-label="Dictionary entry for sate">
+              <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <p class="origin-headword">sate</p>
+                <p class="origin-pronunciation">/ˈsɑː.teɪ/</p>
+                <p class="origin-pronunciation italic">n.</p>
+                <p class="origin-pronunciation">(Malay, Indonesian)</p>
+              </div>
+              <p class="origin-gloss">
+                a skewer; meat (or other food) cut into pieces, threaded onto a skewer, and grilled.
+              </p>
+            </article>
+
+            <div class="text-cream-muted space-y-4 text-base leading-relaxed">
+              <p>
+                English <strong class="text-cream font-medium">satay</strong> comes from the Malay and Indonesian word
+                <strong class="text-cream font-medium">sate</strong>, which refers to both the skewer and the dish.
+                Street vendors thread marinated pieces onto bamboo sticks, grill them over charcoal, and serve them with
+                peanut sauce. The name caught on abroad as the dish spread across Southeast Asia.
+              </p>
+            </div>
+          </div>
+
+          <div class="space-y-6 lg:pt-12">
+            <div class="bg-terracotta/15 text-terracotta inline-flex size-10 items-center justify-center rounded-xl">
+              <GlobeHemisphereEastIcon className="size-5" />
+            </div>
+            <p class="text-cream-muted text-base leading-relaxed">
+              Satay-rs leans into that image. OpenAPI describes the pieces: schemas, operations, constraints. Codegen
+              threads them into typed request builders and response decoders. Your application picks the transport and
+              sends them through. The skewer is the sans-IO boundary. The pieces stay the same no matter which grill you
+              use.
+            </p>
+
+            <ol class="origin-metaphor-list" aria-label="How the skewer metaphor maps to Satay">
+              <li class="origin-metaphor-item">
+                <span class="origin-metaphor-marker" aria-hidden="true"></span>
+                <div>
+                  <p class="text-cream font-medium">OpenAPI spec</p>
+                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">The marinated pieces: schemas, operations, constraints.</p>
+                </div>
+              </li>
+              <li class="origin-metaphor-item">
+                <span class="origin-metaphor-marker" aria-hidden="true"></span>
+                <div>
+                  <p class="text-cream font-medium">Codegen</p>
+                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">Threads them into builders and decoders you can read.</p>
+                </div>
+              </li>
+              <li class="origin-metaphor-item">
+                <span class="origin-metaphor-marker" aria-hidden="true"></span>
+                <div>
+                  <p class="text-cream font-medium">Your transport</p>
+                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">
+                    reqwest, ureq, hyper, tests, WASM, WebSocket, or your own client.
+                  </p>
+                </div>
+              </li>
+              <li class="origin-metaphor-item">
+                <span class="origin-metaphor-marker" aria-hidden="true"></span>
+                <div>
+                  <p class="text-cream font-medium">sans-IO boundary</p>
+                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">The skewer itself. Same pieces, different grill.</p>
+                </div>
+              </li>
+            </ol>
+          </div>
         </div>
       </section>
 

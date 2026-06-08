@@ -1,0 +1,20 @@
+---
+interface Props {
+  label: string
+  lang: string
+  code: string
+  class?: string
+}
+
+const { label, lang, code, class: className } = Astro.props
+---
+
+<div class:list={["terminal-block", className]}>
+  <div class="terminal-header">
+    <span class="terminal-dot bg-terracotta/80"></span>
+    <span class="terminal-dot bg-cream-muted/40"></span>
+    <span class="terminal-dot bg-cream-muted/25"></span>
+    <span class="terminal-label">{label}</span>
+  </div>
+  <pre class="terminal-pre highlight-pre"><code class="highlight-code" data-lang={lang}>{code}</code></pre>
+</div>

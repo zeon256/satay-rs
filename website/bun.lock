@@ -5,6 +5,9 @@
     "": {
       "name": "astro-app",
       "dependencies": {
+        "@arborium/arborium": "^2.18.0",
+        "@arborium/rust": "^2.18.0",
+        "@arborium/toml": "^2.18.0",
         "@astrojs/react": "^5",
         "@fontsource/ibm-plex-sans": "^5.2.8",
         "@fontsource/ibm-plex-serif": "^5.2.7",
@@ -33,6 +36,12 @@
     },
   },
   "packages": {
+    "@arborium/arborium": ["@arborium/arborium@2.18.0", "", {}, "sha512-Qtwxr9wkrPbU8BfeXKQxCkSLbWsNdDvZRzncJ/ZJS6BaU5MxdyGuI2STBUrKxsaibRkmB+ilsmGBwQbSZUegNw=="],
+
+    "@arborium/rust": ["@arborium/rust@2.18.0", "", {}, "sha512-C5ftXLv2oKVkO1ek8VFDDzbPdP9yKDqRZJGJWPz7qUOb5B/rTc7nPi2TJTwGiZLcFq7Zreg6MCS0E9Nz7KE0iA=="],
+
+    "@arborium/toml": ["@arborium/toml@2.18.0", "", {}, "sha512-v02gMeDBHBhMGONQtwCQ+6v/eEcw9OAOrIF75t7ejGstVk1COjP/a/YL21y3vqu4pkdUfSMzxa5xB8iZu6XFRw=="],
+
     "@astrojs/check": ["@astrojs/check@0.9.9", "", { "dependencies": { "@astrojs/language-server": "^2.16.7", "chokidar": "^4.0.3", "kleur": "^4.1.5", "yargs": "^17.7.2" }, "peerDependencies": { "typescript": "^5.0.0 || ^6.0.0" }, "bin": { "astro-check": "bin/astro-check.js" } }, "sha512-A5UW8uIuErLWEoRQvzgXpO1gTjUFtK8r7nU2Z7GewAMxUb7bPvpk11qaKKgxqXlHJWlAvaaxy+Xg28A6bmQ1Tg=="],
 
     "@astrojs/compiler": ["@astrojs/compiler@4.0.0", "", {}, "sha512-eouss7G8ygdZqHuke033VMcVw5HTZUu+PXd/h06DGDUg/jt5btPYPqh66ENWw/mU78rBrf/oeC4oqoBwMtDMNA=="],
