@@ -10,10 +10,10 @@ export type SatayUser = {
   docs?: string
 }
 
-/** Directory for project logos — keep in sync with USERS_SUBMISSION_URL. */
+/** Directory for project logos. Keep in sync with USERS_SUBMISSION_URL. */
 export const USERS_LOGO_DIR = "website/public/users"
 
-/** Path in the satay-rs repo — keep in sync with USERS_SUBMISSION_URL. */
+/** Path in the satay-rs repo. Keep in sync with USERS_SUBMISSION_URL. */
 export const USERS_FILE_PATH = "website/src/data/users.ts"
 
 export const USERS_SUBMISSION_URL =
@@ -23,7 +23,7 @@ export const satayUsers: SatayUser[] = [
   {
     name: "nea-rs",
     description:
-      "Type-safe, sans-IO Rust client for Singapore NEA real-time weather and environmental APIs.",
+      "A type-safe, sans-IO Rust client for Singapore NEA real-time weather & environmental APIs.",
     href: "https://github.com/InfiniteUnion/nea-rs",
     repo: "https://github.com/InfiniteUnion/nea-rs",
     logo: "/users/nea-rs.webp",

@@ -29,23 +29,23 @@ const { crateDownloads, githubStars } = await fetchProjectStats()
 
 const features = [
   {
-    title: "Sans-IO by design",
-    body: "Generated actions return plain http::Request values. Send them with reqwest, ureq, hyper, tests, WASM, or your own stack.",
+    title: "Sans-IO first",
+    body: "Actions build plain <code class=\"code-inline\">http::Request</code> values. Send them with reqwest, ureq, hyper, tests, WASM, or whatever you already run.",
     icon: PlugsIcon,
   },
   {
     title: "Validation newtypes",
-    body: "OpenAPI string, number, integer, and array constraints become nutype newtypes — bounds inferred down to u8 when the spec allows it.",
+    body: "String, number, integer, and array constraints from the spec become nutype newtypes. Bounds narrow to <code class=\"code-inline\">u8</code> when the maximum allows it.",
     icon: ShieldCheckIcon,
   },
   {
     title: "OpenAPI 3.1",
-    body: "Parses modern specs into a normalized IR, then emits Rust structs, enums, builders, and decoders you actually want to maintain.",
+    body: "Reads the spec into a normalized IR, then emits structs, enums, builders, and decoders as ordinary Rust you can edit.",
     icon: CodeIcon,
   },
   {
     title: "Optional adapters",
-    body: "Keep the IO-free boundary, or opt into satay-reqwest and satay-ureq when you want a compact send_with call site.",
+    body: "Stay IO-free, or pull in <code class=\"code-inline\">satay-reqwest</code> and <code class=\"code-inline\">satay-ureq</code> when you want a short <code class=\"code-inline\">send_with</code> call site.",
     icon: GitBranchIcon,
   },
 ]
@@ -93,8 +93,7 @@ const features = [
         <WarningIcon className="text-ember mt-0.5 size-5 shrink-0" />
         <p class="text-cream-muted text-sm leading-relaxed">
           <span class="text-cream font-medium">Work in progress.</span>
-          Satay currently prioritizes lta-rs clients with strong ergonomics and validation. Broader OpenAPI
-          coverage grows as the supported subset becomes explicit and tested.
+          We're focused on lta-rs-style clients right now: ergonomics that feel good in real code, validation that matches the spec. Other OpenAPI shapes come next, once we nail down what's supported and have tests to prove it.
         </p>
       </div>
 
@@ -132,11 +131,11 @@ const features = [
               class="font-heading text-[2.75rem] leading-[1.02] font-semibold tracking-tight md:text-6xl lg:text-[4.25rem]"
             >
               OpenAPI clients
-              <span class="text-terracotta block">for Rust you control</span>
+              <span class="text-terracotta block">without picking a transport</span>
             </h1>
             <p class="text-cream-muted max-w-xl text-base leading-relaxed md:text-lg">
-              Generate typed request builders, response decoders, and validation newtypes from OpenAPI —
-              then wire up reqwest, ureq, hyper, tests, WASM, or any transport yourself.
+              Satay turns a spec into request builders, response decoders, and validation newtypes. You send the
+              <code class="code-inline">http::Request</code> with reqwest, ureq, hyper, or whatever you already run.
             </p>
           </div>
 
@@ -158,10 +157,10 @@ const features = [
                 <span class="terminal-dot bg-terracotta/80"></span>
                 <span class="terminal-dot bg-cream-muted/40"></span>
                 <span class="terminal-dot bg-cream-muted/25"></span>
-                <span class="text-cream-muted ml-2 font-mono text-[0.65rem]">shell</span>
+                <span class="terminal-label">shell</span>
               </div>
               <div class="flex items-center justify-between gap-3 px-4 py-3.5">
-                <code class="text-cream font-mono text-sm break-all">{INSTALL_CMD}</code>
+                <code class="terminal-code">{INSTALL_CMD}</code>
                 <CopyButton client:load value={INSTALL_CMD} label="Copy install command" />
               </div>
             </div>
@@ -176,7 +175,7 @@ const features = [
           </div>
           <img
             src="/logo.webp"
-            alt="Satay logo — modular cubes threaded on a skewer representing OpenAPI, codegen, sync, and transport adapters"
+            alt="Satay logo: cubes on a skewer, standing in for OpenAPI, codegen, and transport adapters"
             width="480"
             height="480"
             fetchpriority="high"
@@ -189,11 +188,10 @@ const features = [
         <div class="mb-10 max-w-2xl space-y-3">
           <p class="text-terracotta text-xs font-medium tracking-[0.24em] uppercase">Features</p>
           <h2 class="font-heading text-3xl font-semibold tracking-tight md:text-4xl">
-            High-quality Rust, not template soup
+            Rust you can read, not template soup
           </h2>
           <p class="text-cream-muted text-base leading-relaxed">
-            One generated API surface. Wire reqwest, ureq, hyper, or your own stack — without maintaining
-            parallel client backends.
+            One codegen output. Plug in reqwest, ureq, hyper, or your own client without keeping separate async, blocking, and WASM backends in sync (Haha get it? Nvm).
           </p>
         </div>
 
@@ -207,7 +205,7 @@ const features = [
                     <Icon className="size-5" />
                   </div>
                   <h3 class="font-heading mb-2 text-xl font-semibold">{feature.title}</h3>
-                  <p class="text-cream-muted text-sm leading-relaxed">{feature.body}</p>
+                  <p class="text-cream-muted text-sm leading-relaxed" set:html={feature.body} />
                 </article>
               )
             })
@@ -219,10 +217,10 @@ const features = [
         <div class="mb-10 max-w-2xl space-y-3">
           <p class="text-terracotta text-xs font-medium tracking-[0.24em] uppercase">Built with Satay</p>
           <h2 class="font-heading text-3xl font-semibold tracking-tight md:text-4xl">
-            Projects in production
+            In the wild
           </h2>
           <p class="text-cream-muted text-base leading-relaxed">
-            Open-source clients and SDKs generated with Satay. Shipping your own? Add it with a pull request.
+            Open-source API clients built with Satay. Got one? Send a PR.
           </p>
         </div>
 
@@ -288,11 +286,11 @@ const features = [
             </div>
             <h3 class="font-heading text-xl font-semibold">Add your project</h3>
             <p class="text-cream-muted mt-3 text-sm leading-relaxed">
-              Open a PR that adds an entry to
-              <code class="text-cream/90 mx-1 font-mono text-[0.85em]">{USERS_FILE_PATH}</code>
-              with your project name, description, and links. Optionally add a logo under
-              <code class="text-cream/90 mx-1 font-mono text-[0.85em]">public/users/</code>
-              and set <code class="text-cream/90 mx-1 font-mono text-[0.85em]">logo</code>.
+              Fork the repo, add a row to
+              <code class="code-inline mx-1">{USERS_FILE_PATH}</code>
+              with your name, description, and links. Logo goes in
+              <code class="code-inline mx-1">public/users/</code>
+              if you have one; set <code class="code-inline mx-1">logo</code> in the entry.
             </p>
             <div class="user-card-links">
               <a href={USERS_SUBMISSION_URL} target="_blank" rel="noreferrer" class="btn btn-outline h-9 px-4 text-xs">
@@ -308,22 +306,21 @@ const features = [
         <div class="space-y-5">
           <p class="text-terracotta text-xs font-medium tracking-[0.24em] uppercase">How it works</p>
           <h2 class="font-heading text-3xl font-semibold tracking-tight md:text-4xl">
-            Generate once. Send anywhere.
+            Generate the client. Send it yourself.
           </h2>
           <ol class="text-cream-muted space-y-4 text-sm leading-relaxed">
             <li class="flex gap-3">
               <span class="text-ember font-heading text-lg leading-none">01</span>
-              <span>Install the CLI and point it at your OpenAPI document.</span>
+              <span>Install the CLI and point it at your OpenAPI file.</span>
             </li>
             <li class="flex gap-3">
               <span class="text-ember font-heading text-lg leading-none">02</span>
-              <span>Satay emits builders that construct IO-free http::Request values.</span>
+              <span>Satay writes builders that produce IO-free <code class="code-inline">http::Request</code> values.</span>
             </li>
             <li class="flex gap-3">
               <span class="text-ember font-heading text-lg leading-none">03</span>
               <span>
-                Send the <code class="text-cream/90 font-mono text-[0.85em]">http::Request</code> with
-                reqwest, ureq, hyper, or your own client — then decode with the generated action APIs.
+                Send that request with reqwest, ureq, hyper, or your own client, then decode the response with the generated action types.
               </span>
             </li>
           </ol>
@@ -335,14 +332,10 @@ const features = [
             <span class="terminal-dot bg-terracotta/80"></span>
             <span class="terminal-dot bg-cream-muted/40"></span>
             <span class="terminal-dot bg-cream-muted/25"></span>
-            <span class="text-cream-muted ml-2 font-mono text-[0.65rem]">generate</span>
+            <span class="terminal-label">generate</span>
           </div>
-          <pre class="overflow-x-auto px-4 py-4 font-mono text-[0.8rem] leading-relaxed"><code class="text-cream-muted"><span class="text-cream-muted/60">$</span> {GENERATE_CMD}
-<span class="text-cream-muted/60">$</span> satay --help
-
-<span class="text-terracotta">let</span> request: http::Request&lt;Vec&lt;u8&gt;&gt; = action.request()?;
- <span class="text-cream-muted/70">// your HTTP client sends the request</span>
-<span class="text-terracotta">let</span> decoded = GetBusArrivalAction::decode(response)?;</code></pre>
+          <pre class="terminal-pre"><code class="text-cream-muted"><span class="text-cream-muted/60">$</span> {GENERATE_CMD}
+<span class="text-cream-muted/60">$</span> satay --help</code></pre>
         </div>
       </section>
 

@@ -46,6 +46,9 @@
   --font-sans: "IBM Plex Sans", sans-serif;
   --font-heading: "IBM Plex Serif", serif;
   --font-mono: "Iosevka", ui-monospace, monospace;
+  --font-size-mono-inline: 1.05em;
+  --font-size-mono-label: 0.8125rem;
+  --font-size-mono-block: 1rem;
   --color-charcoal: var(--charcoal);
   --color-terracotta: var(--terracotta);
   --color-terracotta-deep: var(--terracotta-deep);
@@ -99,6 +102,13 @@
 
   body {
     @apply bg-background text-foreground antialiased;
+  }
+
+  code,
+  kbd,
+  samp,
+  pre {
+    @apply font-mono;
   }
 }
 
@@ -208,9 +218,24 @@
 }
 
 .meta-row {
-  @apply flex cursor-default flex-wrap items-center gap-x-2 gap-y-1 text-[0.7rem] font-medium tracking-[0.2em] text-cream-muted uppercase select-none;
+  @apply flex cursor-default flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[0.8125rem] font-medium tracking-[0.2em] text-cream-muted uppercase select-none;
 }
 
+.code-inline {
+  @apply text-cream/90 font-mono text-[length:var(--font-size-mono-inline)];
+}
+
+.terminal-label {
+  @apply ml-2 font-mono text-[length:var(--font-size-mono-label)] text-cream-muted;
+}
+
+.terminal-code {
+  @apply font-mono text-[length:var(--font-size-mono-block)] break-all text-cream;
+}
+
+.terminal-pre {
+  @apply overflow-x-auto px-4 py-4 font-mono text-[length:var(--font-size-mono-block)] leading-relaxed;
+}
 .meta-sep {
   @apply text-border/70;
 }
@@ -243,7 +268,7 @@
 }
 
 .user-card-mark {
-  @apply bg-terracotta/15 text-terracotta mb-4 inline-flex size-10 items-center justify-center rounded-xl font-mono text-xs font-semibold uppercase tracking-tight;
+  @apply bg-terracotta/15 text-terracotta mb-4 inline-flex size-10 items-center justify-center rounded-xl font-mono text-sm font-semibold uppercase tracking-tight;
 }
 
 .user-card-submit {
