@@ -1,7 +1,7 @@
-export const SITE_TITLE = "Satay: sans-io OpenAPI clients for Rust"
+export const SITE_TITLE = "Satay: sans-IO OpenAPI clients for Rust"
 
 export const SITE_DESCRIPTION =
-  "Satay generates sans-io OpenAPI clients for Rust: request builders, response decoders, and validation newtypes. You pick the HTTP stack."
+  "Satay generates sans-IO OpenAPI clients for Rust: request builders, response decoders, and validation newtypes. You pick the HTTP stack."
 
 export const OG_IMAGE_PATH = "/og.png"
 
