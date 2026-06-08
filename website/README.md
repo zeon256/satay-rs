@@ -12,7 +12,8 @@ bun run dev
 ## Scripts
 
 - `bun run dev` — local dev server
-- `bun run build` — production build
+- `bun run build` — production build (set `SITE_URL` for absolute Open Graph URLs)
+- `bun run og` — regenerate `public/og.png` from `public/og.svg` (requires `rsvg-convert`)
 - `bun run preview` — preview production build
 - `bun run typecheck` — Astro + TypeScript check
 - `bun run lint` — oxlint

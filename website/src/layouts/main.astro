@@ -1,5 +1,29 @@
 ---
 import "@/styles/global.css"
+import {
+  absoluteUrl,
+  OG_IMAGE_ALT,
+  OG_IMAGE_PATH,
+  SITE_DESCRIPTION,
+  SITE_TITLE,
+} from "@/lib/seo"
+
+interface Props {
+  title?: string
+  description?: string
+  image?: string
+  imageAlt?: string
+}
+
+const {
+  title = SITE_TITLE,
+  description = SITE_DESCRIPTION,
+  image = OG_IMAGE_PATH,
+  imageAlt = OG_IMAGE_ALT,
+} = Astro.props
+
+const canonicalURL = Astro.site ? new URL(Astro.url.pathname, Astro.site) : Astro.url
+const ogImageURL = absoluteUrl(image, Astro.site, canonicalURL.origin)
 ---
 
 <html lang="en">
@@ -7,12 +31,27 @@ import "@/styles/global.css"
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/webp" href="/logo.webp" />
-    <meta
-      name="description"
-      content="Satay generates sans-io OpenAPI clients for Rust: request builders, response decoders, and validation newtypes. You pick the HTTP stack."
-    />
+    <link rel="canonical" href={canonicalURL.href} />
+    <meta name="description" content={description} />
     <meta name="theme-color" content="#1f1c19" />
-    <title>Satay: sans-io OpenAPI clients for Rust</title>
+    <title>{title}</title>
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Satay" />
+    <meta property="og:url" content={canonicalURL.href} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={ogImageURL} />
+    <meta property="og:image:alt" content={imageAlt} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:locale" content="en_US" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImageURL} />
+    <meta name="twitter:image:alt" content={imageAlt} />
   </head>
   <body class="grain-overlay min-h-svh overflow-x-clip bg-background text-foreground antialiased">
     <slot />
