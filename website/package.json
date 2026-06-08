@@ -14,7 +14,8 @@
     "lint": "oxlint .",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
-    "typecheck": "astro check"
+    "typecheck": "astro check",
+    "og": "rsvg-convert -w 1200 -h 630 public/og.svg -o public/og.png"
   },
   "dependencies": {
     "@astrojs/react": "^5",
