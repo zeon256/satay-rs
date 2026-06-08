@@ -1,6 +1,7 @@
 ---
 import Layout from "@/layouts/main.astro"
 import { CopyButton } from "@/components/landing/CopyButton"
+import { satayUsers, USERS_FILE_PATH, USERS_SUBMISSION_URL } from "@/data/users"
 import { fetchProjectStats, formatDownloads, formatStars } from "@/lib/stats"
 import {
   ArrowSquareOutIcon,
@@ -9,9 +10,12 @@ import {
   DownloadSimpleIcon,
   GithubLogoIcon,
   GitBranchIcon,
+  PackageIcon,
   PlugsIcon,
+  PlusIcon,
   ShieldCheckIcon,
   StarIcon,
+  UsersThreeIcon,
   WarningIcon,
 } from "@phosphor-icons/react"
 
@@ -208,6 +212,95 @@ const features = [
               )
             })
           }
+        </div>
+      </section>
+
+      <section class="animate-rise delay-650 mt-24" id="users">
+        <div class="mb-10 max-w-2xl space-y-3">
+          <p class="text-terracotta text-xs font-medium tracking-[0.24em] uppercase">Built with Satay</p>
+          <h2 class="font-heading text-3xl font-semibold tracking-tight md:text-4xl">
+            Projects in production
+          </h2>
+          <p class="text-cream-muted text-base leading-relaxed">
+            Open-source clients and SDKs generated with Satay. Shipping your own? Add it with a pull request.
+          </p>
+        </div>
+
+        <div class="grid gap-4 sm:grid-cols-2">
+          {
+            satayUsers.map((user, index) => (
+              <article
+                class="user-card animate-rise"
+                style={`animation-delay: ${700 + index * 75}ms`}
+              >
+                {user.logo ? (
+                  <img
+                    src={user.logo}
+                    alt={user.logoAlt ?? `${user.name} logo`}
+                    width={40}
+                    height={40}
+                    class="user-card-logo"
+                    loading="lazy"
+                    decoding="async"
+                  />
+                ) : (
+                  <div class="user-card-mark" aria-hidden="true">
+                    {user.name.slice(0, 2)}
+                  </div>
+                )}
+                <h3 class="font-heading text-xl font-semibold">
+                  <a
+                    href={user.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    class="user-card-title inline-flex items-center gap-2"
+                  >
+                    {user.name}
+                    <ArrowSquareOutIcon className="text-cream-muted size-4 shrink-0" />
+                  </a>
+                </h3>
+                <p class="text-cream-muted mt-3 text-sm leading-relaxed">{user.description}</p>
+                <nav class="user-card-links" aria-label={`${user.name} links`}>
+                  <a href={user.repo} target="_blank" rel="noreferrer" class="user-card-link">
+                    <GithubLogoIcon className="size-3.5" />
+                    GitHub
+                  </a>
+                  {user.crates && (
+                    <a href={user.crates} target="_blank" rel="noreferrer" class="user-card-link">
+                      <PackageIcon className="size-3.5" />
+                      crates.io
+                    </a>
+                  )}
+                  {user.docs && (
+                    <a href={user.docs} target="_blank" rel="noreferrer" class="user-card-link">
+                      <BookOpenIcon className="size-3.5" />
+                      docs.rs
+                    </a>
+                  )}
+                </nav>
+              </article>
+            ))
+          }
+
+          <article class="user-card user-card-submit animate-rise" style="animation-delay: 775ms">
+            <div class="bg-terracotta/15 text-terracotta mb-4 inline-flex size-10 items-center justify-center rounded-xl">
+              <UsersThreeIcon className="size-5" />
+            </div>
+            <h3 class="font-heading text-xl font-semibold">Add your project</h3>
+            <p class="text-cream-muted mt-3 text-sm leading-relaxed">
+              Open a PR that adds an entry to
+              <code class="text-cream/90 mx-1 font-mono text-[0.85em]">{USERS_FILE_PATH}</code>
+              with your project name, description, and links. Optionally add a logo under
+              <code class="text-cream/90 mx-1 font-mono text-[0.85em]">public/users/</code>
+              and set <code class="text-cream/90 mx-1 font-mono text-[0.85em]">logo</code>.
+            </p>
+            <div class="user-card-links">
+              <a href={USERS_SUBMISSION_URL} target="_blank" rel="noreferrer" class="btn btn-outline h-9 px-4 text-xs">
+                <PlusIcon className="size-4" />
+                Submit via GitHub
+              </a>
+            </div>
+          </article>
         </div>
       </section>
 
