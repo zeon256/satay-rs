@@ -311,72 +311,76 @@ const features = [
                 class="user-card animate-rise"
                 style={`animation-delay: ${700 + index * 75}ms`}
               >
-                {user.logo ? (
-                  <img
-                    src={user.logo}
-                    alt={user.logoAlt ?? `${user.name} logo`}
-                    width={40}
-                    height={40}
-                    class="user-card-logo"
-                    loading="lazy"
-                    decoding="async"
-                  />
-                ) : (
-                  <div class="user-card-mark" aria-hidden="true">
-                    {user.name.slice(0, 2)}
-                  </div>
-                )}
-                <h3 class="font-heading text-xl font-semibold">
-                  <a
-                    href={user.href}
-                    target="_blank"
-                    rel="noreferrer"
-                    class="user-card-title inline-flex items-center gap-2"
-                  >
-                    {user.name}
-                    <ArrowSquareOutIcon className="text-cream-muted size-4 shrink-0" />
-                  </a>
-                </h3>
-                <p class="text-cream-muted mt-3 text-sm leading-relaxed">{user.description}</p>
-                <nav class="user-card-links" aria-label={`${user.name} links`}>
-                  <a href={user.repo} target="_blank" rel="noreferrer" class="user-card-link">
-                    <GithubLogoIcon className="size-3.5" />
-                    GitHub
-                  </a>
-                  {user.crates && (
-                    <a href={user.crates} target="_blank" rel="noreferrer" class="user-card-link">
-                      <PackageIcon className="size-3.5" />
-                      crates.io
+                <div class="user-card-art" aria-hidden="true">
+                  {
+                    user.logo ? (
+                      <img
+                        src={user.logo}
+                        alt=""
+                        class="user-card-bg-image"
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    ) : (
+                      <span class="user-card-bg-mark">{user.name.slice(0, 2)}</span>
+                    )
+                  }
+                </div>
+                <div class="user-card-content">
+                  <h3 class="font-heading text-xl font-semibold">
+                    <a
+                      href={user.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      class="user-card-title inline-flex items-center gap-2"
+                    >
+                      {user.name}
+                      <ArrowSquareOutIcon className="text-cream-muted size-4 shrink-0" />
                     </a>
-                  )}
-                  {user.docs && (
-                    <a href={user.docs} target="_blank" rel="noreferrer" class="user-card-link">
-                      <BookOpenIcon className="size-3.5" />
-                      docs.rs
+                  </h3>
+                  <p class="text-cream-muted mt-3 text-sm leading-relaxed">{user.description}</p>
+                  <nav class="user-card-links" aria-label={`${user.name} links`}>
+                    <a href={user.repo} target="_blank" rel="noreferrer" class="user-card-link">
+                      <GithubLogoIcon className="size-3.5" />
+                      GitHub
                     </a>
-                  )}
-                </nav>
+                    {user.crates && (
+                      <a href={user.crates} target="_blank" rel="noreferrer" class="user-card-link">
+                        <PackageIcon className="size-3.5" />
+                        crates.io
+                      </a>
+                    )}
+                    {user.docs && (
+                      <a href={user.docs} target="_blank" rel="noreferrer" class="user-card-link">
+                        <BookOpenIcon className="size-3.5" />
+                        docs.rs
+                      </a>
+                    )}
+                  </nav>
+                </div>
               </article>
             ))
           }
 
           <article class="user-card user-card-submit animate-rise" style="animation-delay: 775ms">
-            <div class="bg-terracotta/15 text-terracotta mb-4 inline-flex size-10 items-center justify-center rounded-xl">
-              <UsersThreeIcon className="size-5" />
-            </div>
-            <h3 class="font-heading text-xl font-semibold">Add your project</h3>
-            <p class="text-cream-muted mt-3 text-sm leading-relaxed">
-              Fork the repo, add a row to
-              <code class="code-inline mx-1">{USERS_FILE_PATH}</code>
-              with your name, description, and links. Logo goes in
-              <code class="code-inline mx-1">public/users/</code>
-              if you have one; set <code class="code-inline mx-1">logo</code> in the entry.
-            </p>
-            <div class="user-card-links">
-              <a href={USERS_SUBMISSION_URL} target="_blank" rel="noreferrer" class="btn btn-outline h-9 px-4 text-xs">
-                <PlusIcon className="size-4" />
-                Submit via GitHub
-              </a>
+            <div class="user-card-content">
+              <div class="bg-terracotta/15 text-terracotta mb-4 inline-flex size-10 items-center justify-center rounded-xl">
+                <UsersThreeIcon className="size-5" />
+              </div>
+              <h3 class="font-heading text-xl font-semibold">Add your project</h3>
+              <p class="text-cream-muted mt-3 text-sm leading-relaxed">
+                Fork the repo, add a row to
+                <code class="code-inline mx-1">{USERS_FILE_PATH}</code>
+                with your name, description, and links. Logo goes in
+                <code class="code-inline mx-1">public/users/</code>
+                if you have one; set <code class="code-inline mx-1">logo</code> in the entry.
+              </p>
+              <div class="user-card-links">
+                <a href={USERS_SUBMISSION_URL} target="_blank" rel="noreferrer" class="btn btn-outline h-9 px-4 text-xs">
+                  <PlusIcon className="size-4" />
+                  Submit via GitHub
+                </a>
+              </div>
             </div>
           </article>
         </div>
