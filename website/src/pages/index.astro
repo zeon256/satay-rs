@@ -1,0 +1,255 @@
+---
+import Layout from "@/layouts/main.astro"
+import { CopyButton } from "@/components/landing/CopyButton"
+import {
+  ArrowSquareOutIcon,
+  BookOpenIcon,
+  CodeIcon,
+  DownloadSimpleIcon,
+  GithubLogoIcon,
+  GitBranchIcon,
+  PlugsIcon,
+  ShieldCheckIcon,
+  WarningIcon,
+} from "@phosphor-icons/react"
+
+const GITHUB_URL = "https://github.com/zeon256/satay-rs"
+const CRATES_URL = "https://crates.io/crates/satay-cli"
+const DOCS_URL = "https://docs.rs/satay-codegen"
+const INSTALL_CMD = "cargo install satay-cli"
+const GENERATE_CMD = "satay generate --input openapi.yaml --output src/generated --rustfmt"
+
+const features = [
+  {
+    title: "Sans-IO by design",
+    body: "Generated actions return plain http::Request values. Send them with reqwest, ureq, hyper, tests, WASM, or your own stack.",
+    icon: PlugsIcon,
+  },
+  {
+    title: "Validation newtypes",
+    body: "OpenAPI string, number, integer, and array constraints become nutype newtypes — bounds inferred down to u8 when the spec allows it.",
+    icon: ShieldCheckIcon,
+  },
+  {
+    title: "OpenAPI 3.1",
+    body: "Parses modern specs into a normalized IR, then emits Rust structs, enums, builders, and decoders you actually want to maintain.",
+    icon: CodeIcon,
+  },
+  {
+    title: "Optional adapters",
+    body: "Keep the IO-free boundary, or opt into satay-reqwest and satay-ureq when you want a compact send_with call site.",
+    icon: GitBranchIcon,
+  },
+]
+
+---
+
+<Layout>
+  <div class="relative flex min-h-svh flex-col overflow-x-clip">
+    <div class="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+      <div class="bg-terracotta/12 absolute -top-28 right-[8%] size-72 rounded-full blur-3xl"></div>
+      <div class="bg-ember/10 absolute bottom-[18%] -left-20 size-64 rounded-full blur-3xl"></div>
+      <div class="skewer-diagonal absolute inset-0"></div>
+    </div>
+
+    <header
+      class="animate-rise relative z-10 mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-5 md:px-10"
+    >
+      <a href="/" class="group flex items-center gap-3">
+        <img
+          src="/logo.png"
+          alt=""
+          width="36"
+          height="36"
+          class="size-9 rounded-lg shadow-md shadow-black/40 transition-transform group-hover:scale-[1.03]"
+        />
+        <span class="font-heading text-lg font-semibold tracking-tight">Satay</span>
+      </a>
+      <nav class="flex items-center gap-1 sm:gap-2">
+        <a href={DOCS_URL} target="_blank" rel="noreferrer" class="btn-ghost">
+          <BookOpenIcon className="size-4" />
+          <span class="hidden sm:inline">Docs</span>
+        </a>
+        <a href={GITHUB_URL} target="_blank" rel="noreferrer" class="btn-ghost">
+          <GithubLogoIcon className="size-4" />
+          <span class="hidden sm:inline">GitHub</span>
+        </a>
+      </nav>
+    </header>
+
+    <main class="relative z-10 mx-auto flex w-full max-w-6xl flex-1 flex-col px-6 pb-20 md:px-10">
+      <div
+        class="border-ember/25 bg-ember/8 animate-rise delay-100 mb-10 flex items-start gap-3 rounded-2xl border px-4 py-3.5 backdrop-blur-sm"
+        role="note"
+      >
+        <WarningIcon className="text-ember mt-0.5 size-5 shrink-0" />
+        <p class="text-cream-muted text-sm leading-relaxed">
+          <span class="text-cream font-medium">Work in progress.</span>
+          Satay currently prioritizes lta-rs clients with strong ergonomics and validation. Broader OpenAPI
+          coverage grows as the supported subset becomes explicit and tested.
+        </p>
+      </div>
+
+      <div class="grid items-center gap-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)] lg:gap-16">
+        <section class="flex flex-col gap-8">
+          <p class="meta-row animate-rise delay-150" aria-label="Project metadata">
+            <span class="text-terracotta">sans-io</span>
+            <span class="meta-sep" aria-hidden="true">·</span>
+            <span>OpenAPI 3.1</span>
+            <span class="meta-sep" aria-hidden="true">·</span>
+            <span>Rust 2024</span>
+            <span class="meta-sep" aria-hidden="true">·</span>
+            <span>MSRV 1.88</span>
+          </p>
+
+          <div class="animate-rise delay-200 space-y-5">
+            <h1
+              class="font-heading text-[2.75rem] leading-[1.02] font-semibold tracking-tight md:text-6xl lg:text-[4.25rem]"
+            >
+              OpenAPI clients
+              <span class="text-terracotta block">for Rust you control</span>
+            </h1>
+            <p class="text-cream-muted max-w-xl text-base leading-relaxed md:text-lg">
+              Generate typed request builders, response decoders, and validation newtypes from OpenAPI —
+              then wire up reqwest, ureq, hyper, tests, WASM, or any transport yourself.
+            </p>
+          </div>
+
+          <div class="animate-rise delay-300 flex flex-wrap items-center gap-3">
+            <a href={CRATES_URL} target="_blank" rel="noreferrer" class="btn btn-primary">
+              <DownloadSimpleIcon className="size-5" />
+              Install CLI
+            </a>
+            <a href={GITHUB_URL} target="_blank" rel="noreferrer" class="btn btn-outline">
+              <GithubLogoIcon className="size-5" />
+              View source
+            </a>
+          </div>
+
+          <div class="animate-rise delay-400 w-full max-w-lg space-y-2">
+            <p class="text-cream-muted text-[0.7rem] font-medium tracking-[0.22em] uppercase">Quick start</p>
+            <div class="terminal-block">
+              <div class="terminal-header">
+                <span class="terminal-dot bg-terracotta/80"></span>
+                <span class="terminal-dot bg-cream-muted/40"></span>
+                <span class="terminal-dot bg-cream-muted/25"></span>
+                <span class="text-cream-muted ml-2 font-mono text-[0.65rem]">shell</span>
+              </div>
+              <div class="flex items-center justify-between gap-3 px-4 py-3.5">
+                <code class="text-cream font-mono text-sm break-all">{INSTALL_CMD}</code>
+                <CopyButton client:load value={INSTALL_CMD} label="Copy install command" />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="animate-rise delay-500 relative flex items-center justify-center">
+          <div
+            class="bg-terracotta-deep/25 absolute inset-[12%] rounded-[2.5rem] blur-3xl"
+            aria-hidden="true"
+          >
+          </div>
+          <img
+            src="/logo.png"
+            alt="Satay logo — modular cubes threaded on a skewer representing OpenAPI, codegen, sync, and transport adapters"
+            width="480"
+            height="480"
+            class="animate-logo-float relative z-10 w-full max-w-[22rem] drop-shadow-2xl drop-shadow-black/60 lg:max-w-[26rem]"
+          />
+        </section>
+      </div>
+
+      <section class="animate-rise delay-600 mt-24">
+        <div class="mb-10 max-w-2xl space-y-3">
+          <p class="text-terracotta text-xs font-medium tracking-[0.24em] uppercase">Features</p>
+          <h2 class="font-heading text-3xl font-semibold tracking-tight md:text-4xl">
+            High-quality Rust, not template soup
+          </h2>
+          <p class="text-cream-muted text-base leading-relaxed">
+            One generated API surface. Wire reqwest, ureq, hyper, or your own stack — without maintaining
+            parallel client backends.
+          </p>
+        </div>
+
+        <div class="grid gap-4 sm:grid-cols-2">
+          {
+            features.map((feature, index) => {
+              const Icon = feature.icon
+              return (
+                <article class="feature-card animate-rise" style={`animation-delay: ${650 + index * 75}ms`}>
+                  <div class="bg-terracotta/15 text-terracotta mb-4 inline-flex size-10 items-center justify-center rounded-xl">
+                    <Icon className="size-5" />
+                  </div>
+                  <h3 class="font-heading mb-2 text-xl font-semibold">{feature.title}</h3>
+                  <p class="text-cream-muted text-sm leading-relaxed">{feature.body}</p>
+                </article>
+              )
+            })
+          }
+        </div>
+      </section>
+
+      <section class="animate-rise delay-700 mt-24 grid gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:items-start">
+        <div class="space-y-5">
+          <p class="text-terracotta text-xs font-medium tracking-[0.24em] uppercase">How it works</p>
+          <h2 class="font-heading text-3xl font-semibold tracking-tight md:text-4xl">
+            Generate once. Send anywhere.
+          </h2>
+          <ol class="text-cream-muted space-y-4 text-sm leading-relaxed">
+            <li class="flex gap-3">
+              <span class="text-ember font-heading text-lg leading-none">01</span>
+              <span>Install the CLI and point it at your OpenAPI document.</span>
+            </li>
+            <li class="flex gap-3">
+              <span class="text-ember font-heading text-lg leading-none">02</span>
+              <span>Satay emits builders that construct IO-free http::Request values.</span>
+            </li>
+            <li class="flex gap-3">
+              <span class="text-ember font-heading text-lg leading-none">03</span>
+              <span>
+                Send the <code class="text-cream/90 font-mono text-[0.85em]">http::Request</code> with
+                reqwest, ureq, hyper, or your own client — then decode with the generated action APIs.
+              </span>
+            </li>
+          </ol>
+
+        </div>
+
+        <div class="terminal-block lg:mt-8">
+          <div class="terminal-header">
+            <span class="terminal-dot bg-terracotta/80"></span>
+            <span class="terminal-dot bg-cream-muted/40"></span>
+            <span class="terminal-dot bg-cream-muted/25"></span>
+            <span class="text-cream-muted ml-2 font-mono text-[0.65rem]">generate</span>
+          </div>
+          <pre class="overflow-x-auto px-4 py-4 font-mono text-[0.8rem] leading-relaxed"><code class="text-cream-muted"><span class="text-cream-muted/60">$</span> {GENERATE_CMD}
+<span class="text-cream-muted/60">$</span> satay --help
+
+<span class="text-terracotta">let</span> request: http::Request&lt;Vec&lt;u8&gt;&gt; = action.request()?;
+ <span class="text-cream-muted/70">// your HTTP client sends the request</span>
+<span class="text-terracotta">let</span> decoded = GetBusArrivalAction::decode(response)?;</code></pre>
+        </div>
+      </section>
+
+      <footer
+        class="border-border/40 animate-rise delay-800 mt-24 flex flex-col gap-6 border-t pt-8 sm:flex-row sm:items-center sm:justify-between"
+      >
+        <p class="text-cream-muted text-sm">Apache-2.0 / MIT · zeon256/satay-rs</p>
+        <nav class="flex flex-wrap items-center gap-5 text-sm">
+          <a href={DOCS_URL} target="_blank" rel="noreferrer" class="footer-link">
+            <ArrowSquareOutIcon className="size-3.5" />
+            docs.rs
+          </a>
+          <a href={CRATES_URL} target="_blank" rel="noreferrer" class="footer-link">
+            <ArrowSquareOutIcon className="size-3.5" />
+            crates.io
+          </a>
+          <a href={GITHUB_URL} target="_blank" rel="noreferrer" class="footer-link">
+            <ArrowSquareOutIcon className="size-3.5" />
+            GitHub
+          </a>
+        </nav>
+      </footer>
+    </main>
+  </div>
+</Layout>
