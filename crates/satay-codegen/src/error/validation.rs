@@ -253,7 +253,10 @@ pub enum ValidationError {
     #[error("{context}.anyOf[{index}] must be a local component schema reference")]
     UnsupportedAnyOfBranch { context: String, index: usize },
 
-    /// An `anyOf` schema declares no branches.
+    /// A composition schema declares no branches.
+    ///
+    /// Raised for empty `anyOf` and, today, for empty component `allOf` that is routed
+    /// through the shared empty composition-shape check.
     ///
     /// Error message: `{context} must declare at least one `anyOf` branch`
     #[error("{context} must declare at least one `anyOf` branch")]
