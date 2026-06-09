@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.2.0...satay-codegen-v0.3.0) - 2026-06-09
+
+### Added
+
+- *(codegen)* discriminator union support for oneOf
+- *(codegen)* add initial support for allOf
+
+### Fixed
+
+- *(codegen)* apply implicit discriminator mapping defaults
+
+### Other
+
+- *(codegen)* add docs for how much allOf is supported
+- *(codegen)* add more negative test caes
+
 ## [0.2.0](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.1.4...satay-codegen-v0.2.0) - 2026-06-09
 
 ### Added
