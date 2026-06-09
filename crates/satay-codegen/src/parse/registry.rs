@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use crate::ident::{type_ident, unique_ident};
 use crate::model::{
     Component, ComponentKind, ConstrainedType, EnumVariant, RangeScalar, RangeType, RangeTypeRef,
-    TypeRef, UnionVariant, Validation,
+    TypeRef, Union, Validation,
 };
 
 #[derive(Debug, Default)]
@@ -83,14 +83,14 @@ impl TypeRegistry {
         &mut self,
         type_name_hint: &str,
         description: Option<String>,
-        variants: Vec<UnionVariant>,
+        union: Union,
     ) -> TypeRef {
         let rust_name = self.generated_type_name(type_name_hint);
 
         self.inline_unions.push(Component {
             rust_name: rust_name.clone(),
             description,
-            kind: ComponentKind::Union(variants),
+            kind: ComponentKind::Union(union),
         });
 
         TypeRef::Named(rust_name)

@@ -1,12 +1,12 @@
 use crate::ident::{field_ident, type_ident, unique_ident, variant_ident};
 use crate::model::{
     Component, ComponentKind, ConstrainedType, EnumVariant, Field, RangeType, RangeTypeRef,
-    TypeRef, UnionVariant,
+    TypeRef, Union, UnionTag, UnionVariant,
 };
 use crate::parse::registry::TypeRegistry;
 use crate::parse::validate::{
     ValidatedComponent, ValidatedComponentKind, ValidatedDocument, ValidatedField, ValidatedType,
-    ValidatedTypeKind, ValidatedUnionVariant,
+    ValidatedTypeKind, ValidatedUnion, ValidatedUnionVariant,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -116,8 +116,8 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
             (ValidatedTypeKind::Enum(variants), false, None) => {
                 ComponentKind::Enum(variants.clone())
             }
-            (ValidatedTypeKind::AnyOf(variants), false, None) => {
-                ComponentKind::Union(self.parse_union_variants(variants, registry))
+            (ValidatedTypeKind::AnyOf(union), false, None) => {
+                ComponentKind::Union(self.parse_union(union, registry))
             }
             (ValidatedTypeKind::Range(scalar), false, None) => ComponentKind::Range(RangeType {
                 rust_name,
@@ -202,13 +202,22 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
                 description.clone(),
                 registry,
             ),
-            ValidatedTypeKind::AnyOf(variants) => {
-                let variants = self.parse_union_variants(variants, registry);
-                registry.inline_union_ref(type_name_hint, description.clone(), variants)
+            ValidatedTypeKind::AnyOf(union) => {
+                let union = self.parse_union(union, registry);
+                registry.inline_union_ref(type_name_hint, description.clone(), union)
             }
             ValidatedTypeKind::Range(scalar) => {
                 registry.inline_range_ref(type_name_hint, description.clone(), *scalar)
             }
+        }
+    }
+
+    fn parse_union(&mut self, union: &ValidatedUnion, registry: &mut TypeRegistry) -> Union {
+        Union {
+            variants: self.parse_union_variants(&union.variants, registry),
+            tag: union.tag.as_ref().map(|tag| UnionTag {
+                property_name: tag.property_name.clone(),
+            }),
         }
     }
 
@@ -222,6 +231,7 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
             .map(|variant| UnionVariant {
                 rust_name: variant.rust_name.clone(),
                 ty: self.component_ref(&variant.type_name, registry),
+                tag_value: variant.tag_value.clone(),
             })
             .collect()
     }

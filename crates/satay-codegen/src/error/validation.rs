@@ -268,6 +268,68 @@ pub enum ValidationError {
     #[error("{context} forms a recursive `anyOf` cycle through schema `{schema}`")]
     RecursiveAnyOf { context: String, schema: String },
 
+    /// A discriminator union does not use exactly one non-empty `anyOf` or `oneOf` branch list.
+    ///
+    /// Error message: `{context} discriminator unions must declare exactly one non-empty `anyOf` or `oneOf` branch list`
+    #[error(
+        "{context} discriminator unions must declare exactly one non-empty `anyOf` or `oneOf` branch list"
+    )]
+    InvalidDiscriminatorUnion { context: String },
+
+    /// A discriminator union branch is not a local component schema reference.
+    ///
+    /// Error message: `{context}.{keyword}[{index}] must be a local component schema reference when using `discriminator``
+    #[error(
+        "{context}.{keyword}[{index}] must be a local component schema reference when using `discriminator`"
+    )]
+    UnsupportedDiscriminatorBranch {
+        context: String,
+        keyword: &'static str,
+        index: usize,
+    },
+
+    /// A discriminator union branch target does not generate as an object struct.
+    ///
+    /// Error message: `{context} discriminator branch `{schema}` must be an object struct component`
+    #[error("{context} discriminator branch `{schema}` must be an object struct component")]
+    DiscriminatorBranchNotObject { context: String, schema: String },
+
+    /// A discriminator branch object contains the discriminator property.
+    ///
+    /// Error message: `{context} discriminator branch `{schema}` contains discriminator property `{property}``
+    #[error(
+        "{context} discriminator branch `{schema}` contains discriminator property `{property}`"
+    )]
+    DiscriminatorPropertyConflict {
+        context: String,
+        schema: String,
+        property: String,
+    },
+
+    /// A discriminator mapping entry targets a non-local schema or a schema outside the union branches.
+    ///
+    /// Error message: `{context}.discriminator.mapping[{value:?}] targets `{target}`, which is not a local union branch schema`
+    #[error(
+        "{context}.discriminator.mapping[{value:?}] targets `{target}`, which is not a local union branch schema"
+    )]
+    InvalidDiscriminatorMapping {
+        context: String,
+        value: String,
+        target: String,
+    },
+
+    /// Multiple discriminator mapping values target the same union branch schema.
+    ///
+    /// Error message: `{context}.discriminator.mapping maps multiple values to branch schema `{schema}``
+    #[error("{context}.discriminator.mapping maps multiple values to branch schema `{schema}`")]
+    DuplicateDiscriminatorMapping { context: String, schema: String },
+
+    /// A discriminator mapping omits one of the union branch schemas.
+    ///
+    /// Error message: `{context}.discriminator.mapping does not map branch schema `{schema}``
+    #[error("{context}.discriminator.mapping does not map branch schema `{schema}`")]
+    MissingDiscriminatorMapping { context: String, schema: String },
+
     // -- Schema constraint validation --
     /// A string schema specifies a `minLength` greater than its `maxLength`.
     ///

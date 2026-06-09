@@ -49,7 +49,7 @@ pub(crate) struct Component {
 pub(crate) enum ComponentKind {
     Struct(Vec<Field>),
     Enum(Vec<EnumVariant>),
-    Union(Vec<UnionVariant>),
+    Union(Union),
     Range(RangeType),
     Alias(TypeRef),
     Nutype(ConstrainedType),
@@ -145,9 +145,21 @@ pub(crate) struct EnumVariant {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct Union {
+    pub(crate) variants: Vec<UnionVariant>,
+    pub(crate) tag: Option<UnionTag>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct UnionTag {
+    pub(crate) property_name: String,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct UnionVariant {
     pub(crate) rust_name: String,
     pub(crate) ty: TypeRef,
+    pub(crate) tag_value: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

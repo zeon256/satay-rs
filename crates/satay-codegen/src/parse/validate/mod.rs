@@ -98,8 +98,19 @@ pub(crate) enum ValidatedTypeKind {
     Bool,
     Array(Box<ValidatedType>),
     Enum(Vec<EnumVariant>),
-    AnyOf(Vec<ValidatedUnionVariant>),
+    AnyOf(ValidatedUnion),
     Range(RangeScalar),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ValidatedUnion {
+    pub(crate) variants: Vec<ValidatedUnionVariant>,
+    pub(crate) tag: Option<ValidatedUnionTag>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ValidatedUnionTag {
+    pub(crate) property_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +118,7 @@ pub(crate) struct ValidatedUnionVariant {
     pub(crate) rust_name: String,
     pub(crate) type_name: String,
     pub(crate) schema_name: String,
+    pub(crate) tag_value: Option<String>,
 }
 
 #[derive(Debug)]

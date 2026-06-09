@@ -1814,6 +1814,137 @@ components:
 }
 
 #[test]
+fn any_of_discriminator_generates_tagged_union_types() {
+    let files = satay_codegen::generate(
+        r##"
+openapi: 3.1.0
+info:
+  title: Search API
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: search
+      responses:
+        '200':
+          description: Search result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResult'
+components:
+  schemas:
+    User:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    Organization:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    SearchResult:
+      anyOf:
+        - $ref: '#/components/schemas/User'
+        - $ref: '#/components/schemas/Organization'
+      discriminator:
+        propertyName: kind
+"##,
+    )
+    .expect("generate discriminator anyOf fixture");
+
+    let types_rs = find_file(&files, "types.rs");
+    assert!(
+        types_rs
+            .contents
+            .contains("#[cfg_attr(feature = \"serde\", serde(tag = \"kind\"))]")
+    );
+    assert!(
+        !types_rs
+            .contents
+            .contains("#[cfg_attr(feature = \"serde\", serde(untagged))]")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("#[cfg_attr(feature = \"serde\", serde(rename = \"User\"))]")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("#[cfg_attr(feature = \"serde\", serde(rename = \"Organization\"))]")
+    );
+}
+
+#[test]
+fn one_of_discriminator_mapping_generates_variant_renames() {
+    let files = satay_codegen::generate(
+        r##"
+openapi: 3.1.0
+info:
+  title: Pet API
+  version: 1.0.0
+paths:
+  /pet:
+    get:
+      operationId: getPet
+      responses:
+        '200':
+          description: Pet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+components:
+  schemas:
+    Dog:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+    Cat:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+    Pet:
+      oneOf:
+        - $ref: '#/components/schemas/Dog'
+        - $ref: '#/components/schemas/Cat'
+      discriminator:
+        propertyName: kind
+        mapping:
+          dog: '#/components/schemas/Dog'
+          cat: Cat
+"##,
+    )
+    .expect("generate discriminator oneOf fixture");
+
+    let types_rs = find_file(&files, "types.rs");
+    assert!(
+        types_rs
+            .contents
+            .contains("#[cfg_attr(feature = \"serde\", serde(tag = \"kind\"))]")
+    );
+    let union_start = types_rs
+        .contents
+        .find("pub enum Pet")
+        .expect("Pet union exists");
+    let union = &types_rs.contents[union_start..];
+    assert!(union.contains("#[cfg_attr(feature = \"serde\", serde(rename = \"dog\"))]"));
+    assert!(union.contains("#[cfg_attr(feature = \"serde\", serde(rename = \"cat\"))]"));
+}
+
+#[test]
 fn generated_any_of_deserializes_with_first_matching_branch() {
     let files = satay_codegen::generate(
         r##"
@@ -1894,6 +2025,120 @@ mod tests {
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(crate_dir, "test", &[], "anyOf generated crate tests");
+}
+
+#[test]
+fn generated_discriminator_union_serializes_and_deserializes_with_tag() {
+    let files = satay_codegen::generate(
+        r##"
+openapi: 3.1.0
+info:
+  title: Pet API
+  version: 1.0.0
+paths:
+  /pet:
+    get:
+      operationId: getPet
+      responses:
+        '200':
+          description: Pet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Pet'
+components:
+  schemas:
+    Dog:
+      type: object
+      required:
+        - name
+        - barkVolume
+      properties:
+        name:
+          type: string
+        barkVolume:
+          type: integer
+    Cat:
+      type: object
+      required:
+        - name
+        - lives
+      properties:
+        name:
+          type: string
+        lives:
+          type: integer
+    Pet:
+      oneOf:
+        - $ref: '#/components/schemas/Dog'
+        - $ref: '#/components/schemas/Cat'
+      discriminator:
+        propertyName: kind
+        mapping:
+          dog: '#/components/schemas/Dog'
+          cat: Cat
+"##,
+    )
+    .expect("generate discriminator runtime fixture");
+
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+
+    let runtime_path = runtime_path_toml();
+
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::*;
+
+    #[test]
+    fn tagged_union_deserializes_response() {
+        let response = satay_runtime::ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: br#"{"kind":"cat","name":"Milo","lives":9}"#.to_vec(),
+        };
+
+        let decoded = decode_get_pet_response(response).expect("decoded response");
+        match decoded {
+            GetPetResponse::Ok(Pet::Cat(value)) => {
+                assert_eq!(value.name, "Milo");
+                assert_eq!(value.lives, 9);
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tagged_union_serializes_tag() {
+        let value = Pet::Dog(Dog {
+            name: "Rex".to_owned(),
+            bark_volume: 7,
+        });
+        let encoded = serde_json::to_value(value).expect("serialized pet");
+        assert_eq!(
+            encoded,
+            serde_json::json!({
+                "kind": "dog",
+                "name": "Rex",
+                "barkVolume": 7
+            })
+        );
+    }
+}
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    run_temp_cargo(
+        crate_dir,
+        "test",
+        &[],
+        "discriminator generated crate tests",
+    );
 }
 
 #[test]
