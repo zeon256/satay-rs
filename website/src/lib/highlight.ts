@@ -77,6 +77,32 @@ export async function highlightRust(source: string): Promise<string> {
   return await grammar.highlight(source)
 }
 
+export function wrapHighlightLines(
+  html: string,
+  lineNumbers: readonly number[]
+): string {
+  if (lineNumbers.length === 0) {
+    return html
+  }
+
+  const highlighted = new Set(lineNumbers)
+  const lines = html.split("\n")
+
+  return lines
+    .map((line, index) => {
+      const isLast = index === lines.length - 1
+      const lineBreak = isLast ? "" : "\n"
+
+      if (highlighted.has(index)) {
+        // Keep the newline inside the block span; an external one renders as a blank line in <pre>.
+        return `<span class="transport-variant-line">${line}${lineBreak}</span>`
+      }
+
+      return isLast ? line : `${line}\n`
+    })
+    .join("")
+}
+
 export async function highlightToml(source: string): Promise<string> {
   const grammar = await loadTomlGrammar()
 

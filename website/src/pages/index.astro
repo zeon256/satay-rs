@@ -2,7 +2,12 @@
 import Layout from "@/layouts/main.astro"
 import { CopyButton } from "@/components/landing/CopyButton"
 import { satayUsers, USERS_FILE_PATH, USERS_SUBMISSION_URL } from "@/data/users"
-import { highlightRust, highlightToml, highlightYaml } from "@/lib/highlight"
+import {
+  highlightRust,
+  highlightToml,
+  highlightYaml,
+  wrapHighlightLines,
+} from "@/lib/highlight"
 import { SITEMAP_INDEX_PATH } from "@/lib/sitemap"
 import { fetchProjectStats, formatDownloads, formatStars } from "@/lib/stats"
 import {
@@ -48,12 +53,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .get_bus_arrival(83139)
         .service_no(BusServiceNumber::try_new("15")?);
 
-    let _response = action
-        .send_with(&reqwest::Client::new())
+    let client = reqwest::Client::new();
+    let _response = action.send_with(&client)
         .await?;
 
     Ok(())
 }`,
+    variantLines: [1, 11, 13],
   },
   {
     id: "reqwest-blocking",
@@ -69,11 +75,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         .get_bus_arrival(83139)
         .service_no(BusServiceNumber::try_new("15")?);
 
-    let _response = action
-        .send_with(&reqwest::blocking::Client::new())?;
+    let client = reqwest::blocking::Client::new();
+    let _response = action.send_with(&client)?;
 
     Ok(())
 }`,
+    variantLines: [1, 4, 10],
   },
   {
     id: "ureq",
@@ -89,15 +96,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         .get_bus_arrival(83139)
         .service_no(BusServiceNumber::try_new("15")?);
 
-    let agent: ureq::Agent = ureq::Agent::config_builder()
+    let client: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .build()
         .into();
 
-    let _response = action.send_with(&agent)?;
+    let _response = action.send_with(&client)?;
 
     Ok(())
 }`,
+    variantLines: [1, 4, 10, 11, 12, 13],
   },
   {
     id: "diy",
@@ -125,6 +133,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }`,
+    variantLines: [0, 1, 2, 11, 12, 14, 15, 16, 17, 18],
   },
 ] as const
 
@@ -328,10 +337,14 @@ const [
 ] = await Promise.all([
   fetchProjectStats(),
   Promise.all(
-    transportExamples.map(async (example) => ({
-      ...example,
-      html: await highlightRust(example.code),
-    })),
+    transportExamples.map(async (example) => {
+      const html = await highlightRust(example.code)
+
+      return {
+        ...example,
+        html: wrapHighlightLines(html, example.variantLines),
+      }
+    }),
   ),
   highlightRust(testingExampleCode),
   highlightToml(neaCargoTomlCode),

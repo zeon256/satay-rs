@@ -476,6 +476,15 @@
   scrollbar-color: oklch(0.52 0.11 42 / 55%) transparent;
 }
 
+.transport-variant-line {
+  display: block;
+  margin-inline: -1rem;
+  padding-inline: 1rem;
+  padding-inline-start: calc(1rem - 3px);
+  border-inline-start: 3px solid oklch(0.66 0.2 48 / 45%);
+  background: oklch(0.66 0.2 48 / 6%);
+}
+
 .compare-point-grid {
   @apply mt-4 grid gap-3 md:grid-cols-3;
 }
