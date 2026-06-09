@@ -101,20 +101,15 @@ pub(super) fn schema_type_wire(schema_type: OasSchemaType) -> &'static str {
     }
 }
 
-pub(super) fn reject_one_of_all_of(
+pub(super) fn reject_one_of(
     schema: &OasObjectSchema,
     context: &str,
 ) -> Result<(), ValidationError> {
-    for (keyword, present) in [
-        ("oneOf", !schema.one_of.is_empty()),
-        ("allOf", !schema.all_of.is_empty()),
-    ] {
-        if present {
-            return Err(ValidationError::UnsupportedComposition {
-                context: context.to_owned(),
-                keyword,
-            });
-        }
+    if !schema.one_of.is_empty() {
+        return Err(ValidationError::UnsupportedComposition {
+            context: context.to_owned(),
+            keyword: "oneOf",
+        });
     }
     Ok(())
 }

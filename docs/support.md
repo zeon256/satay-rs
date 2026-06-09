@@ -8,6 +8,7 @@ Satay targets OpenAPI 3.1.x and a small, typed subset.
 - `components.schemas` as Rust structs, string enums, primitive aliases, and constrained newtypes.
 - Schema types: `string` (`unixtime` recognized specially; other formats are plain strings), `integer` (`int32`, `int64`, `unixtime`, or no format, with Rust integer inference from bounds), `number` (`float`, `double`, or no format), `boolean`, arrays, nullable values expressed as `type: [T, "null"]`, and local `#/components/schemas/...` references. Unformatted non-negative open-ended integers infer `u64`; `unixtime` generates `satay_runtime::OffsetDateTime` from Unix timestamp seconds.
 - `anyOf` unions whose branches are local `#/components/schemas/...` references, rendered as ordered serde-untagged Rust enums.
+- `allOf` component object schemas whose branches are local component object references or inline object branches, rendered by flattening branch fields into one Rust struct.
 - Operations for standard HTTP methods with explicit `operationId`, or inferred names from method + path.
 - Path, query, and header parameters declared with `schema`.
 - Path-level parameters with operation-level overrides.
@@ -48,7 +49,7 @@ These are known gaps rather than silent compatibility promises:
 - Default response bodies.
 - Inline object schemas outside `components.schemas`.
 - Map schemas / `additionalProperties`.
-- `anyOf` inline branches, `anyOf` parameters, recursive `anyOf` cycles, full JSON Schema `anyOf` validation semantics, `oneOf`, `allOf`, and discriminator-based polymorphism.
+- `anyOf` inline branches, `anyOf` parameters, recursive `anyOf` cycles, full JSON Schema `anyOf` validation semantics, `allOf` scalar/intersection semantics, `oneOf`, and discriminator-based polymorphism.
 - JSON Schema boolean schemas (`true` / `false`).
 - `$ref` siblings other than Satay-owned `x-satay` extensions.
 - Non-string enums.

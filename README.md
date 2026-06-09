@@ -104,7 +104,7 @@ let decoded = generated::GetBusArrivalAction::decode(response)?;
  
 ## What It Generates
 
-- Rust structs, string enums, primitive aliases, and constrained newtypes from `components.schemas`.
+- Rust structs, flattened `allOf` object structs, string enums, primitive aliases, and constrained newtypes from `components.schemas`.
 - Operation input builders with required constructor arguments and chainable optional setters.
 - Request builders that return `http::Request<Vec<u8>>` without choosing a transport.
 - Response decoders for known JSON responses, preserving unknown statuses as `UnexpectedStatus(http::StatusCode, Vec<u8>)`.

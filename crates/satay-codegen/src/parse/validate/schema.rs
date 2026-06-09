@@ -1,13 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::mem;
 
 use oas3::spec::{
     ObjectSchema as OasObjectSchema, Schema as OasSchema, SchemaType as OasSchemaType,
+    SchemaTypeSet as OasSchemaTypeSet,
 };
 
 use super::super::helpers::{optional_description, schema_description};
 use super::super::reference::{
-    object_schema, reject_one_of_all_of, schema_ref, schema_ref_type_name,
-    schema_type_and_nullable, schema_type_wire,
+    object_schema, reject_one_of, schema_ref, schema_ref_type_name, schema_type_and_nullable,
+    schema_type_wire,
 };
 use super::super::resolve::{ResolvedDocument, refs::local_ref_name};
 use super::constraint::{parse_integer_type, parse_validation, reject_keyword};
@@ -33,7 +35,13 @@ pub(super) fn validate_components(
     let mut parsed = Vec::with_capacity(components.schemas.len());
 
     for (schema_name, schema) in &components.schemas {
-        parsed.push(validate_component_schema(document, schema_name, schema)?);
+        let mut stack = vec![];
+        parsed.push(validate_component_schema(
+            document,
+            schema_name,
+            schema,
+            &mut stack,
+        )?);
     }
 
     reject_any_of_cycles(&parsed)?;
@@ -58,7 +66,13 @@ pub(super) fn validate_type_schema(
     }
 
     let schema = object_schema(schema, context)?;
-    reject_one_of_all_of(schema, context)?;
+    reject_one_of(schema, context)?;
+    if !schema.all_of.is_empty() {
+        return Err(ValidationError::UnsupportedComposition {
+            context: context.to_owned(),
+            keyword: "allOf",
+        });
+    }
     if schema_is_any_of_union(schema) {
         return validate_any_of_type_schema(schema, context);
     }
@@ -119,6 +133,7 @@ fn validate_component_schema(
     document: &ResolvedDocument<'_>,
     schema_name: &str,
     schema: &OasSchema,
+    stack: &mut Vec<String>,
 ) -> Result<ValidatedComponent, ValidationError> {
     let context = format!("schema `{schema_name}`");
     let description = schema_description(schema);
@@ -126,9 +141,16 @@ fn validate_component_schema(
         ValidatedComponentKind::Reference(schema_ref_type_name(reference)?)
     } else {
         let schema = object_schema(schema, &context)?;
-        reject_one_of_all_of(schema, &context)?;
+        reject_one_of(schema, &context)?;
         if schema_is_any_of_union(schema) {
             ValidatedComponentKind::Type(validate_any_of_type_schema(schema, &context)?)
+        } else if !schema.all_of.is_empty() {
+            ValidatedComponentKind::Struct(validate_all_of_struct_properties(
+                document,
+                schema_name,
+                schema,
+                stack,
+            )?)
         } else {
             let (schema_type, nullable) = schema_type_and_nullable(schema, &context)?;
 
@@ -248,11 +270,336 @@ fn validate_any_of_type_schema(
     })
 }
 
+fn validate_all_of_struct_properties(
+    document: &ResolvedDocument<'_>,
+    schema_name: &str,
+    schema: &OasObjectSchema,
+    stack: &mut Vec<String>,
+) -> Result<Vec<ValidatedField>, ValidationError> {
+    let context = format!("schema `{schema_name}`");
+    reject_all_of_sibling_keywords(schema, &context)?;
+    push_all_of_schema(schema_name, stack)?;
+
+    let mut collector = AllOfFieldCollector::new(document, stack);
+    let result = collector.collect(schema_name, schema);
+    collector.pop_schema();
+    result
+}
+
+struct AllOfFieldCollector<'a, 'doc> {
+    document: &'a ResolvedDocument<'doc>,
+    stack: &'a mut Vec<String>,
+    fields: Vec<ValidatedField>,
+    used: BTreeSet<String>,
+}
+
+impl<'a, 'doc> AllOfFieldCollector<'a, 'doc> {
+    fn new(document: &'a ResolvedDocument<'doc>, stack: &'a mut Vec<String>) -> Self {
+        Self {
+            document,
+            stack,
+            fields: vec![],
+            used: BTreeSet::new(),
+        }
+    }
+
+    fn collect(
+        &mut self,
+        schema_name: &str,
+        schema: &OasObjectSchema,
+    ) -> Result<Vec<ValidatedField>, ValidationError> {
+        for (index, branch) in schema.all_of.iter().enumerate() {
+            self.collect_branch_fields(schema_name, branch, index)?;
+        }
+
+        Ok(mem::take(&mut self.fields))
+    }
+
+    fn pop_schema(&mut self) {
+        self.stack.pop();
+    }
+
+    fn collect_branch_fields(
+        &mut self,
+        schema_name: &str,
+        branch: &OasSchema,
+        index: usize,
+    ) -> Result<(), ValidationError> {
+        let context = format!("schema `{schema_name}`");
+        if let Some(reference) = schema_ref(branch, &context)? {
+            let branch_schema_name = local_ref_name(reference, "schemas").map_err(|_| {
+                ValidationError::UnsupportedAllOfBranch {
+                    context: context.clone(),
+                    index,
+                }
+            })?;
+            return self.collect_component_fields(&branch_schema_name, &context, index);
+        }
+
+        let schema = object_schema(branch, &context).map_err(|_| {
+            ValidationError::UnsupportedAllOfBranch {
+                context: context.clone(),
+                index,
+            }
+        })?;
+        self.collect_object_fields(schema_name, schema, &context, index, false)
+    }
+
+    fn collect_component_fields(
+        &mut self,
+        component_schema_name: &str,
+        context: &str,
+        index: usize,
+    ) -> Result<(), ValidationError> {
+        push_all_of_schema(component_schema_name, self.stack)?;
+
+        let schema = component_schema(self.document, component_schema_name)?;
+        let result =
+            self.collect_component_schema_fields(component_schema_name, schema, context, index);
+
+        self.stack.pop();
+        result
+    }
+
+    fn collect_component_schema_fields(
+        &mut self,
+        component_schema_name: &str,
+        schema: &OasSchema,
+        context: &str,
+        index: usize,
+    ) -> Result<(), ValidationError> {
+        if let Some(reference) = schema_ref(schema, context)? {
+            let target_schema_name = local_ref_name(reference, "schemas").map_err(|_| {
+                ValidationError::UnsupportedAllOfBranch {
+                    context: context.to_owned(),
+                    index,
+                }
+            })?;
+            return self.collect_component_fields(&target_schema_name, context, index);
+        }
+
+        let schema = object_schema(schema, context).map_err(|_| {
+            ValidationError::UnsupportedAllOfBranch {
+                context: context.to_owned(),
+                index,
+            }
+        })?;
+        self.collect_object_fields(component_schema_name, schema, context, index, true)
+    }
+
+    fn collect_object_fields(
+        &mut self,
+        schema_name: &str,
+        schema: &OasObjectSchema,
+        context: &str,
+        index: usize,
+        allow_all_of: bool,
+    ) -> Result<(), ValidationError> {
+        reject_one_of(schema, context)?;
+        if !schema.any_of.is_empty() {
+            return Err(ValidationError::UnsupportedAllOfBranch {
+                context: context.to_owned(),
+                index,
+            });
+        }
+
+        if !schema.all_of.is_empty() {
+            if !allow_all_of {
+                return Err(ValidationError::UnsupportedAllOfBranch {
+                    context: context.to_owned(),
+                    index,
+                });
+            }
+            let all_of_context = format!("schema `{schema_name}`");
+            reject_all_of_sibling_keywords(schema, &all_of_context)?;
+            for (nested_index, branch) in schema.all_of.iter().enumerate() {
+                self.collect_branch_fields(schema_name, branch, nested_index)?;
+            }
+            return Ok(());
+        }
+
+        reject_all_of_object_branch_keywords(schema, context, index)?;
+
+        if schema.properties.is_empty() {
+            return Err(ValidationError::UnsupportedAllOfBranch {
+                context: context.to_owned(),
+                index,
+            });
+        }
+
+        let branch_fields = validate_struct_properties(self.document, schema_name, schema)?;
+        self.extend_fields(context, branch_fields)
+    }
+
+    fn extend_fields(
+        &mut self,
+        context: &str,
+        branch_fields: Vec<ValidatedField>,
+    ) -> Result<(), ValidationError> {
+        for field in branch_fields {
+            if !self.used.insert(field.wire_name.clone()) {
+                return Err(ValidationError::DuplicateAllOfProperty {
+                    context: context.to_owned(),
+                    property: field.wire_name,
+                });
+            }
+            self.fields.push(field);
+        }
+
+        Ok(())
+    }
+}
+
+fn push_all_of_schema(schema_name: &str, stack: &mut Vec<String>) -> Result<(), ValidationError> {
+    if let Some(index) = stack.iter().position(|visited| visited == schema_name) {
+        return Err(ValidationError::RecursiveAllOf {
+            context: format!("schema `{}`", stack[index]),
+            schema: schema_name.to_owned(),
+        });
+    }
+
+    stack.push(schema_name.to_owned());
+    Ok(())
+}
+
+fn component_schema<'a>(
+    document: &ResolvedDocument<'a>,
+    schema_name: &str,
+) -> Result<&'a OasSchema, ValidationError> {
+    document
+        .spec
+        .components
+        .as_ref()
+        .and_then(|components| components.schemas.get(schema_name))
+        .ok_or_else(|| ValidationError::MissingJsonPointerToken {
+            token: schema_name.to_owned(),
+        })
+}
+
+fn reject_all_of_sibling_keywords(
+    schema: &OasObjectSchema,
+    context: &str,
+) -> Result<(), ValidationError> {
+    if !all_of_object_type_is_allowed(schema) {
+        return Err(ValidationError::UnsupportedAllOfSiblingKeyword {
+            context: context.to_owned(),
+            keyword: "type".to_owned(),
+        });
+    }
+
+    for (keyword, present) in [
+        ("anyOf", !schema.any_of.is_empty()),
+        ("enum", !schema.enum_values.is_empty()),
+        ("const", schema.const_value.is_some()),
+        ("items", schema.items.is_some()),
+        ("prefixItems", !schema.prefix_items.is_empty()),
+        ("properties", !schema.properties.is_empty()),
+        (
+            "additionalProperties",
+            schema.additional_properties.is_some(),
+        ),
+        ("multipleOf", schema.multiple_of.is_some()),
+        ("maximum", schema.maximum.is_some()),
+        ("exclusiveMaximum", schema.exclusive_maximum.is_some()),
+        ("minimum", schema.minimum.is_some()),
+        ("exclusiveMinimum", schema.exclusive_minimum.is_some()),
+        ("maxLength", schema.max_length.is_some()),
+        ("minLength", schema.min_length.is_some()),
+        ("pattern", schema.pattern.is_some()),
+        ("maxItems", schema.max_items.is_some()),
+        ("minItems", schema.min_items.is_some()),
+        ("uniqueItems", schema.unique_items.is_some()),
+        ("maxProperties", schema.max_properties.is_some()),
+        ("minProperties", schema.min_properties.is_some()),
+        ("required", !schema.required.is_empty()),
+        ("format", schema.format.is_some()),
+        ("discriminator", schema.discriminator.is_some()),
+    ] {
+        if present {
+            return Err(ValidationError::UnsupportedAllOfSiblingKeyword {
+                context: context.to_owned(),
+                keyword: keyword.to_owned(),
+            });
+        }
+    }
+
+    if let Some(keyword) = schema.extensions.keys().next() {
+        return Err(ValidationError::UnsupportedAllOfSiblingKeyword {
+            context: context.to_owned(),
+            keyword: format!("x-{keyword}"),
+        });
+    }
+
+    Ok(())
+}
+
+fn reject_all_of_object_branch_keywords(
+    schema: &OasObjectSchema,
+    context: &str,
+    index: usize,
+) -> Result<(), ValidationError> {
+    if !all_of_object_type_is_allowed(schema) {
+        return Err(ValidationError::UnsupportedAllOfBranch {
+            context: context.to_owned(),
+            index,
+        });
+    }
+
+    for (keyword, present) in [
+        ("enum", !schema.enum_values.is_empty()),
+        ("const", schema.const_value.is_some()),
+        ("items", schema.items.is_some()),
+        ("prefixItems", !schema.prefix_items.is_empty()),
+        (
+            "additionalProperties",
+            schema.additional_properties.is_some(),
+        ),
+        ("multipleOf", schema.multiple_of.is_some()),
+        ("maximum", schema.maximum.is_some()),
+        ("exclusiveMaximum", schema.exclusive_maximum.is_some()),
+        ("minimum", schema.minimum.is_some()),
+        ("exclusiveMinimum", schema.exclusive_minimum.is_some()),
+        ("maxLength", schema.max_length.is_some()),
+        ("minLength", schema.min_length.is_some()),
+        ("pattern", schema.pattern.is_some()),
+        ("maxItems", schema.max_items.is_some()),
+        ("minItems", schema.min_items.is_some()),
+        ("uniqueItems", schema.unique_items.is_some()),
+        ("format", schema.format.is_some()),
+        ("discriminator", schema.discriminator.is_some()),
+    ] {
+        if present {
+            return Err(ValidationError::UnsupportedAllOfSiblingKeyword {
+                context: context.to_owned(),
+                keyword: keyword.to_owned(),
+            });
+        }
+    }
+
+    if let Some(keyword) = schema.extensions.keys().next() {
+        return Err(ValidationError::UnsupportedAllOfSiblingKeyword {
+            context: context.to_owned(),
+            keyword: format!("x-{keyword}"),
+        });
+    }
+
+    Ok(())
+}
+
+fn all_of_object_type_is_allowed(schema: &OasObjectSchema) -> bool {
+    matches!(
+        schema.schema_type.as_ref(),
+        None | Some(OasSchemaTypeSet::Single(OasSchemaType::Object))
+    )
+}
+
 fn reject_any_of_sibling_keywords(
     schema: &OasObjectSchema,
     context: &str,
 ) -> Result<(), ValidationError> {
     for (keyword, present) in [
+        ("oneOf", !schema.one_of.is_empty()),
+        ("allOf", !schema.all_of.is_empty()),
         ("type", schema.schema_type.is_some()),
         ("enum", !schema.enum_values.is_empty()),
         ("const", schema.const_value.is_some()),
