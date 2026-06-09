@@ -1372,7 +1372,7 @@ dependencies = [
 
 [[package]]
 name = "satay-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "argh",
  "satay-codegen",
@@ -1383,7 +1383,7 @@ dependencies = [
 
 [[package]]
 name = "satay-codegen"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "heck",
  "oas3",
@@ -1478,7 +1478,7 @@ dependencies = [
 
 [[package]]
 name = "satay-reqwest"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "reqwest",
  "satay-runtime",
@@ -1487,7 +1487,7 @@ dependencies = [
 
 [[package]]
 name = "satay-runtime"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "fast-float2",
  "http",
@@ -1500,7 +1500,7 @@ dependencies = [
 
 [[package]]
 name = "satay-ureq"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "satay-runtime",
  "thiserror",
