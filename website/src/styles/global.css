@@ -609,6 +609,10 @@
   @apply mt-1.5 size-2 shrink-0 rounded-none bg-terracotta/80 shadow-[0_0_10px_var(--ember-glow)];
 }
 
+.origin-metaphor-card {
+  @apply h-full;
+}
+
 .contrast-card {
   @apply relative isolate flex h-full flex-col overflow-hidden rounded-none border border-border/50 bg-card/45;
 }

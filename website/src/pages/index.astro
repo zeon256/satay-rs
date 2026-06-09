@@ -19,7 +19,6 @@ import {
   StarIcon,
   UsersThreeIcon,
   WarningIcon,
-  GlobeHemisphereEastIcon,
   XCircleIcon,
   CheckCircleIcon,
 } from "@phosphor-icons/react"
@@ -750,15 +749,15 @@ const features = [
       </section>
 
       <section class="section-anchor animate-rise delay-700 mt-24" id="origin">
-        <div class="grid gap-10 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-start lg:gap-16">
-          <div class="space-y-6">
-            <div class="space-y-3">
-              <p class="section-label">Origin</p>
-              <h2 class="font-heading text-3xl font-semibold tracking-tight text-balance md:text-4xl">
-                Named for the skewer, not the sauce
-              </h2>
-            </div>
+        <div class="section-intro">
+          <p class="section-label">Origin</p>
+          <h2 class="font-heading text-3xl font-semibold tracking-tight text-balance md:text-4xl">
+            Named for the skewer, not the sauce
+          </h2>
+        </div>
 
+        <div class="grid gap-10 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)] lg:items-stretch lg:gap-16">
+          <div class="space-y-6">
             <article class="origin-entry" aria-label="Dictionary entry for sate">
               <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <p class="origin-headword">sate</p>
@@ -771,7 +770,7 @@ const features = [
               </p>
             </article>
 
-            <div class="text-cream-muted space-y-4 text-base leading-relaxed">
+            <div class="text-cream-muted text-base leading-relaxed">
               <p>
                 English <strong class="text-cream font-medium">satay</strong> comes from the Malay and Indonesian word
                 <strong class="text-cream font-medium">sate</strong>, which refers to both the skewer and the dish.
@@ -781,49 +780,53 @@ const features = [
             </div>
           </div>
 
-          <div class="space-y-6 lg:pt-12">
-            <div class="bg-terracotta/15 text-terracotta inline-flex size-10 items-center justify-center rounded-none">
-              <GlobeHemisphereEastIcon className="size-5" />
-            </div>
-            <p class="text-cream-muted text-base leading-relaxed">
-              The name is the metaphor. OpenAPI holds the pieces: schemas, operations, constraints. Codegen threads them
-              into request builders and response decoders. Your app picks the transport. The skewer is the sans-IO
-              boundary; the pieces do not change when you swap grills.
-            </p>
+          <article class="contrast-card contrast-card--with origin-metaphor-card">
+            <div class="card-body space-y-6">
+              <div class="space-y-3">
+                <p class="section-label">The metaphor</p>
+                <p class="text-cream-muted text-base leading-relaxed">
+                  The name is the metaphor. OpenAPI holds the pieces: schemas, operations, constraints. Codegen threads
+                  them into request builders and response decoders. Your app picks the transport. The skewer is the
+                  sans-IO boundary; the pieces do not change when you swap grills.
+                </p>
+              </div>
 
-            <ol class="origin-metaphor-list" aria-label="How the skewer metaphor maps to Satay">
-              <li class="origin-metaphor-item">
-                <span class="origin-metaphor-marker" aria-hidden="true"></span>
-                <div>
-                  <p class="text-cream font-medium">OpenAPI spec</p>
-                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">Schemas, operations, and constraints.</p>
-                </div>
-              </li>
-              <li class="origin-metaphor-item">
-                <span class="origin-metaphor-marker" aria-hidden="true"></span>
-                <div>
-                  <p class="text-cream font-medium">Codegen</p>
-                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">Threads them into builders and decoders you can read.</p>
-                </div>
-              </li>
-              <li class="origin-metaphor-item">
-                <span class="origin-metaphor-marker" aria-hidden="true"></span>
-                <div>
-                  <p class="text-cream font-medium">Your transport</p>
-                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">
-                    reqwest, ureq, hyper, a test harness, WASM, or your own client.
-                  </p>
-                </div>
-              </li>
-              <li class="origin-metaphor-item">
-                <span class="origin-metaphor-marker" aria-hidden="true"></span>
-                <div>
-                  <p class="text-cream font-medium">sans-IO boundary</p>
-                  <p class="text-cream-muted mt-1 text-sm leading-relaxed">The skewer. Same pieces, different grill.</p>
-                </div>
-              </li>
-            </ol>
-          </div>
+              <ol class="origin-metaphor-list" aria-label="How the skewer metaphor maps to Satay">
+                <li class="origin-metaphor-item">
+                  <span class="origin-metaphor-marker" aria-hidden="true"></span>
+                  <div>
+                    <p class="text-cream font-medium">OpenAPI spec</p>
+                    <p class="text-cream-muted mt-1 text-sm leading-relaxed">Schemas, operations, and constraints.</p>
+                  </div>
+                </li>
+                <li class="origin-metaphor-item">
+                  <span class="origin-metaphor-marker" aria-hidden="true"></span>
+                  <div>
+                    <p class="text-cream font-medium">Codegen</p>
+                    <p class="text-cream-muted mt-1 text-sm leading-relaxed">
+                      Threads them into builders and decoders you can read.
+                    </p>
+                  </div>
+                </li>
+                <li class="origin-metaphor-item">
+                  <span class="origin-metaphor-marker" aria-hidden="true"></span>
+                  <div>
+                    <p class="text-cream font-medium">Your transport</p>
+                    <p class="text-cream-muted mt-1 text-sm leading-relaxed">
+                      reqwest, ureq, hyper, a test harness, WASM, or your own client.
+                    </p>
+                  </div>
+                </li>
+                <li class="origin-metaphor-item">
+                  <span class="origin-metaphor-marker" aria-hidden="true"></span>
+                  <div>
+                    <p class="text-cream font-medium">sans-IO boundary</p>
+                    <p class="text-cream-muted mt-1 text-sm leading-relaxed">The skewer. Same pieces, different grill.</p>
+                  </div>
+                </li>
+              </ol>
+            </div>
+          </article>
         </div>
       </section>
 
