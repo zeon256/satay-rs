@@ -1123,7 +1123,7 @@ paths:
     assert!(
         parts_rs
             .contents
-            .contains("satay_runtime::format_date(&value)")
+            .contains("satay_runtime::format_date(value)")
     );
 
     let temp = tempfile::tempdir().expect("create temp crate");
@@ -1193,7 +1193,7 @@ paths:
     assert!(
         parts_rs
             .contents
-            .contains("satay_runtime::format_naive_datetime(&value)")
+            .contains("satay_runtime::format_naive_datetime(value)")
     );
 
     let temp = tempfile::tempdir().expect("create temp crate");
