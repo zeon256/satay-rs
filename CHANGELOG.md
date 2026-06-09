@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.1.4...satay-codegen-v0.2.0) - 2026-06-09
+
+### Added
+
+- *(codegen)* make sure datetimes dont get additional reference
+- *(codegen)* support for unixtime
+- *(codegen)* reject empty anyOf unions and alias-indirected cycles
+- *(codegen)* add support for local schema anyOf
+
+### Other
+
+- *(codegen)* make sure to document big branch
+
 ## [0.1.4](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.1.3...satay-codegen-v0.1.4) - 2026-06-05
 
 ### Other
