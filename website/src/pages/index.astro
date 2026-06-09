@@ -3,6 +3,7 @@ import Layout from "@/layouts/main.astro"
 import { CopyButton } from "@/components/landing/CopyButton"
 import { satayUsers, USERS_FILE_PATH, USERS_SUBMISSION_URL } from "@/data/users"
 import { highlightRust, highlightToml } from "@/lib/highlight"
+import { SITEMAP_INDEX_PATH } from "@/lib/sitemap"
 import { fetchProjectStats, formatDownloads, formatStars } from "@/lib/stats"
 import {
   ArrowSquareOutIcon,
@@ -858,6 +859,7 @@ const features = [
             <ArrowSquareOutIcon className="size-3.5" />
             GitHub
           </a>
+          <a href={SITEMAP_INDEX_PATH} class="footer-link">Sitemap</a>
         </nav>
       </footer>
     </main>

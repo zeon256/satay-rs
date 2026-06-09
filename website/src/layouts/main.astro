@@ -7,6 +7,7 @@ import {
   SITE_DESCRIPTION,
   SITE_TITLE,
 } from "@/lib/seo"
+import { SITEMAP_INDEX_PATH } from "@/lib/sitemap"
 
 interface Props {
   title?: string
@@ -32,6 +33,7 @@ const ogImageURL = absoluteUrl(image, Astro.site, canonicalURL.origin)
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/webp" href="/logo.webp" />
     <link rel="canonical" href={canonicalURL.href} />
+    <link rel="sitemap" href={SITEMAP_INDEX_PATH} />
     <meta name="description" content={description} />
     <meta name="theme-color" content="#1f1c19" />
     <title>{title}</title>

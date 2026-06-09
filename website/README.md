@@ -23,7 +23,7 @@ bun run dev
 
 The layout emits Open Graph and Twitter Card meta tags, plus a canonical URL. The share image is `public/og.png` (source: `public/og.svg`).
 
-For production builds, set `SITE_URL` to the public origin of the deployed site (no trailing slash). Astro uses it for `og:url`, `og:image`, and the canonical link — crawlers need those as absolute URLs.
+For production builds, set `SITE_URL` to the public origin of the deployed site (no trailing slash). Astro uses it for `og:url`, `og:image`, the canonical link, and the sitemap — crawlers need those as absolute URLs.
 
 ```bash
 SITE_URL=https://satay.example.com bun run build
