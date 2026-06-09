@@ -697,6 +697,9 @@
   @apply min-w-0;
 }
 
+#extension-tab-unixtime:checked
+  ~ .extension-tab-panels
+  .extension-tab-panel--unixtime,
 #extension-tab-parse-as:checked
   ~ .extension-tab-panels
   .extension-tab-panel--parse-as,
@@ -712,6 +715,9 @@
   display: block;
 }
 
+#extension-tab-unixtime:checked
+  ~ .extension-tab-list
+  [for="extension-tab-unixtime"],
 #extension-tab-parse-as:checked
   ~ .extension-tab-list
   [for="extension-tab-parse-as"],
@@ -728,6 +734,10 @@
   box-shadow: inset 0 -2px 0 var(--terracotta);
 }
 
+#extension-tab-unixtime:checked
+  ~ .extension-tab-list
+  [for="extension-tab-unixtime"]
+  .extension-tab-label-meta,
 #extension-tab-parse-as:checked
   ~ .extension-tab-list
   [for="extension-tab-parse-as"]
@@ -747,6 +757,9 @@
   @apply text-ember;
 }
 
+#extension-tab-unixtime:focus-visible
+  ~ .extension-tab-list
+  [for="extension-tab-unixtime"],
 #extension-tab-parse-as:focus-visible
   ~ .extension-tab-list
   [for="extension-tab-parse-as"],
