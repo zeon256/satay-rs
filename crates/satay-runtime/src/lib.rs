@@ -213,6 +213,10 @@ pub fn format_offset_datetime(value: &OffsetDateTime) -> String {
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }
 
+pub fn format_unix_time(value: &OffsetDateTime) -> String {
+    value.unix_timestamp().to_string()
+}
+
 pub fn format_date(value: &Date) -> String {
     format!(
         "{:04}-{:02}-{:02}",
@@ -793,6 +797,62 @@ pub mod serde_string {
         }
     }
 
+    pub mod as_unix_time {
+        use serde::Deserialize;
+        use serde::de::Error as DeError;
+
+        use super::*;
+
+        pub fn serialize<S>(value: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            serializer.serialize_str(&crate::format_unix_time(value))
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            let value = <String as Deserialize>::deserialize(deserializer)?;
+            let value = value.parse::<i64>().map_err(DeError::custom)?;
+            OffsetDateTime::from_unix_timestamp(value).map_err(DeError::custom)
+        }
+
+        pub mod option {
+            use serde::Deserialize;
+            use serde::de::Error as DeError;
+
+            use super::*;
+
+            pub fn serialize<S>(
+                value: &Option<OffsetDateTime>,
+                serializer: S,
+            ) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                match value {
+                    Some(value) => super::serialize(value, serializer),
+                    None => serializer.serialize_none(),
+                }
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<OffsetDateTime>, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let value = <Option<String> as Deserialize>::deserialize(deserializer)?;
+                value
+                    .map(|value| {
+                        let value = value.parse::<i64>().map_err(DeError::custom)?;
+                        OffsetDateTime::from_unix_timestamp(value).map_err(DeError::custom)
+                    })
+                    .transpose()
+            }
+        }
+    }
+
     pub mod as_time {
         use serde::Deserialize;
         use serde::de::Error as DeError;
@@ -901,6 +961,60 @@ pub mod serde_string {
 
 #[cfg(feature = "serde")]
 pub mod serde_integer {
+    pub mod as_unix_time {
+        use serde::Deserialize;
+        use serde::de::Error as DeError;
+
+        use crate::OffsetDateTime;
+
+        pub fn serialize<S>(value: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            serializer.serialize_i64(value.unix_timestamp())
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<OffsetDateTime, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            let value = <i64 as Deserialize>::deserialize(deserializer)?;
+            OffsetDateTime::from_unix_timestamp(value).map_err(DeError::custom)
+        }
+
+        pub mod option {
+            use serde::Deserialize;
+            use serde::de::Error as DeError;
+
+            use crate::OffsetDateTime;
+
+            pub fn serialize<S>(
+                value: &Option<OffsetDateTime>,
+                serializer: S,
+            ) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                match value {
+                    Some(value) => super::serialize(value, serializer),
+                    None => serializer.serialize_none(),
+                }
+            }
+
+            pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<OffsetDateTime>, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let value = <Option<i64> as Deserialize>::deserialize(deserializer)?;
+                value
+                    .map(|value| {
+                        OffsetDateTime::from_unix_timestamp(value).map_err(DeError::custom)
+                    })
+                    .transpose()
+            }
+        }
+    }
+
     pub mod as_bool {
         use crate::serde_string::as_bool as string_bool;
 
@@ -1107,6 +1221,12 @@ mod tests {
         );
     }
 
+    #[test]
+    fn formats_unix_time_seconds() {
+        let datetime = OffsetDateTime::from_unix_timestamp(-1).unwrap();
+        assert_eq!(format_unix_time(&datetime), "-1");
+    }
+
     #[cfg(all(feature = "serde", feature = "json"))]
     #[test]
     fn serde_string_naive_datetime_round_trips() {
@@ -1202,5 +1322,58 @@ mod tests {
 
         let encoded = serde_json::to_value(Value { monitored: true }).unwrap();
         assert_eq!(encoded, serde_json::json!({ "monitored": 1 }));
+    }
+
+    #[cfg(all(feature = "serde", feature = "json"))]
+    #[test]
+    fn serde_string_unix_time_round_trips() {
+        #[derive(serde::Deserialize, serde::Serialize)]
+        struct Value {
+            #[serde(with = "crate::serde_string::as_unix_time")]
+            at: OffsetDateTime,
+        }
+
+        let at = OffsetDateTime::from_unix_timestamp(1_719_892_800).unwrap();
+        let encoded = serde_json::to_value(Value { at }).unwrap();
+        assert_eq!(encoded, serde_json::json!({ "at": "1719892800" }));
+
+        let decoded = serde_json::from_value::<Value>(encoded).unwrap();
+        assert_eq!(decoded.at, at);
+    }
+
+    #[cfg(all(feature = "serde", feature = "json"))]
+    #[test]
+    fn serde_integer_unix_time_round_trips_and_handles_null() {
+        #[derive(serde::Deserialize, serde::Serialize)]
+        struct Value {
+            #[serde(with = "crate::serde_integer::as_unix_time")]
+            at: OffsetDateTime,
+            #[serde(with = "crate::serde_integer::as_unix_time::option")]
+            maybe_at: Option<OffsetDateTime>,
+        }
+
+        let at = OffsetDateTime::from_unix_timestamp(1_719_892_800).unwrap();
+        let encoded = serde_json::to_value(Value { at, maybe_at: None }).unwrap();
+        assert_eq!(
+            encoded,
+            serde_json::json!({ "at": 1719892800, "maybe_at": null })
+        );
+
+        let decoded = serde_json::from_value::<Value>(encoded).unwrap();
+        assert_eq!(decoded.at, at);
+        assert_eq!(decoded.maybe_at, None);
+    }
+
+    #[cfg(all(feature = "serde", feature = "json"))]
+    #[test]
+    fn serde_integer_unix_time_rejects_out_of_range_values() {
+        #[derive(serde::Deserialize)]
+        #[allow(dead_code)]
+        struct Value {
+            #[serde(with = "crate::serde_integer::as_unix_time")]
+            at: OffsetDateTime,
+        }
+
+        assert!(serde_json::from_str::<Value>(r#"{"at":9223372036854775807}"#).is_err());
     }
 }

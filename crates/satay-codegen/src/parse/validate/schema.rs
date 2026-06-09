@@ -21,7 +21,7 @@ use super::{
 };
 use crate::error::ValidationError;
 use crate::ident::{unique_ident, variant_ident};
-use crate::model::{EnumVariant, TypeRef};
+use crate::model::{EnumVariant, ParseAs, TypeRef};
 
 pub(super) fn validate_components(
     document: &ResolvedDocument<'_>,
@@ -464,12 +464,18 @@ fn validate_inline_type_kind(
     satay: &ValidatedSataySchema,
 ) -> Result<ValidatedTypeKind, ValidationError> {
     match schema_type {
-        Some(OasSchemaType::String) => Ok(ValidatedTypeKind::String),
-        Some(OasSchemaType::Integer) => Ok(ValidatedTypeKind::Integer(parse_integer_type(
-            schema,
-            context,
-            satay.explicit_integer_type,
-        )?)),
+        Some(OasSchemaType::String) => validate_string_type(schema),
+        Some(OasSchemaType::Integer) => {
+            if schema.format.as_deref() == Some("unixtime") {
+                Ok(ValidatedTypeKind::ParsedInteger(ParseAs::UnixTime))
+            } else {
+                Ok(ValidatedTypeKind::Integer(parse_integer_type(
+                    schema,
+                    context,
+                    satay.explicit_integer_type,
+                )?))
+            }
+        }
         Some(OasSchemaType::Number) => validate_number_type(schema, context),
         Some(OasSchemaType::Boolean) => Ok(ValidatedTypeKind::Bool),
         Some(OasSchemaType::Array) => {
@@ -502,6 +508,13 @@ fn validate_inline_type_kind(
         None => Err(ValidationError::MissingSchemaType {
             context: context.to_owned(),
         }),
+    }
+}
+
+fn validate_string_type(schema: &OasObjectSchema) -> Result<ValidatedTypeKind, ValidationError> {
+    match schema.format.as_deref() {
+        Some("unixtime") => Ok(ValidatedTypeKind::ParsedString(ParseAs::UnixTime)),
+        _ => Ok(ValidatedTypeKind::String),
     }
 }
 
