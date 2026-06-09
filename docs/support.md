@@ -7,6 +7,7 @@ Satay targets OpenAPI 3.1.x and a small, typed subset.
 - YAML or JSON OpenAPI documents.
 - `components.schemas` as Rust structs, string enums, primitive aliases, and constrained newtypes.
 - Schema types: `string`, `integer` (`int32`, `int64`, or no format, with Rust integer inference from bounds), `number` (`float`, `double`, or no format), `boolean`, arrays, nullable values expressed as `type: [T, "null"]`, and local `#/components/schemas/...` references. Unformatted non-negative open-ended integers infer `u64`.
+- `anyOf` unions whose branches are local `#/components/schemas/...` references, rendered as ordered serde-untagged Rust enums.
 - Operations for standard HTTP methods with explicit `operationId`, or inferred names from method + path.
 - Path, query, and header parameters declared with `schema`.
 - Path-level parameters with operation-level overrides.
@@ -47,7 +48,7 @@ These are known gaps rather than silent compatibility promises:
 - Default response bodies.
 - Inline object schemas outside `components.schemas`.
 - Map schemas / `additionalProperties`.
-- `oneOf`, `anyOf`, `allOf`, and discriminator-based polymorphism.
+- `anyOf` inline branches, `anyOf` parameters, recursive `anyOf` cycles, full JSON Schema `anyOf` validation semantics, `oneOf`, `allOf`, and discriminator-based polymorphism.
 - JSON Schema boolean schemas (`true` / `false`).
 - `$ref` siblings other than Satay-owned `x-satay` extensions.
 - Non-string enums.

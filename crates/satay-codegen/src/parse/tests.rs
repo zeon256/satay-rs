@@ -492,6 +492,97 @@ components:
     }
 
     #[test]
+    fn parses_any_of_component_and_inline_refs_into_ir() {
+        let api = parse_valid(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: search
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResult'
+components:
+  schemas:
+    User:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    Organization:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    SearchResult:
+      description: A search result.
+      anyOf:
+        - $ref: '#/components/schemas/User'
+        - $ref: '#/components/schemas/Organization'
+    Envelope:
+      type: object
+      required:
+        - item
+      properties:
+        item:
+          anyOf:
+            - $ref: '#/components/schemas/Organization'
+            - $ref: '#/components/schemas/User'
+"#,
+        );
+
+        let search_result = component(&api, "SearchResult");
+        match &search_result.kind {
+            ComponentKind::Union(variants) => {
+                assert_eq!(variants.len(), 2);
+                assert_eq!(variants[0].rust_name, "User");
+                assert_eq!(variants[0].ty, TypeRef::Named("User".to_owned()));
+                assert_eq!(variants[1].rust_name, "Organization");
+                assert_eq!(variants[1].ty, TypeRef::Named("Organization".to_owned()));
+            }
+            other => panic!("expected SearchResult union, got {other:?}"),
+        }
+
+        let envelope = component(&api, "Envelope");
+        match &envelope.kind {
+            ComponentKind::Struct(fields) => {
+                let item = field(fields, "item");
+                assert_eq!(item.ty, TypeRef::Named("EnvelopeItem".to_owned()));
+                assert!(item.required);
+            }
+            other => panic!("expected Envelope struct, got {other:?}"),
+        }
+
+        let envelope_item = component(&api, "EnvelopeItem");
+        match &envelope_item.kind {
+            ComponentKind::Union(variants) => {
+                assert_eq!(variants[0].rust_name, "Organization");
+                assert_eq!(variants[0].ty, TypeRef::Named("Organization".to_owned()));
+                assert_eq!(variants[1].rust_name, "User");
+                assert_eq!(variants[1].ty, TypeRef::Named("User".to_owned()));
+            }
+            other => panic!("expected EnvelopeItem union, got {other:?}"),
+        }
+
+        assert_eq!(
+            api.operations[0].responses[0].body,
+            Some(TypeRef::Named("SearchResult".to_owned()))
+        );
+    }
+
+    #[test]
     fn lifts_inline_constraints_into_generated_types() {
         let api = parse_valid(
             r#"
@@ -1615,6 +1706,224 @@ components:
         match err {
             ValidationError::UnsupportedBooleanSchema { context } => {
                 assert_eq!(context, "schema `Broken`");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Broken:
+      anyOf:
+        - type: string
+"##,
+        );
+        match err {
+            ValidationError::UnsupportedAnyOfBranch { context, index } => {
+                assert_eq!(context, "schema `Broken`");
+                assert_eq!(index, 0);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    User:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    Broken:
+      type: object
+      anyOf:
+        - $ref: '#/components/schemas/User'
+"##,
+        );
+        match err {
+            ValidationError::UnsupportedAnyOfSiblingKeyword { context, keyword } => {
+                assert_eq!(context, "schema `Broken`");
+                assert_eq!(keyword, "type");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      parameters:
+        - name: filter
+          in: query
+          schema:
+            anyOf:
+              - $ref: '#/components/schemas/User'
+              - $ref: '#/components/schemas/Organization'
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    User:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    Organization:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+"##,
+        );
+        match err {
+            ValidationError::AnyOfParameterUnsupported { wire_name } => {
+                assert_eq!(wire_name, "filter");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      parameters:
+        - name: filter
+          in: query
+          schema:
+            $ref: '#/components/schemas/SearchResult'
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    User:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    Organization:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    SearchResult:
+      anyOf:
+        - $ref: '#/components/schemas/User'
+        - $ref: '#/components/schemas/Organization'
+"##,
+        );
+        match err {
+            ValidationError::AnyOfParameterUnsupported { wire_name } => {
+                assert_eq!(wire_name, "filter");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    A:
+      anyOf:
+        - $ref: '#/components/schemas/B'
+    B:
+      anyOf:
+        - $ref: '#/components/schemas/A'
+"##,
+        );
+        match err {
+            ValidationError::RecursiveAnyOf { context, schema } => {
+                assert_eq!(context, "schema `A`");
+                assert_eq!(schema, "A");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    A:
+      type: object
+      properties:
+        child:
+          anyOf:
+            - $ref: '#/components/schemas/A'
+"##,
+        );
+        match err {
+            ValidationError::RecursiveAnyOf { context, schema } => {
+                assert_eq!(context, "schema `A`");
+                assert_eq!(schema, "A");
             }
             other => panic!("unexpected error: {other}"),
         }

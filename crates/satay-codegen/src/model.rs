@@ -49,6 +49,7 @@ pub(crate) struct Component {
 pub(crate) enum ComponentKind {
     Struct(Vec<Field>),
     Enum(Vec<EnumVariant>),
+    Union(Vec<UnionVariant>),
     Range(RangeType),
     Alias(TypeRef),
     Nutype(ConstrainedType),
@@ -141,6 +142,12 @@ pub(crate) struct Field {
 pub(crate) struct EnumVariant {
     pub(crate) wire_name: String,
     pub(crate) rust_name: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct UnionVariant {
+    pub(crate) rust_name: String,
+    pub(crate) ty: TypeRef,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

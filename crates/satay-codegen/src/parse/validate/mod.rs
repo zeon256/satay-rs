@@ -67,6 +67,23 @@ impl ValidatedType {
     pub(crate) fn is_array(&self) -> bool {
         matches!(self.kind, ValidatedTypeKind::Array(_))
     }
+
+    pub(crate) fn contains_any_of(&self) -> bool {
+        match &self.kind {
+            ValidatedTypeKind::AnyOf(_) => true,
+            ValidatedTypeKind::Array(item) => item.contains_any_of(),
+            ValidatedTypeKind::Named(_)
+            | ValidatedTypeKind::String
+            | ValidatedTypeKind::ParsedString(_)
+            | ValidatedTypeKind::ParsedInteger(_)
+            | ValidatedTypeKind::Integer(_)
+            | ValidatedTypeKind::F32
+            | ValidatedTypeKind::F64
+            | ValidatedTypeKind::Bool
+            | ValidatedTypeKind::Enum(_)
+            | ValidatedTypeKind::Range(_) => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -81,7 +98,15 @@ pub(crate) enum ValidatedTypeKind {
     Bool,
     Array(Box<ValidatedType>),
     Enum(Vec<EnumVariant>),
+    AnyOf(Vec<ValidatedUnionVariant>),
     Range(RangeScalar),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ValidatedUnionVariant {
+    pub(crate) rust_name: String,
+    pub(crate) type_name: String,
+    pub(crate) schema_name: String,
 }
 
 #[derive(Debug)]

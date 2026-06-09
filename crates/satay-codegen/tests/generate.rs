@@ -1314,6 +1314,154 @@ paths:
 }
 
 #[test]
+fn any_of_generates_untagged_union_types() {
+    let files = satay_codegen::generate(
+        r##"
+openapi: 3.1.0
+info:
+  title: Search API
+  version: 1.0.0
+paths:
+  /search:
+    get:
+      operationId: search
+      responses:
+        '200':
+          description: Search result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResult'
+components:
+  schemas:
+    User:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    Organization:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    SearchResult:
+      description: A search result.
+      anyOf:
+        - $ref: '#/components/schemas/User'
+        - $ref: '#/components/schemas/Organization'
+"##,
+    )
+    .expect("generate anyOf fixture");
+
+    let types_rs = find_file(&files, "types.rs");
+    assert!(types_rs.contents.contains("/// A search result."));
+    assert!(types_rs.contents.contains("pub enum SearchResult"));
+    assert!(
+        types_rs
+            .contents
+            .contains("#[cfg_attr(feature = \"serde\", serde(untagged))]")
+    );
+
+    let union_start = types_rs
+        .contents
+        .find("pub enum SearchResult")
+        .expect("SearchResult union exists");
+    let union = &types_rs.contents[union_start..];
+    let user = union.find("User(User)").expect("User variant exists");
+    let organization = union
+        .find("Organization(Organization)")
+        .expect("Organization variant exists");
+    assert!(user < organization);
+}
+
+#[test]
+fn generated_any_of_deserializes_with_first_matching_branch() {
+    let files = satay_codegen::generate(
+        r##"
+openapi: 3.1.0
+info:
+  title: Entity API
+  version: 1.0.0
+paths:
+  /entity:
+    get:
+      operationId: getEntity
+      responses:
+        '200':
+          description: Entity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Entity'
+components:
+  schemas:
+    Loose:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    Specific:
+      type: object
+      required:
+        - id
+        - slug
+      properties:
+        id:
+          type: string
+        slug:
+          type: string
+    Entity:
+      anyOf:
+        - $ref: '#/components/schemas/Loose'
+        - $ref: '#/components/schemas/Specific'
+"##,
+    )
+    .expect("generate anyOf runtime fixture");
+
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+
+    let runtime_path = runtime_path_toml();
+
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::*;
+
+    #[test]
+    fn any_of_uses_first_matching_branch() {
+        let response = satay_runtime::ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: br#"{"id":"1","slug":"specific"}"#.to_vec(),
+        };
+
+        let decoded = decode_get_entity_response(response).expect("decoded response");
+        match decoded {
+            GetEntityResponse::Ok(Entity::Loose(value)) => {
+                assert_eq!(value.id, "1");
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+}
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    run_temp_cargo(crate_dir, "test", &[], "anyOf generated crate tests");
+}
+
+#[test]
 fn inline_enum_generates_proper_enum_types() {
     let files = satay_codegen::generate(INLINE_ENUM).expect("generate inline-enum fixture");
 

@@ -215,6 +215,24 @@ pub enum ValidationError {
         keyword: &'static str,
     },
 
+    /// An `anyOf` schema combines a supported union with another schema keyword.
+    ///
+    /// Error message: `{context} uses `anyOf` with `{keyword}`; only annotation siblings are supported`
+    #[error("{context} uses `anyOf` with `{keyword}`; only annotation siblings are supported")]
+    UnsupportedAnyOfSiblingKeyword { context: String, keyword: String },
+
+    /// An `anyOf` branch is not a local component schema reference.
+    ///
+    /// Error message: `{context}.anyOf[{index}] must be a local component schema reference`
+    #[error("{context}.anyOf[{index}] must be a local component schema reference")]
+    UnsupportedAnyOfBranch { context: String, index: usize },
+
+    /// `anyOf` component schemas form a recursive union cycle.
+    ///
+    /// Error message: `{context} forms a recursive `anyOf` cycle through schema `{schema}``
+    #[error("{context} forms a recursive `anyOf` cycle through schema `{schema}`")]
+    RecursiveAnyOf { context: String, schema: String },
+
     // -- Schema constraint validation --
     /// A string schema specifies a `minLength` greater than its `maxLength`.
     ///
@@ -362,6 +380,12 @@ pub enum ValidationError {
     /// Error message: `parameter `{wire_name}` is nullable; nullable parameters are not supported`
     #[error("parameter `{wire_name}` is nullable; nullable parameters are not supported")]
     NullableParameterUnsupported { wire_name: String },
+
+    /// A parameter uses `anyOf`, which is not supported for URI/header encoding yet.
+    ///
+    /// Error message: `parameter `{wire_name}` uses `anyOf`; anyOf parameters are not supported yet`
+    #[error("parameter `{wire_name}` uses `anyOf`; anyOf parameters are not supported yet")]
+    AnyOfParameterUnsupported { wire_name: String },
 
     /// A path parameter is an array, which is not supported.
     ///

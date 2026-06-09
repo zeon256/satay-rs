@@ -5,6 +5,7 @@ mod constrained;
 mod enums;
 mod ranges;
 pub(super) mod structs;
+mod unions;
 
 pub(super) fn render_types_file(api: &Api) -> syn::File {
     let mut items = vec![];
@@ -56,6 +57,13 @@ fn render_component(component: &Component, items: &mut Vec<syn::Item>) {
             component.description.as_deref(),
             variants,
         )),
+        ComponentKind::Union(variants) => {
+            items.push(Item::Enum(unions::render_union(
+                &component.rust_name,
+                component.description.as_deref(),
+                variants,
+            )));
+        }
         ComponentKind::Range(range_type) => items.extend(ranges::render_range_type(range_type)),
         ComponentKind::Alias(ty) => {
             let name = super::ident(&component.rust_name);

@@ -6,8 +6,8 @@ use oas3::spec::{
 
 use super::super::helpers::{optional_description, schema_description};
 use super::super::reference::{
-    object_schema, reject_composition, schema_ref, schema_ref_type_name, schema_type_and_nullable,
-    schema_type_wire,
+    object_schema, reject_one_of_all_of, schema_ref, schema_ref_type_name,
+    schema_type_and_nullable, schema_type_wire,
 };
 use super::super::resolve::{ResolvedDocument, refs::local_ref_name};
 use super::constraint::{parse_integer_type, parse_validation, reject_keyword};
@@ -17,6 +17,7 @@ use super::satay::{
 };
 use super::{
     ValidatedComponent, ValidatedComponentKind, ValidatedField, ValidatedType, ValidatedTypeKind,
+    ValidatedUnionVariant,
 };
 use crate::error::ValidationError;
 use crate::ident::{unique_ident, variant_ident};
@@ -34,6 +35,8 @@ pub(super) fn validate_components(
     for (schema_name, schema) in &components.schemas {
         parsed.push(validate_component_schema(document, schema_name, schema)?);
     }
+
+    reject_any_of_cycles(&parsed)?;
 
     Ok(parsed)
 }
@@ -55,7 +58,10 @@ pub(super) fn validate_type_schema(
     }
 
     let schema = object_schema(schema, context)?;
-    reject_composition(schema, context)?;
+    reject_one_of_all_of(schema, context)?;
+    if !schema.any_of.is_empty() {
+        return validate_any_of_type_schema(schema, context);
+    }
     let (schema_type, nullable) = schema_type_and_nullable(schema, context)?;
 
     validate_object_type_schema(
@@ -66,6 +72,47 @@ pub(super) fn validate_type_schema(
         context,
         allow_treat_error_as_none,
     )
+}
+
+pub(super) fn schema_uses_any_of(
+    document: &ResolvedDocument<'_>,
+    schema: &OasSchema,
+) -> Result<bool, ValidationError> {
+    let mut visited = BTreeSet::new();
+    schema_uses_any_of_inner(document, schema, &mut visited)
+}
+
+fn schema_uses_any_of_inner(
+    document: &ResolvedDocument<'_>,
+    schema: &OasSchema,
+    visited: &mut BTreeSet<String>,
+) -> Result<bool, ValidationError> {
+    if let Some(reference) = schema_ref(schema, "anyOf parameter validation")? {
+        let name = local_ref_name(reference, "schemas")?;
+        if !visited.insert(name.clone()) {
+            return Ok(false);
+        }
+        let target = document
+            .spec
+            .components
+            .as_ref()
+            .and_then(|components| components.schemas.get(&name))
+            .ok_or(ValidationError::MissingJsonPointerToken { token: name })?;
+        return schema_uses_any_of_inner(document, target, visited);
+    }
+
+    let schema = object_schema(schema, "anyOf parameter validation")?;
+    if !schema.any_of.is_empty() {
+        return Ok(true);
+    }
+
+    if let Some(items) = schema.items.as_deref()
+        && schema_uses_any_of_inner(document, items, visited)?
+    {
+        return Ok(true);
+    }
+
+    Ok(false)
 }
 
 fn validate_component_schema(
@@ -79,56 +126,60 @@ fn validate_component_schema(
         ValidatedComponentKind::Reference(schema_ref_type_name(reference)?)
     } else {
         let schema = object_schema(schema, &context)?;
-        reject_composition(schema, &context)?;
-        let (schema_type, nullable) = schema_type_and_nullable(schema, &context)?;
-
-        if !schema.enum_values.is_empty() {
-            validate_enum_shape(schema, schema_type, &context)?;
-            let validated_satay = validate_component_enum_satay(schema, &context)?;
-            ValidatedComponentKind::Type(ValidatedType {
-                kind: ValidatedTypeKind::Enum(validated_enum_variants(
-                    schema,
-                    &validated_satay.enum_variants,
-                    &context,
-                )?),
-                nullable,
-                validation: None,
-                description: optional_description(&schema.description),
-                treat_error_as_none: false,
-            })
+        reject_one_of_all_of(schema, &context)?;
+        if !schema.any_of.is_empty() {
+            ValidatedComponentKind::Type(validate_any_of_type_schema(schema, &context)?)
         } else {
-            match schema_type {
-                Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => {
-                    ValidatedComponentKind::Struct(validate_struct_properties(
-                        document,
-                        schema_name,
+            let (schema_type, nullable) = schema_type_and_nullable(schema, &context)?;
+
+            if !schema.enum_values.is_empty() {
+                validate_enum_shape(schema, schema_type, &context)?;
+                let validated_satay = validate_component_enum_satay(schema, &context)?;
+                ValidatedComponentKind::Type(ValidatedType {
+                    kind: ValidatedTypeKind::Enum(validated_enum_variants(
                         schema,
-                    )?)
-                }
-                Some(
-                    OasSchemaType::Array
-                    | OasSchemaType::String
-                    | OasSchemaType::Integer
-                    | OasSchemaType::Number
-                    | OasSchemaType::Boolean,
-                ) => ValidatedComponentKind::Type(validate_object_type_schema(
-                    document,
-                    schema,
-                    schema_type,
+                        &validated_satay.enum_variants,
+                        &context,
+                    )?),
                     nullable,
-                    &context,
-                    false,
-                )?),
-                Some(kind) => {
-                    return Err(ValidationError::UnsupportedComponentType {
-                        schema: schema_name.to_owned(),
-                        kind: schema_type_wire(kind).to_owned(),
-                    });
-                }
-                None => {
-                    return Err(ValidationError::MissingComponentSchemaType {
-                        schema: schema_name.to_owned(),
-                    });
+                    validation: None,
+                    description: optional_description(&schema.description),
+                    treat_error_as_none: false,
+                })
+            } else {
+                match schema_type {
+                    Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => {
+                        ValidatedComponentKind::Struct(validate_struct_properties(
+                            document,
+                            schema_name,
+                            schema,
+                        )?)
+                    }
+                    Some(
+                        OasSchemaType::Array
+                        | OasSchemaType::String
+                        | OasSchemaType::Integer
+                        | OasSchemaType::Number
+                        | OasSchemaType::Boolean,
+                    ) => ValidatedComponentKind::Type(validate_object_type_schema(
+                        document,
+                        schema,
+                        schema_type,
+                        nullable,
+                        &context,
+                        false,
+                    )?),
+                    Some(kind) => {
+                        return Err(ValidationError::UnsupportedComponentType {
+                            schema: schema_name.to_owned(),
+                            kind: schema_type_wire(kind).to_owned(),
+                        });
+                    }
+                    None => {
+                        return Err(ValidationError::MissingComponentSchemaType {
+                            schema: schema_name.to_owned(),
+                        });
+                    }
                 }
             }
         }
@@ -139,6 +190,171 @@ fn validate_component_schema(
         description,
         kind,
     })
+}
+
+fn validate_any_of_type_schema(
+    schema: &OasObjectSchema,
+    context: &str,
+) -> Result<ValidatedType, ValidationError> {
+    reject_any_of_sibling_keywords(schema, context)?;
+
+    let mut used = BTreeSet::new();
+    let mut variants = Vec::with_capacity(schema.any_of.len());
+
+    for (index, branch) in schema.any_of.iter().enumerate() {
+        let Some(reference) = schema_ref(branch, context)? else {
+            return Err(ValidationError::UnsupportedAnyOfBranch {
+                context: context.to_owned(),
+                index,
+            });
+        };
+        let schema_name = local_ref_name(reference, "schemas")?;
+        let type_name = schema_ref_type_name(reference)?;
+        variants.push(ValidatedUnionVariant {
+            rust_name: unique_ident(type_name.clone(), &mut used),
+            type_name,
+            schema_name,
+        });
+    }
+
+    Ok(ValidatedType {
+        kind: ValidatedTypeKind::AnyOf(variants),
+        nullable: false,
+        validation: None,
+        description: optional_description(&schema.description),
+        treat_error_as_none: false,
+    })
+}
+
+fn reject_any_of_sibling_keywords(
+    schema: &OasObjectSchema,
+    context: &str,
+) -> Result<(), ValidationError> {
+    for (keyword, present) in [
+        ("type", schema.schema_type.is_some()),
+        ("enum", !schema.enum_values.is_empty()),
+        ("const", schema.const_value.is_some()),
+        ("items", schema.items.is_some()),
+        ("prefixItems", !schema.prefix_items.is_empty()),
+        ("properties", !schema.properties.is_empty()),
+        (
+            "additionalProperties",
+            schema.additional_properties.is_some(),
+        ),
+        ("multipleOf", schema.multiple_of.is_some()),
+        ("maximum", schema.maximum.is_some()),
+        ("exclusiveMaximum", schema.exclusive_maximum.is_some()),
+        ("minimum", schema.minimum.is_some()),
+        ("exclusiveMinimum", schema.exclusive_minimum.is_some()),
+        ("maxLength", schema.max_length.is_some()),
+        ("minLength", schema.min_length.is_some()),
+        ("pattern", schema.pattern.is_some()),
+        ("maxItems", schema.max_items.is_some()),
+        ("minItems", schema.min_items.is_some()),
+        ("uniqueItems", schema.unique_items.is_some()),
+        ("maxProperties", schema.max_properties.is_some()),
+        ("minProperties", schema.min_properties.is_some()),
+        ("required", !schema.required.is_empty()),
+        ("format", schema.format.is_some()),
+        ("discriminator", schema.discriminator.is_some()),
+    ] {
+        if present {
+            return Err(ValidationError::UnsupportedAnyOfSiblingKeyword {
+                context: context.to_owned(),
+                keyword: keyword.to_owned(),
+            });
+        }
+    }
+
+    if let Some(keyword) = schema.extensions.keys().next() {
+        return Err(ValidationError::UnsupportedAnyOfSiblingKeyword {
+            context: context.to_owned(),
+            keyword: format!("x-{keyword}"),
+        });
+    }
+
+    Ok(())
+}
+
+fn reject_any_of_cycles(components: &[ValidatedComponent]) -> Result<(), ValidationError> {
+    let graph = components
+        .iter()
+        .filter_map(|component| {
+            let mut targets = vec![];
+            collect_component_any_of_targets(component, &mut targets);
+            (!targets.is_empty()).then(|| (component.schema_name.clone(), targets))
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    let mut visited = BTreeSet::new();
+    for schema_name in graph.keys() {
+        let mut stack = vec![];
+        visit_any_of_cycle(schema_name, &graph, &mut stack, &mut visited)?;
+    }
+
+    Ok(())
+}
+
+fn collect_component_any_of_targets(component: &ValidatedComponent, targets: &mut Vec<String>) {
+    match &component.kind {
+        ValidatedComponentKind::Reference(_) => {}
+        ValidatedComponentKind::Struct(fields) => {
+            for field in fields {
+                collect_type_any_of_targets(&field.ty, targets);
+            }
+        }
+        ValidatedComponentKind::Type(ty) => collect_type_any_of_targets(ty, targets),
+    }
+}
+
+fn collect_type_any_of_targets(ty: &ValidatedType, targets: &mut Vec<String>) {
+    match &ty.kind {
+        ValidatedTypeKind::AnyOf(variants) => {
+            targets.extend(variants.iter().map(|variant| variant.schema_name.clone()));
+        }
+        ValidatedTypeKind::Array(item) => collect_type_any_of_targets(item, targets),
+        ValidatedTypeKind::Named(_)
+        | ValidatedTypeKind::String
+        | ValidatedTypeKind::ParsedString(_)
+        | ValidatedTypeKind::ParsedInteger(_)
+        | ValidatedTypeKind::Integer(_)
+        | ValidatedTypeKind::F32
+        | ValidatedTypeKind::F64
+        | ValidatedTypeKind::Bool
+        | ValidatedTypeKind::Enum(_)
+        | ValidatedTypeKind::Range(_) => {}
+    }
+}
+
+fn visit_any_of_cycle(
+    schema_name: &str,
+    graph: &BTreeMap<String, Vec<String>>,
+    stack: &mut Vec<String>,
+    visited: &mut BTreeSet<String>,
+) -> Result<(), ValidationError> {
+    if let Some(index) = stack.iter().position(|visited| visited == schema_name) {
+        return Err(ValidationError::RecursiveAnyOf {
+            context: format!("schema `{}`", stack[index]),
+            schema: schema_name.to_owned(),
+        });
+    }
+
+    if visited.contains(schema_name) {
+        return Ok(());
+    }
+
+    let Some(targets) = graph.get(schema_name) else {
+        return Ok(());
+    };
+
+    stack.push(schema_name.to_owned());
+    for target in targets {
+        visit_any_of_cycle(target, graph, stack, visited)?;
+    }
+    stack.pop();
+    visited.insert(schema_name.to_owned());
+
+    Ok(())
 }
 
 fn validate_object_type_schema(
@@ -277,6 +493,7 @@ fn validation_base_type(kind: &ValidatedTypeKind) -> Option<TypeRef> {
         | ValidatedTypeKind::ParsedString(_)
         | ValidatedTypeKind::ParsedInteger(_)
         | ValidatedTypeKind::Enum(_)
+        | ValidatedTypeKind::AnyOf(_)
         | ValidatedTypeKind::Range(_) => None,
     }
 }
