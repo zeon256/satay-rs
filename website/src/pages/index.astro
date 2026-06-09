@@ -190,6 +190,28 @@ http = "1"`
 
 const extensions = [
   {
+    id: "unixtime",
+    label: "unixtime",
+    meta: "format",
+    title: "Unix timestamp seconds",
+    body: `Use the standard OpenAPI <code class="code-inline">format: unixtime</code> on <code class="code-inline">type: integer</code> or <code class="code-inline">type: string</code> schemas. Both generate <code class="code-inline">satay_runtime::OffsetDateTime</code>. Integer fields stay JSON numbers; string fields stay JSON strings. Path, query, and header parameters encode as decimal seconds.`,
+    types: ["integer", "string"],
+    yamlCode: `StartedAt:
+  type: integer
+  format: unixtime
+
+StartedAtString:
+  type: string
+  format: unixtime`,
+    rustCode: `pub struct Event {
+    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_integer::as_unix_time"))]
+    pub started_at: satay_runtime::OffsetDateTime,
+
+    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_unix_time"))]
+    pub started_at_string: satay_runtime::OffsetDateTime,
+}`,
+  },
+  {
     id: "parse-as",
     label: "parse-as",
     meta: "typed",
@@ -777,12 +799,13 @@ const features = [
 
       <section class="section-anchor animate-rise delay-625 mt-24" id="extensions">
         <div class="section-intro">
-          <p class="section-label">x-satay extensions</p>
+          <p class="section-label">Extensions &amp; formats</p>
           <h2 class="font-heading text-3xl font-semibold tracking-tight text-balance md:text-4xl">
             When the spec alone is not enough
           </h2>
           <p class="text-cream-muted text-base leading-relaxed">
-            Most schemas map cleanly to Rust. For the rest, annotate the OpenAPI with
+            Most schemas map cleanly to Rust. Satay recognizes standard formats like
+            <code class="code-inline">unixtime</code>. For the rest, annotate the OpenAPI with
             <code class="code-inline">x-satay</code> vendor extensions and regenerate.
           </p>
         </div>
