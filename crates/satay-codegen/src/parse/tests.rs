@@ -939,10 +939,7 @@ components:
 "##,
         );
         match err {
-            ValidationError::UnsupportedComposition {
-                context,
-                keyword,
-            } => {
+            ValidationError::UnsupportedComposition { context, keyword } => {
                 assert_eq!(context, "property `Parent.child`");
                 assert_eq!(keyword, "allOf");
             }

@@ -222,6 +222,10 @@ fn schema_is_any_of_union(schema: &OasObjectSchema) -> bool {
     schema_is_empty_any_of_shape(schema)
 }
 
+/// True when a schema has no composition branches but also no unsupported siblings.
+///
+/// Empty component `allOf: []` matches this shape because `all_of` is empty, so it is
+/// routed through the `anyOf` validator and rejected with `EmptyAnyOf`.
 fn schema_is_empty_any_of_shape(schema: &OasObjectSchema) -> bool {
     if !schema.one_of.is_empty() || !schema.all_of.is_empty() {
         return false;
