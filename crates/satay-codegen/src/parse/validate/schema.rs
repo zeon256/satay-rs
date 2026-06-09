@@ -405,39 +405,41 @@ fn validate_discriminator_mapping(
         .map(|branch| branch.schema_name.clone())
         .collect::<BTreeSet<_>>();
 
-    let Some(mapping) = discriminator.mapping.as_ref() else {
-        return Ok(branches
-            .iter()
-            .map(|branch| (branch.schema_name.clone(), branch.schema_name.clone()))
-            .collect());
-    };
+    let mut by_schema = branches
+        .iter()
+        .map(|branch| (branch.schema_name.clone(), branch.schema_name.clone()))
+        .collect::<BTreeMap<_, _>>();
 
-    let mut by_schema = BTreeMap::new();
-    for (value, target) in mapping {
-        let Some(schema_name) = discriminator_mapping_schema_name(target, &branch_names) else {
-            return Err(ValidationError::InvalidDiscriminatorMapping {
-                context: context.to_owned(),
-                value: value.clone(),
-                target: target.clone(),
-            });
-        };
+    if let Some(mapping) = discriminator.mapping.as_ref() {
+        for (value, target) in mapping {
+            let Some(schema_name) = discriminator_mapping_schema_name(target, &branch_names) else {
+                return Err(ValidationError::InvalidDiscriminatorMapping {
+                    context: context.to_owned(),
+                    value: value.clone(),
+                    target: target.clone(),
+                });
+            };
 
-        if by_schema
-            .insert(schema_name.clone(), value.clone())
-            .is_some()
-        {
-            return Err(ValidationError::DuplicateDiscriminatorMapping {
-                context: context.to_owned(),
-                schema: schema_name,
-            });
+            if by_schema.get(&schema_name) != Some(&schema_name) {
+                return Err(ValidationError::DuplicateDiscriminatorMapping {
+                    context: context.to_owned(),
+                    schema: schema_name,
+                });
+            }
+
+            by_schema.insert(schema_name, value.clone());
         }
     }
 
+    let mut values = BTreeSet::new();
     for branch in branches {
-        if !by_schema.contains_key(&branch.schema_name) {
-            return Err(ValidationError::MissingDiscriminatorMapping {
+        let value = by_schema
+            .get(&branch.schema_name)
+            .expect("every branch starts with an implicit discriminator value");
+        if !values.insert(value.clone()) {
+            return Err(ValidationError::DuplicateDiscriminatorValue {
                 context: context.to_owned(),
-                schema: branch.schema_name.clone(),
+                value: value.clone(),
             });
         }
     }
@@ -964,37 +966,74 @@ fn reject_any_of_cycles(components: &[ValidatedComponent]) -> Result<(), Validat
         .iter()
         .map(|component| (component.schema_name.clone(), component))
         .collect::<BTreeMap<_, _>>();
+    let schemas_by_rust_name = components
+        .values()
+        .map(|component| {
+            (
+                type_ident(&component.schema_name),
+                component.schema_name.clone(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
     let graph = components
         .values()
         .filter_map(|component| {
             let mut targets = vec![];
-            collect_component_any_of_targets(component, &mut targets);
+            collect_component_union_targets(component, &schemas_by_rust_name, &mut targets);
             (!targets.is_empty()).then(|| (component.schema_name.clone(), targets))
         })
         .collect::<BTreeMap<_, _>>();
 
     let mut visited = BTreeSet::new();
-    for schema_name in graph.keys() {
+    for schema_name in components
+        .values()
+        .filter(|component| component_contains_union(component))
+        .map(|component| component.schema_name.as_str())
+    {
         let mut stack = vec![];
-        visit_any_of_cycle(schema_name, &components, &graph, &mut stack, &mut visited)?;
+        visit_any_of_cycle(schema_name, &graph, &mut stack, &mut visited)?;
     }
 
     Ok(())
 }
 
-fn collect_component_any_of_targets(component: &ValidatedComponent, targets: &mut Vec<String>) {
+fn component_contains_union(component: &ValidatedComponent) -> bool {
     match &component.kind {
-        ValidatedComponentKind::Reference(_) => {}
+        ValidatedComponentKind::Reference(_) => false,
         ValidatedComponentKind::Struct(fields) => {
-            for field in fields {
-                collect_type_any_of_targets(&field.ty, targets);
-            }
+            fields.iter().any(|field| field.ty.contains_any_of())
         }
-        ValidatedComponentKind::Type(ty) => collect_type_any_of_targets(ty, targets),
+        ValidatedComponentKind::Type(ty) => ty.contains_any_of(),
     }
 }
 
-fn collect_type_any_of_targets(ty: &ValidatedType, targets: &mut Vec<String>) {
+fn collect_component_union_targets(
+    component: &ValidatedComponent,
+    schemas_by_rust_name: &BTreeMap<String, String>,
+    targets: &mut Vec<String>,
+) {
+    match &component.kind {
+        ValidatedComponentKind::Reference(rust_name) => {
+            if let Some(schema_name) = schemas_by_rust_name.get(rust_name) {
+                targets.push(schema_name.clone());
+            }
+        }
+        ValidatedComponentKind::Struct(fields) => {
+            for field in fields {
+                collect_type_union_targets(&field.ty, schemas_by_rust_name, targets);
+            }
+        }
+        ValidatedComponentKind::Type(ty) => {
+            collect_type_union_targets(ty, schemas_by_rust_name, targets);
+        }
+    }
+}
+
+fn collect_type_union_targets(
+    ty: &ValidatedType,
+    schemas_by_rust_name: &BTreeMap<String, String>,
+    targets: &mut Vec<String>,
+) {
     match &ty.kind {
         ValidatedTypeKind::AnyOf(union) => {
             targets.extend(
@@ -1004,11 +1043,17 @@ fn collect_type_any_of_targets(ty: &ValidatedType, targets: &mut Vec<String>) {
                     .map(|variant| variant.schema_name.clone()),
             );
         }
-        ValidatedTypeKind::Array(item) => collect_type_any_of_targets(item, targets),
+        ValidatedTypeKind::Array(item) => {
+            collect_type_union_targets(item, schemas_by_rust_name, targets);
+        }
+        ValidatedTypeKind::Named(rust_name) => {
+            if let Some(schema_name) = schemas_by_rust_name.get(rust_name) {
+                targets.push(schema_name.clone());
+            }
+        }
         // Keep these arms explicit so future ValidatedTypeKind variants force a
-        // decision about whether they can contain nested anyOf schemas.
-        ValidatedTypeKind::Named(_)
-        | ValidatedTypeKind::String
+        // decision about whether they can contain component references.
+        ValidatedTypeKind::String
         | ValidatedTypeKind::ParsedString(_)
         | ValidatedTypeKind::ParsedInteger(_)
         | ValidatedTypeKind::Integer(_)
@@ -1022,20 +1067,13 @@ fn collect_type_any_of_targets(ty: &ValidatedType, targets: &mut Vec<String>) {
 
 fn any_of_cycle_successors(
     schema_name: &str,
-    components: &BTreeMap<String, &ValidatedComponent>,
     graph: &BTreeMap<String, Vec<String>>,
 ) -> Vec<String> {
-    match components.get(schema_name).map(|component| &component.kind) {
-        Some(ValidatedComponentKind::Reference(target)) => {
-            any_of_cycle_successors(target, components, graph)
-        }
-        _ => graph.get(schema_name).cloned().unwrap_or_default(),
-    }
+    graph.get(schema_name).cloned().unwrap_or_default()
 }
 
 fn visit_any_of_cycle(
     schema_name: &str,
-    components: &BTreeMap<String, &ValidatedComponent>,
     graph: &BTreeMap<String, Vec<String>>,
     stack: &mut Vec<String>,
     visited: &mut BTreeSet<String>,
@@ -1052,8 +1090,8 @@ fn visit_any_of_cycle(
     }
 
     stack.push(schema_name.to_owned());
-    for target in any_of_cycle_successors(schema_name, components, graph) {
-        visit_any_of_cycle(&target, components, graph, stack, visited)?;
+    for target in any_of_cycle_successors(schema_name, graph) {
+        visit_any_of_cycle(&target, graph, stack, visited)?;
     }
     stack.pop();
     visited.insert(schema_name.to_owned());

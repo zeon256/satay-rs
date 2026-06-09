@@ -1924,7 +1924,6 @@ components:
         propertyName: kind
         mapping:
           dog: '#/components/schemas/Dog'
-          cat: Cat
 "##,
     )
     .expect("generate discriminator oneOf fixture");
@@ -1941,7 +1940,7 @@ components:
         .expect("Pet union exists");
     let union = &types_rs.contents[union_start..];
     assert!(union.contains("#[cfg_attr(feature = \"serde\", serde(rename = \"dog\"))]"));
-    assert!(union.contains("#[cfg_attr(feature = \"serde\", serde(rename = \"cat\"))]"));
+    assert!(union.contains("#[cfg_attr(feature = \"serde\", serde(rename = \"Cat\"))]"));
 }
 
 #[test]

@@ -324,11 +324,11 @@ pub enum ValidationError {
     #[error("{context}.discriminator.mapping maps multiple values to branch schema `{schema}`")]
     DuplicateDiscriminatorMapping { context: String, schema: String },
 
-    /// A discriminator mapping omits one of the union branch schemas.
+    /// Multiple discriminator branches resolve to the same discriminator value after implicit defaults are applied.
     ///
-    /// Error message: `{context}.discriminator.mapping does not map branch schema `{schema}``
-    #[error("{context}.discriminator.mapping does not map branch schema `{schema}`")]
-    MissingDiscriminatorMapping { context: String, schema: String },
+    /// Error message: `{context}.discriminator resolves multiple branch schemas to value `{value}``
+    #[error("{context}.discriminator resolves multiple branch schemas to value `{value}`")]
+    DuplicateDiscriminatorValue { context: String, value: String },
 
     // -- Schema constraint validation --
     /// A string schema specifies a `minLength` greater than its `maxLength`.

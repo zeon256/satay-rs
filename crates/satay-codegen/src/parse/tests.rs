@@ -2516,6 +2516,92 @@ paths:
   /ping:
     get:
       operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Dog:
+      type: object
+      properties:
+        name:
+          type: string
+    Cat:
+      type: object
+      properties:
+        name:
+          type: string
+    Pet:
+      oneOf:
+        - $ref: '#/components/schemas/Dog'
+        - $ref: '#/components/schemas/Cat'
+      discriminator:
+        propertyName: kind
+        mapping:
+          Cat: Dog
+"##,
+        );
+        match err {
+            ValidationError::DuplicateDiscriminatorValue { context, value } => {
+                assert_eq!(context, "schema `Pet`");
+                assert_eq!(value, "Cat");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Dog:
+      type: object
+      properties:
+        friend:
+          $ref: '#/components/schemas/Pet'
+    Cat:
+      type: object
+      properties:
+        name:
+          type: string
+    Pet:
+      oneOf:
+        - $ref: '#/components/schemas/Dog'
+        - $ref: '#/components/schemas/Cat'
+      discriminator:
+        propertyName: kind
+        mapping:
+          dog: Dog
+"##,
+        );
+        match err {
+            ValidationError::RecursiveAnyOf { context, schema } => {
+                assert_eq!(context, "schema `Pet`");
+                assert_eq!(schema, "Pet");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
       parameters:
         - name: filter
           in: query
