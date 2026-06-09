@@ -1726,6 +1726,32 @@ paths:
 components:
   schemas:
     Broken:
+      anyOf: []
+"##,
+        );
+        match err {
+            ValidationError::EmptyAnyOf { context } => {
+                assert_eq!(context, "schema `Broken`");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Broken:
       anyOf:
         - type: string
 "##,
@@ -1918,6 +1944,39 @@ components:
         child:
           anyOf:
             - $ref: '#/components/schemas/A'
+"##,
+        );
+        match err {
+            ValidationError::RecursiveAnyOf { context, schema } => {
+                assert_eq!(context, "schema `A`");
+                assert_eq!(schema, "A");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    A:
+      anyOf:
+        - $ref: '#/components/schemas/Alias'
+    Alias:
+      $ref: '#/components/schemas/B'
+    B:
+      anyOf:
+        - $ref: '#/components/schemas/A'
 "##,
         );
         match err {
