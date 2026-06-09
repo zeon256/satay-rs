@@ -2,7 +2,7 @@
 import Layout from "@/layouts/main.astro"
 import { CopyButton } from "@/components/landing/CopyButton"
 import { satayUsers, USERS_FILE_PATH, USERS_SUBMISSION_URL } from "@/data/users"
-import { highlightRust, highlightToml } from "@/lib/highlight"
+import { highlightRust, highlightToml, highlightYaml } from "@/lib/highlight"
 import { SITEMAP_INDEX_PATH } from "@/lib/sitemap"
 import { fetchProjectStats, formatDownloads, formatStars } from "@/lib/stats"
 import {
@@ -27,6 +27,7 @@ const GITHUB_URL = "https://github.com/zeon256/satay-rs"
 const CRATES_URL = "https://crates.io/crates/satay-cli"
 const DOCS_URL = "https://docs.rs/satay-codegen"
 const REQWEST_EXAMPLE_TEST_URL = `${GITHUB_URL}/blob/main/examples/reqwest/src/main.rs#L35-L74`
+const EXTENSIONS_DOCS_URL = `${GITHUB_URL}/blob/main/docs/extensions.md`
 const NEA_CARGO_TOML_URL = "https://github.com/InfiniteUnion/nea-rs/blob/main/Cargo.toml"
 const INSTALL_CMD = "cargo install satay-cli"
 const GENERATE_CMD = "satay generate --input openapi.yaml --output src/generated --rustfmt"
@@ -178,11 +179,152 @@ serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 http = "1"`
 
+const extensions = [
+  {
+    id: "parse-as",
+    label: "parse-as",
+    meta: "typed",
+    title: "Parse wire strings as stronger types",
+    body: `Use on <code class="code-inline">type: string</code> schemas when an API sends JSON strings but the Rust field should be a number, date, or time. Serde keeps the wire format as a string.`,
+    types: [
+      "u8",
+      "u16",
+      "u32",
+      "u64",
+      "i8",
+      "i16",
+      "i32",
+      "i64",
+      "f32",
+      "f64",
+      "bool",
+      "date",
+      "naive-datetime",
+      "offset-datetime",
+      "time",
+    ],
+    yamlCode: `BusStopCode:
+  type: string
+  x-satay:
+    parse-as: u32
+
+EstimatedArrival:
+  type: string
+  x-satay:
+    parse-as: offset-datetime
+
+Monitored:
+  type: integer
+  x-satay:
+    parse-as: bool`,
+    rustCode: `pub struct Bus {
+    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_u32"))]
+    pub bus_stop_code: u32,
+
+    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_offset_datetime"))]
+    pub estimated_arrival: satay_runtime::OffsetDateTime,
+
+    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_integer::as_bool"))]
+    pub monitored: bool,
+}`,
+  },
+  {
+    id: "integer-type",
+    label: "integer-type",
+    meta: "integers",
+    title: "Override inferred integer primitives",
+    body: `Satay infers the smallest Rust integer from <code class="code-inline">minimum</code> and <code class="code-inline">maximum</code> bounds. Use <code class="code-inline">integer-type</code> to opt out or pick a specific primitive. <code class="code-inline">auto</code> is the default.`,
+    types: ["auto", "u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64"],
+    yamlCode: `Direction:
+  type: integer
+  format: int32
+  description: >
+    The direction in which the bus travels. Valid values are 1 or 2;
+    loop services only have 1 direction.
+  example: 1
+  minimum: 1
+  maximum: 2`,
+    rustCode: `/// The direction in which the bus travels. Valid values are 1 or 2; loop services only have 1 direction.
+#[nutype::nutype(
+    validate(greater_or_equal = 1, less_or_equal = 2),
+    derive(
+        Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, AsRef, Deref, TryFrom, Into, Display
+    ),
+    cfg_attr(feature = "serde", derive(Serialize, Deserialize))
+)]
+pub struct BusRouteDirection(u8);`,
+  },
+  {
+    id: "enum-variants",
+    label: "enum-variants",
+    meta: "rename",
+    title: "Descriptive enum variant names",
+    body: `Map terse wire values to readable Rust variants. Mapping a value to <code class="code-inline">Unknown</code> folds it into Satay's generated fallback variant.`,
+    types: null,
+    yamlCode: `Type:
+  type: string
+  description: >
+    Vehicle type of the bus.
+  enum: [SD, DD, BD, ""]
+  example: SD
+  x-satay:
+    enum-variants:
+      SD: SingleDecker
+      DD: DoubleDecker
+      BD: Bendy
+      "": Unknown`,
+    rustCode: `/// Vehicle type of the bus.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum BusArrivalTimingType {
+    #[cfg_attr(feature = "serde", serde(rename = "SD"))]
+    SingleDecker,
+    #[cfg_attr(feature = "serde", serde(rename = "DD"))]
+    DoubleDecker,
+    #[cfg_attr(feature = "serde", serde(rename = "BD"))]
+    Bendy,
+    #[default]
+    #[cfg_attr(feature = "serde", serde(other))]
+    Unknown,
+}`,
+  },
+  {
+    id: "treat-error-as-none",
+    label: "treat-error-as-none",
+    meta: "optional",
+    title: "Treat deserialization errors as None",
+    body: `Make a field <code class="code-inline">Option&lt;T&gt;</code>. When nested deserialization fails, the field resolves to <code class="code-inline">None</code> instead of failing the whole response. Requires the generated crate's <code class="code-inline">json</code> feature.`,
+    types: null,
+    yamlCode: `BusServiceArrival:
+  type: object
+  required: [ServiceNo, NextBus]
+  properties:
+    ServiceNo:
+      type: string
+    NextBus:
+      $ref: "#/components/schemas/BusArrivalTiming"
+      x-satay:
+        treat-error-as-none: true`,
+    rustCode: `pub struct BusServiceArrival {
+    pub service_no: String,
+    #[cfg_attr(feature = "serde", serde(
+        rename = "NextBus",
+        deserialize_with = "satay_runtime::treat_error_as_none::deserialize",
+        serialize_with = "satay_runtime::treat_error_as_none::serialize",
+        default,
+        skip_serializing_if = "Option::is_none"
+    ))]
+    pub next_bus: Option<BusArrivalTiming>,
+}`,
+  },
+] as const
+
 const [
   { crateDownloads, githubStars },
   highlightedTransportExamples,
   testingExampleHtml,
   neaCargoTomlHtml,
+  highlightedExtensions,
 ] = await Promise.all([
   fetchProjectStats(),
   Promise.all(
@@ -193,12 +335,20 @@ const [
   ),
   highlightRust(testingExampleCode),
   highlightToml(neaCargoTomlCode),
+  Promise.all(
+    extensions.map(async (extension) => ({
+      ...extension,
+      yamlHtml: await highlightYaml(extension.yamlCode),
+      rustHtml: extension.rustCode ? await highlightRust(extension.rustCode) : null,
+    })),
+  ),
 ])
 
 const sectionLinks = [
   { href: "#compare", label: "Compare" },
   { href: "#why-sans-io", label: "sans-IO" },
   { href: "#features", label: "Features" },
+  { href: "#extensions", label: "Extensions" },
   { href: "#users", label: "Users" },
   { href: "#how-it-works", label: "How it works" },
 ]
@@ -610,6 +760,101 @@ const features = [
             })
           }
         </div>
+      </section>
+
+      <section class="section-anchor animate-rise delay-625 mt-24" id="extensions">
+        <div class="section-intro">
+          <p class="section-label">x-satay extensions</p>
+          <h2 class="font-heading text-3xl font-semibold tracking-tight text-balance md:text-4xl">
+            When the spec alone is not enough
+          </h2>
+          <p class="text-cream-muted text-base leading-relaxed">
+            Most schemas map cleanly to Rust. For the rest, annotate the OpenAPI with
+            <code class="code-inline">x-satay</code> vendor extensions and regenerate.
+          </p>
+        </div>
+
+        <div class="extension-tabs" aria-label="Satay OpenAPI extensions">
+          {
+            highlightedExtensions.map((extension, index) => (
+              <input
+                class="extension-tab-input"
+                type="radio"
+                name="extension-example"
+                id={`extension-tab-${extension.id}`}
+                checked={index === 0}
+              />
+            ))
+          }
+
+          <div class="extension-tab-list" role="tablist" aria-label="Extension choices">
+            {
+              highlightedExtensions.map((extension) => (
+                <label class="extension-tab-label" for={`extension-tab-${extension.id}`} role="tab">
+                  <span class="extension-tab-label-main">{extension.label}</span>
+                  <span class="extension-tab-label-meta">{extension.meta}</span>
+                </label>
+              ))
+            }
+          </div>
+
+          <div class="extension-tab-panels">
+            {
+              highlightedExtensions.map((extension) => (
+                <article class:list={["extension-tab-panel", `extension-tab-panel--${extension.id}`]}>
+                  <div class="extension-panel-shell">
+                    <div class="extension-panel-copy">
+                      <h3 class="extension-panel-title">{extension.title}</h3>
+                      <p class="text-cream-muted text-sm leading-relaxed" set:html={extension.body} />
+                      {
+                        extension.types && (
+                          <div>
+                            <p class="text-cream-muted mb-2 text-xs font-medium tracking-wide uppercase">
+                              Supported values
+                            </p>
+                            <div class="extension-type-list">
+                              {extension.types.map((typeName) => (
+                                <span class="extension-type-chip">{typeName}</span>
+                              ))}
+                            </div>
+                          </div>
+                        )
+                      }
+                    </div>
+
+                    <div class="extension-code-stack">
+                      <article class="code-panel">
+                        <div class="code-panel-bar">
+                          <span class="code-panel-filename">openapi.yaml</span>
+                        </div>
+                        <pre class="code-compare-pre"><code class="highlight-code language-yaml" set:html={extension.yamlHtml} /></pre>
+                      </article>
+                      {
+                        extension.rustHtml && (
+                          <article class="code-panel">
+                            <div class="code-panel-bar">
+                              <span class="code-panel-filename">generated.rs</span>
+                            </div>
+                            <pre class="code-compare-pre"><code class="highlight-code language-rust" set:html={extension.rustHtml} /></pre>
+                          </article>
+                        )
+                      }
+                    </div>
+                  </div>
+                </article>
+              ))
+            }
+          </div>
+        </div>
+
+        <p class="text-cream-muted mt-6 text-sm leading-relaxed">
+          Full reference in
+          <a href={EXTENSIONS_DOCS_URL} target="_blank" rel="noreferrer" class="test-example-link mx-1">
+            docs/extensions.md
+            <ArrowSquareOutIcon className="size-3.5" />
+          </a>
+          on GitHub.
+        </p>
       </section>
 
       <section class="section-anchor animate-rise delay-650 mt-24" id="users">

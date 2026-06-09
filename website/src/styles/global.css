@@ -206,6 +206,9 @@
 .delay-600 {
   animation-delay: 600ms;
 }
+.delay-625 {
+  animation-delay: 625ms;
+}
 .delay-650 {
   animation-delay: 650ms;
 }
@@ -352,7 +355,7 @@
 }
 
 .code-panel {
-  @apply overflow-hidden rounded-none border;
+  @apply max-w-full min-w-0 overflow-hidden rounded-none border;
   border-color: oklch(0.52 0.11 42 / 42%);
   background: var(--arb-bg-dark);
 }
@@ -467,7 +470,9 @@
 }
 
 .code-compare-pre {
-  @apply overflow-x-auto p-4 font-mono text-[0.84rem] leading-relaxed sm:text-[0.9rem];
+  @apply max-w-full overflow-x-auto p-4 font-mono text-[0.84rem] leading-relaxed sm:text-[0.9rem];
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
   scrollbar-color: oklch(0.52 0.11 42 / 55%) transparent;
 }
 
@@ -639,4 +644,136 @@
 
 .footer-link {
   @apply inline-flex items-center gap-1.5 text-cream-muted transition-colors hover:text-cream;
+}
+
+.extension-tabs {
+  @apply min-w-0 overflow-hidden rounded-none border;
+  border-color: oklch(0.52 0.11 42 / 42%);
+  background: var(--arb-bg-dark);
+}
+
+.extension-tab-input {
+  @apply sr-only;
+}
+
+.extension-tab-list {
+  @apply flex overflow-x-auto border-b;
+  border-color: oklch(0.94 0.025 88 / 10%);
+  background: oklch(0.19 0.012 35 / 78%);
+  scrollbar-width: none;
+}
+
+.extension-tab-list::-webkit-scrollbar {
+  display: none;
+}
+
+.extension-tab-label {
+  @apply flex min-w-28 flex-1 cursor-pointer flex-col justify-center border-r border-border/10 px-4 py-3 text-cream-muted transition-colors select-none last:border-r-0 hover:bg-cream/5 hover:text-cream;
+}
+
+.extension-tab-label-main {
+  @apply block text-sm leading-tight font-semibold;
+}
+
+.extension-tab-label-meta {
+  @apply mt-0.5 block font-mono text-[length:var(--font-size-mono-label)] text-cream-muted;
+}
+
+.extension-tab-panel {
+  display: none;
+  min-width: 0;
+}
+
+.extension-tab-panels {
+  @apply min-w-0;
+}
+
+#extension-tab-parse-as:checked
+  ~ .extension-tab-panels
+  .extension-tab-panel--parse-as,
+#extension-tab-integer-type:checked
+  ~ .extension-tab-panels
+  .extension-tab-panel--integer-type,
+#extension-tab-enum-variants:checked
+  ~ .extension-tab-panels
+  .extension-tab-panel--enum-variants,
+#extension-tab-treat-error-as-none:checked
+  ~ .extension-tab-panels
+  .extension-tab-panel--treat-error-as-none {
+  display: block;
+}
+
+#extension-tab-parse-as:checked
+  ~ .extension-tab-list
+  [for="extension-tab-parse-as"],
+#extension-tab-integer-type:checked
+  ~ .extension-tab-list
+  [for="extension-tab-integer-type"],
+#extension-tab-enum-variants:checked
+  ~ .extension-tab-list
+  [for="extension-tab-enum-variants"],
+#extension-tab-treat-error-as-none:checked
+  ~ .extension-tab-list
+  [for="extension-tab-treat-error-as-none"] {
+  @apply border-terracotta/25 bg-terracotta/12 text-cream;
+  box-shadow: inset 0 -2px 0 var(--terracotta);
+}
+
+#extension-tab-parse-as:checked
+  ~ .extension-tab-list
+  [for="extension-tab-parse-as"]
+  .extension-tab-label-meta,
+#extension-tab-integer-type:checked
+  ~ .extension-tab-list
+  [for="extension-tab-integer-type"]
+  .extension-tab-label-meta,
+#extension-tab-enum-variants:checked
+  ~ .extension-tab-list
+  [for="extension-tab-enum-variants"]
+  .extension-tab-label-meta,
+#extension-tab-treat-error-as-none:checked
+  ~ .extension-tab-list
+  [for="extension-tab-treat-error-as-none"]
+  .extension-tab-label-meta {
+  @apply text-ember;
+}
+
+#extension-tab-parse-as:focus-visible
+  ~ .extension-tab-list
+  [for="extension-tab-parse-as"],
+#extension-tab-integer-type:focus-visible
+  ~ .extension-tab-list
+  [for="extension-tab-integer-type"],
+#extension-tab-enum-variants:focus-visible
+  ~ .extension-tab-list
+  [for="extension-tab-enum-variants"],
+#extension-tab-treat-error-as-none:focus-visible
+  ~ .extension-tab-list
+  [for="extension-tab-treat-error-as-none"] {
+  outline: 2px solid oklch(0.66 0.2 48 / 70%);
+  outline-offset: 2px;
+}
+
+.extension-panel-shell {
+  @apply grid min-w-0 gap-6 p-4 sm:p-5 lg:grid-cols-[minmax(0,0.72fr)_minmax(0,1.28fr)] lg:items-start lg:gap-8 lg:p-6;
+}
+
+.extension-panel-copy {
+  @apply min-w-0 space-y-4;
+}
+
+.extension-panel-title {
+  @apply font-heading text-xl font-semibold tracking-tight text-balance md:text-2xl;
+}
+
+.extension-type-list {
+  @apply flex flex-wrap gap-1.5;
+}
+
+.extension-type-chip {
+  @apply inline-flex rounded-none border border-border/50 bg-charcoal/50 px-2.5 py-1 font-mono text-[calc(0.6875rem+2pt)] text-cream-muted;
+}
+
+.extension-code-stack {
+  @apply min-w-0 max-w-full space-y-3;
 }

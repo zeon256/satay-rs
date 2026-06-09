@@ -21,6 +21,7 @@
     "@arborium/arborium": "^2.18.0",
     "@arborium/rust": "^2.18.0",
     "@arborium/toml": "^2.18.0",
+    "@arborium/yaml": "^2.18.0",
     "@astrojs/react": "^5",
     "@fontsource/ibm-plex-sans": "^5.2.8",
     "@fontsource/ibm-plex-serif": "^5.2.7",

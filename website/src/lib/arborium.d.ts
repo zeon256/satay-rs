@@ -9,3 +9,9 @@ declare module "@arborium/toml" {
 
   export default grammar
 }
+
+declare module "@arborium/yaml" {
+  const grammar: unknown
+
+  export default grammar
+}

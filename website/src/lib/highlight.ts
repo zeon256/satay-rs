@@ -8,6 +8,7 @@ import {
 } from "@arborium/arborium"
 import * as rustGrammar from "@arborium/rust"
 import * as tomlGrammar from "@arborium/toml"
+import * as yamlGrammar from "@arborium/yaml"
 
 const quietLogger = {
   debug: () => {},
@@ -18,6 +19,7 @@ const quietLogger = {
 let hostWasmPromise: Promise<Uint8Array<ArrayBuffer>> | null = null
 let rustGrammarPromise: Promise<Grammar> | null = null
 let tomlGrammarPromise: Promise<Grammar> | null = null
+let yamlGrammarPromise: Promise<Grammar> | null = null
 
 async function loadWasm(specifier: string): Promise<Uint8Array<ArrayBuffer>> {
   return await readFile(new URL(import.meta.resolve(specifier)))
@@ -77,6 +79,23 @@ export async function highlightRust(source: string): Promise<string> {
 
 export async function highlightToml(source: string): Promise<string> {
   const grammar = await loadTomlGrammar()
+
+  return await grammar.highlight(source)
+}
+
+async function loadYamlGrammar(): Promise<Grammar> {
+  if (!yamlGrammarPromise) {
+    yamlGrammarPromise = registerLocalGrammar(
+      yamlGrammar,
+      "@arborium/yaml/grammar_bg.wasm"
+    )
+  }
+
+  return await yamlGrammarPromise
+}
+
+export async function highlightYaml(source: string): Promise<string> {
+  const grammar = await loadYamlGrammar()
 
   return await grammar.highlight(source)
 }

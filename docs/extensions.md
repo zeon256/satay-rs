@@ -108,11 +108,7 @@ Use `x-satay.enum-variants` on string enums when the wire values are terse codes
 ```yaml
 Type:
   type: string
-  enum:
-    - SD
-    - DD
-    - BD
-    - ""
+  enum: [SD, DD, BD, ""]
   x-satay:
     enum-variants:
       SD: SingleDecker
@@ -130,9 +126,7 @@ Use `x-satay.treat-error-as-none` on a struct field to make the generated field 
 ```yaml
 BusServiceArrival:
   type: object
-  required:
-    - ServiceNo
-    - NextBus
+  required: [ServiceNo, NextBus]
   properties:
     ServiceNo:
       type: string
