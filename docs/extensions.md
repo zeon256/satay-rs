@@ -2,6 +2,22 @@
 
 Satay accepts OpenAPI vendor extensions under `x-satay` when the spec's shape alone cannot produce the Rust type you want.
 
+## Standard `unixtime` Format
+
+Satay supports the OpenAPI format registry's `unixtime` format on `type: integer` and `type: string` schemas. Both generate `satay_runtime::OffsetDateTime` and represent Unix timestamp seconds.
+
+```yaml
+StartedAt:
+  type: integer
+  format: unixtime
+
+StartedAtString:
+  type: string
+  format: unixtime
+```
+
+Integer-backed fields deserialize from JSON numbers and serialize back to numbers. String-backed fields deserialize from JSON strings and serialize back to strings. Path, query, and header parameters encode as decimal seconds.
+
 ## `parse-as`
 
 Use `x-satay.parse-as` on `type: string` schemas when an API sends a value as a JSON string but the Rust field should be a stronger type. Serde deserializes from a string and serializes back to a string, so the wire format stays the same.

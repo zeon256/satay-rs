@@ -215,6 +215,7 @@ pub fn parse_as_rust_type(parse_as: ParseAs) -> syn::Type {
         ParseAs::Date => parse_quote!(satay_runtime::Date),
         ParseAs::NaiveDateTime => parse_quote!(satay_runtime::PrimitiveDateTime),
         ParseAs::OffsetDateTime => parse_quote!(satay_runtime::OffsetDateTime),
+        ParseAs::UnixTime => parse_quote!(satay_runtime::OffsetDateTime),
         ParseAs::Time => parse_quote!(satay_runtime::Time),
         ParseAs::IntegerRange | ParseAs::NumberRange => {
             unreachable!("range parse-as uses generated range types")
@@ -238,6 +239,7 @@ pub fn parse_as_string_serde_module(parse_as: ParseAs) -> &'static str {
         ParseAs::Date => "satay_runtime::serde_string::as_date",
         ParseAs::NaiveDateTime => "satay_runtime::serde_string::as_naive_datetime",
         ParseAs::OffsetDateTime => "satay_runtime::serde_string::as_offset_datetime",
+        ParseAs::UnixTime => "satay_runtime::serde_string::as_unix_time",
         ParseAs::Time => "satay_runtime::serde_string::as_time",
         ParseAs::IntegerRange | ParseAs::NumberRange => {
             unreachable!("range parse-as uses generated range types")
@@ -248,6 +250,7 @@ pub fn parse_as_string_serde_module(parse_as: ParseAs) -> &'static str {
 pub fn parse_as_integer_serde_module(parse_as: ParseAs) -> &'static str {
     match parse_as {
         ParseAs::Bool => "satay_runtime::serde_integer::as_bool",
+        ParseAs::UnixTime => "satay_runtime::serde_integer::as_unix_time",
         ParseAs::U8
         | ParseAs::U16
         | ParseAs::U32
@@ -263,7 +266,7 @@ pub fn parse_as_integer_serde_module(parse_as: ParseAs) -> &'static str {
         | ParseAs::OffsetDateTime
         | ParseAs::Time
         | ParseAs::IntegerRange
-        | ParseAs::NumberRange => unreachable!("only bool can parse from integer"),
+        | ParseAs::NumberRange => unreachable!("only bool and unixtime can parse from integer"),
     }
 }
 

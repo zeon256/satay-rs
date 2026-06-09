@@ -1123,7 +1123,7 @@ paths:
     assert!(
         parts_rs
             .contents
-            .contains("satay_runtime::format_date(value)")
+            .contains("satay_runtime::format_date(&value)")
     );
 
     let temp = tempfile::tempdir().expect("create temp crate");
@@ -1193,7 +1193,7 @@ paths:
     assert!(
         parts_rs
             .contents
-            .contains("satay_runtime::format_naive_datetime(value)")
+            .contains("satay_runtime::format_naive_datetime(&value)")
     );
 
     let temp = tempfile::tempdir().expect("create temp crate");
@@ -1226,6 +1226,164 @@ mod tests {
         &[],
         "parse-as naive-datetime generated crate tests",
     );
+}
+
+#[test]
+fn unixtime_format_generates_offset_datetime_types_and_seconds_encoding() {
+    let files = satay_codegen::generate(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /events:
+    get:
+      operationId: getEvents
+      parameters:
+        - name: at
+          in: query
+          required: true
+          schema:
+            type: integer
+            format: unixtime
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    EventTime:
+      type: integer
+      format: unixtime
+    Event:
+      type: object
+      required:
+        - startedAt
+        - endedAt
+        - createdAtString
+        - endedAtString
+      properties:
+        startedAt:
+          type: integer
+          format: unixtime
+        endedAt:
+          type: [integer, "null"]
+          format: unixtime
+        createdAtString:
+          type: string
+          format: unixtime
+        endedAtString:
+          type: [string, "null"]
+          format: unixtime
+"#,
+    )
+    .expect("generate unixtime fixture");
+
+    let types_rs = find_file(&files, "types.rs");
+    assert!(
+        types_rs
+            .contents
+            .contains("pub type EventTime = satay_runtime::OffsetDateTime")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("pub started_at: satay_runtime::OffsetDateTime")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("pub ended_at: Option<satay_runtime::OffsetDateTime>")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("pub created_at_string: satay_runtime::OffsetDateTime")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("with = \"satay_runtime::serde_integer::as_unix_time\"")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("with = \"satay_runtime::serde_integer::as_unix_time::option\"")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("with = \"satay_runtime::serde_string::as_unix_time\"")
+    );
+    assert!(
+        types_rs
+            .contents
+            .contains("with = \"satay_runtime::serde_string::as_unix_time::option\"")
+    );
+
+    let parts_rs = find_file(&files, "get_events/parts.rs");
+    assert!(
+        parts_rs
+            .contents
+            .contains("pub at: satay_runtime::OffsetDateTime")
+    );
+    assert!(
+        parts_rs
+            .contents
+            .contains("satay_runtime::format_unix_time(&input.at)")
+    );
+
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+
+    let runtime_path = runtime_path_toml();
+
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::*;
+
+    #[test]
+    fn encodes_unixtime_query_parameter_and_json_values() {
+        let at = satay_runtime::OffsetDateTime::from_unix_timestamp(1_719_892_800).unwrap();
+        let before_epoch = satay_runtime::OffsetDateTime::from_unix_timestamp(-1).unwrap();
+
+        let parts = get_events_parts(GetEventsInput::new(at)).expect("request parts");
+        assert_eq!(parts.uri, "/events?at=1719892800");
+
+        let event: Event = serde_json::from_value(serde_json::json!({
+            "startedAt": 1719892800,
+            "endedAt": null,
+            "createdAtString": "1719892800",
+            "endedAtString": "-1"
+        }))
+        .unwrap();
+
+        assert_eq!(event.started_at, at);
+        assert_eq!(event.ended_at, None);
+        assert_eq!(event.created_at_string, at);
+        assert_eq!(event.ended_at_string, Some(before_epoch));
+
+        let encoded = serde_json::to_value(event).unwrap();
+        assert_eq!(
+            encoded,
+            serde_json::json!({
+                "startedAt": 1719892800,
+                "endedAt": null,
+                "createdAtString": "1719892800",
+                "endedAtString": "-1"
+            })
+        );
+    }
+}
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    run_temp_cargo(crate_dir, "test", &[], "unixtime generated crate tests");
 }
 
 #[test]

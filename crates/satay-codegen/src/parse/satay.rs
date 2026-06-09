@@ -184,6 +184,7 @@ pub(super) fn satay_parse_as_wire(parse_as: ParseAs) -> &'static str {
         ParseAs::Date => "date",
         ParseAs::NaiveDateTime => "naive-datetime",
         ParseAs::OffsetDateTime => "offset-datetime",
+        ParseAs::UnixTime => "unixtime",
         ParseAs::Time => "time",
         ParseAs::IntegerRange => "integer-range",
         ParseAs::NumberRange => "number-range",
