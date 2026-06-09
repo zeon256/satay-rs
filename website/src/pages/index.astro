@@ -39,11 +39,11 @@ const transportExamples = [
     meta: "async",
     code: `use generated::{Api, BusServiceNumber};
 use satay_reqwest::{reqwest, ReqwestActionExt};
+use std::{env, error::Error};
 
-type Error = Box<dyn std::error::Error>;
-
-async fn via_reqwest(account_key: String) -> Result<(), Error> {
-    let api = Api::new().account_key(account_key);
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    let api = Api::new().account_key(env::var("LTA_ACCOUNT_KEY")?);
     let action = api
         .get_bus_arrival(83139)
         .service_no(BusServiceNumber::try_new("15")?);
@@ -61,11 +61,10 @@ async fn via_reqwest(account_key: String) -> Result<(), Error> {
     meta: "blocking",
     code: `use generated::{Api, BusServiceNumber};
 use satay_reqwest::{reqwest, ReqwestBlockingActionExt};
+use std::{env, error::Error};
 
-type Error = Box<dyn std::error::Error>;
-
-fn via_reqwest_blocking(account_key: String) -> Result<(), Error> {
-    let api = Api::new().account_key(account_key);
+fn main() -> Result<(), Box<dyn Error>> {
+    let api = Api::new().account_key(env::var("LTA_ACCOUNT_KEY")?);
     let action = api
         .get_bus_arrival(83139)
         .service_no(BusServiceNumber::try_new("15")?);
@@ -82,11 +81,10 @@ fn via_reqwest_blocking(account_key: String) -> Result<(), Error> {
     meta: "blocking",
     code: `use generated::{Api, BusServiceNumber};
 use satay_ureq::{ureq, UreqActionExt};
+use std::{env, error::Error};
 
-type Error = Box<dyn std::error::Error>;
-
-fn via_ureq(account_key: String) -> Result<(), Error> {
-    let api = Api::new().account_key(account_key);
+fn main() -> Result<(), Box<dyn Error>> {
+    let api = Api::new().account_key(env::var("LTA_ACCOUNT_KEY")?);
     let action = api
         .get_bus_arrival(83139)
         .service_no(BusServiceNumber::try_new("15")?);
@@ -107,37 +105,25 @@ fn via_ureq(account_key: String) -> Result<(), Error> {
     meta: "sans-IO",
     code: `use generated::{Api, BusServiceNumber, GetBusArrivalAction};
 use satay_runtime::ResponseParts;
+use std::{env, error::Error, mem};
 
-type Error = Box<dyn std::error::Error>;
-
-struct RawResponse {
-    status: http::StatusCode,
-    headers: http::HeaderMap,
-    body: Vec<u8>,
-}
-
-async fn via_custom_transport(account_key: String) -> Result<(), Error> {
-    let api = Api::new().account_key(account_key);
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    let api = Api::new().account_key(env::var("LTA_ACCOUNT_KEY")?);
     let action = api
         .get_bus_arrival(83139)
         .service_no(BusServiceNumber::try_new("15")?);
 
-    let request: http::Request<Vec<u8>> = action.request()?;
-    let response = send_over_my_transport(request).await?;
+    let request: reqwest::Request = action.request()?.try_into()?;
+    let mut response = reqwest::Client::new().execute(request).await?;
 
     let _decoded = GetBusArrivalAction::decode(ResponseParts {
-        status: response.status,
-        headers: response.headers,
-        body: response.body,
+        status: response.status(),
+        headers: mem::take(response.headers_mut()),
+        body: response.bytes().await?,
     })?;
 
     Ok(())
-}
-
-async fn send_over_my_transport(
-    _request: http::Request<Vec<u8>>,
-) -> Result<RawResponse, Error> {
-    todo!("use your HTTP client, WASM fetch, queue, or test harness")
 }`,
   },
 ] as const
@@ -146,11 +132,10 @@ const testingExampleCode = `use generated::{
     Api, BusServiceNumber, GetBusArrivalAction,
     GetBusArrivalResponse,
 };
-
-type Error = Box<dyn std::error::Error>;
+use std::error::Error;
 
 #[test]
-fn tests_the_api_without_http() -> Result<(), Error> {
+fn tests_the_api_without_http() -> Result<(), Box<dyn Error>> {
     let api = Api::new().base_url("").account_key("test-key");
     let action = api
         .get_bus_arrival(83139)

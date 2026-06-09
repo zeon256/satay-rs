@@ -397,7 +397,7 @@
 }
 
 .transport-tab-label-meta {
-  @apply mt-0.5 block font-mono text-[0.7rem] text-cream-muted/80;
+  @apply mt-0.5 block font-mono text-[length:var(--font-size-mono-label)] text-cream-muted;
 }
 
 .transport-tab-panel {
@@ -447,7 +447,7 @@
   ~ .transport-tab-list
   [for="transport-tab-diy"]
   .transport-tab-label-meta {
-  @apply text-terracotta opacity-100;
+  @apply text-ember;
 }
 
 #transport-tab-reqwest:focus-visible
