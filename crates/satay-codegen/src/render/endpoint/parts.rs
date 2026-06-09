@@ -76,13 +76,17 @@ fn render_header_statements(operation: &Operation) -> Vec<syn::Stmt> {
     for parameter in header_parameters {
         let wire_name = lit_str(&parameter.wire_name);
         let field = ident(&parameter.rust_name);
-        let expr = value_expr(input_field(&parameter.rust_name), &parameter.ty);
+        let expr = value_expr(
+            input_field(&parameter.rust_name),
+            &parameter.ty,
+            ValueBase::Owned,
+        );
         if parameter.required {
             statements.push(parse_quote!(
                 satay_runtime::insert_header(&mut headers, #wire_name, #expr)?;
             ));
         } else {
-            let expr = value_expr(parse_quote!(value), &parameter.ty);
+            let expr = value_expr(parse_quote!(value), &parameter.ty, ValueBase::Borrowed);
             statements.push(parse_quote!(
                 if let Some(value) = &input.#field {
                     satay_runtime::insert_header(&mut headers, #wire_name, #expr)?;
@@ -132,7 +136,11 @@ fn render_path(operation: &Operation) -> Vec<syn::Stmt> {
                             && parameter.wire_name == *name
                     })
                     .expect("path parameters validated before render");
-                let expr = value_expr(input_field(&parameter.rust_name), &parameter.ty);
+                let expr = value_expr(
+                    input_field(&parameter.rust_name),
+                    &parameter.ty,
+                    ValueBase::Owned,
+                );
                 statements.push(parse_quote!(
                     satay_runtime::append_path_segment(&mut uri, #expr);
                 ));
@@ -166,13 +174,17 @@ fn render_query_parameter(parameter: &Parameter) -> Vec<syn::Stmt> {
 
     let wire_name = lit_str(&parameter.wire_name);
     if parameter.required {
-        let expr = value_expr(input_field(&parameter.rust_name), &parameter.ty);
+        let expr = value_expr(
+            input_field(&parameter.rust_name),
+            &parameter.ty,
+            ValueBase::Owned,
+        );
         vec![parse_quote!(
             satay_runtime::append_query_pair(&mut uri, &mut first_query, #wire_name, #expr);
         )]
     } else {
         let field = ident(&parameter.rust_name);
-        let expr = value_expr(parse_quote!(value), &parameter.ty);
+        let expr = value_expr(parse_quote!(value), &parameter.ty, ValueBase::Borrowed);
         vec![parse_quote!(
             if let Some(value) = &input.#field {
                 satay_runtime::append_query_pair(&mut uri, &mut first_query, #wire_name, #expr);
@@ -183,7 +195,7 @@ fn render_query_parameter(parameter: &Parameter) -> Vec<syn::Stmt> {
 
 fn render_array_query_parameter(parameter: &Parameter, item: &TypeRef) -> Vec<syn::Stmt> {
     let wire_name = lit_str(&parameter.wire_name);
-    let value = value_expr(parse_quote!(value), item);
+    let value = value_expr(parse_quote!(value), item, ValueBase::Borrowed);
 
     if parameter.required {
         let values = array_values_expr(
@@ -227,6 +239,12 @@ enum ArrayValueBase {
     Borrowed,
 }
 
+#[derive(Clone, Copy)]
+enum ValueBase {
+    Owned,
+    Borrowed,
+}
+
 fn array_values_expr(base: syn::Expr, ty: &TypeRef, base_kind: ArrayValueBase) -> syn::Expr {
     match ty.non_option() {
         TypeRef::Array(_) => match base_kind {
@@ -240,15 +258,17 @@ fn array_values_expr(base: syn::Expr, ty: &TypeRef, base_kind: ArrayValueBase) -
     }
 }
 
-fn value_expr(base: syn::Expr, ty: &TypeRef) -> syn::Expr {
+fn value_expr(base: syn::Expr, ty: &TypeRef, base_kind: ValueBase) -> syn::Expr {
     match ty.non_option() {
         TypeRef::String => parse_quote!(#base.as_str()),
         TypeRef::ParsedString(parse_as) | TypeRef::ParsedInteger(parse_as) => {
-            parsed_value_expr(base, *parse_as)
+            parsed_value_expr(base, *parse_as, base_kind)
         }
         TypeRef::Named(_) => parse_quote!(#base.as_ref()),
         TypeRef::Range(_) => parse_quote!(&#base.to_string()),
-        TypeRef::Constrained { inner, .. } => constrained_value_expr(base, inner.non_option()),
+        TypeRef::Constrained { inner, .. } => {
+            constrained_value_expr(base, inner.non_option(), base_kind)
+        }
         TypeRef::Integer(_) | TypeRef::F32 | TypeRef::F64 | TypeRef::Bool => {
             parse_quote!(&#base.to_string())
         }
@@ -256,13 +276,13 @@ fn value_expr(base: syn::Expr, ty: &TypeRef) -> syn::Expr {
     }
 }
 
-fn constrained_value_expr(base: syn::Expr, inner: &TypeRef) -> syn::Expr {
+fn constrained_value_expr(base: syn::Expr, inner: &TypeRef, base_kind: ValueBase) -> syn::Expr {
     match inner {
         TypeRef::String => parse_quote!(#base.as_ref()),
         TypeRef::Named(_) => parse_quote!(#base.as_ref()),
         TypeRef::Range(_) => parse_quote!(&#base.to_string()),
         TypeRef::ParsedString(parse_as) | TypeRef::ParsedInteger(parse_as) => {
-            parsed_value_expr(base, *parse_as)
+            parsed_value_expr(base, *parse_as, base_kind)
         }
         TypeRef::Integer(_) | TypeRef::F32 | TypeRef::F64 | TypeRef::Bool => {
             parse_quote!(&#base.to_string())
@@ -273,17 +293,18 @@ fn constrained_value_expr(base: syn::Expr, inner: &TypeRef) -> syn::Expr {
     }
 }
 
-fn parsed_value_expr(base: syn::Expr, parse_as: ParseAs) -> syn::Expr {
+fn parsed_value_expr(base: syn::Expr, parse_as: ParseAs, base_kind: ValueBase) -> syn::Expr {
+    let ref_arg = ref_arg(base.clone(), base_kind);
     match parse_as {
-        ParseAs::Date => parse_quote!(&satay_runtime::format_date(&#base)),
+        ParseAs::Date => parse_quote!(&satay_runtime::format_date(#ref_arg)),
         ParseAs::NaiveDateTime => {
-            parse_quote!(&satay_runtime::format_naive_datetime(&#base))
+            parse_quote!(&satay_runtime::format_naive_datetime(#ref_arg))
         }
         ParseAs::OffsetDateTime => {
-            parse_quote!(&satay_runtime::format_offset_datetime(&#base))
+            parse_quote!(&satay_runtime::format_offset_datetime(#ref_arg))
         }
-        ParseAs::UnixTime => parse_quote!(&satay_runtime::format_unix_time(&#base)),
-        ParseAs::Time => parse_quote!(&satay_runtime::format_time(&#base)),
+        ParseAs::UnixTime => parse_quote!(&satay_runtime::format_unix_time(#ref_arg)),
+        ParseAs::Time => parse_quote!(&satay_runtime::format_time(#ref_arg)),
         ParseAs::U8
         | ParseAs::U16
         | ParseAs::U32
@@ -294,10 +315,17 @@ fn parsed_value_expr(base: syn::Expr, parse_as: ParseAs) -> syn::Expr {
         | ParseAs::I64
         | ParseAs::F32
         | ParseAs::F64 => parse_quote!(&#base.to_string()),
-        ParseAs::Bool => parse_quote!(satay_runtime::format_bool(&#base)),
+        ParseAs::Bool => parse_quote!(satay_runtime::format_bool(#ref_arg)),
         ParseAs::IntegerRange | ParseAs::NumberRange => {
             unreachable!("range parse-as uses generated range types")
         }
+    }
+}
+
+fn ref_arg(base: syn::Expr, base_kind: ValueBase) -> syn::Expr {
+    match base_kind {
+        ValueBase::Owned => parse_quote!(&#base),
+        ValueBase::Borrowed => base,
     }
 }
 
