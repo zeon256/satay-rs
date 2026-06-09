@@ -59,7 +59,7 @@ pub(super) fn validate_type_schema(
 
     let schema = object_schema(schema, context)?;
     reject_one_of_all_of(schema, context)?;
-    if !schema.any_of.is_empty() {
+    if schema_is_any_of_union(schema) {
         return validate_any_of_type_schema(schema, context);
     }
     let (schema_type, nullable) = schema_type_and_nullable(schema, context)?;
@@ -127,7 +127,7 @@ fn validate_component_schema(
     } else {
         let schema = object_schema(schema, &context)?;
         reject_one_of_all_of(schema, &context)?;
-        if !schema.any_of.is_empty() {
+        if schema_is_any_of_union(schema) {
             ValidatedComponentKind::Type(validate_any_of_type_schema(schema, &context)?)
         } else {
             let (schema_type, nullable) = schema_type_and_nullable(schema, &context)?;
@@ -192,11 +192,33 @@ fn validate_component_schema(
     })
 }
 
+fn schema_is_any_of_union(schema: &OasObjectSchema) -> bool {
+    if !schema.any_of.is_empty() {
+        return true;
+    }
+
+    schema_is_empty_any_of_shape(schema)
+}
+
+fn schema_is_empty_any_of_shape(schema: &OasObjectSchema) -> bool {
+    if !schema.one_of.is_empty() || !schema.all_of.is_empty() {
+        return false;
+    }
+
+    reject_any_of_sibling_keywords(schema, "").is_ok()
+}
+
 fn validate_any_of_type_schema(
     schema: &OasObjectSchema,
     context: &str,
 ) -> Result<ValidatedType, ValidationError> {
     reject_any_of_sibling_keywords(schema, context)?;
+
+    if schema.any_of.is_empty() {
+        return Err(ValidationError::EmptyAnyOf {
+            context: context.to_owned(),
+        });
+    }
 
     let mut used = BTreeSet::new();
     let mut variants = Vec::with_capacity(schema.any_of.len());
@@ -277,8 +299,12 @@ fn reject_any_of_sibling_keywords(
 }
 
 fn reject_any_of_cycles(components: &[ValidatedComponent]) -> Result<(), ValidationError> {
-    let graph = components
+    let components = components
         .iter()
+        .map(|component| (component.schema_name.clone(), component))
+        .collect::<BTreeMap<_, _>>();
+    let graph = components
+        .values()
         .filter_map(|component| {
             let mut targets = vec![];
             collect_component_any_of_targets(component, &mut targets);
@@ -289,7 +315,7 @@ fn reject_any_of_cycles(components: &[ValidatedComponent]) -> Result<(), Validat
     let mut visited = BTreeSet::new();
     for schema_name in graph.keys() {
         let mut stack = vec![];
-        visit_any_of_cycle(schema_name, &graph, &mut stack, &mut visited)?;
+        visit_any_of_cycle(schema_name, &components, &graph, &mut stack, &mut visited)?;
     }
 
     Ok(())
@@ -328,8 +354,22 @@ fn collect_type_any_of_targets(ty: &ValidatedType, targets: &mut Vec<String>) {
     }
 }
 
+fn any_of_cycle_successors(
+    schema_name: &str,
+    components: &BTreeMap<String, &ValidatedComponent>,
+    graph: &BTreeMap<String, Vec<String>>,
+) -> Vec<String> {
+    match components.get(schema_name).map(|component| &component.kind) {
+        Some(ValidatedComponentKind::Reference(target)) => {
+            any_of_cycle_successors(target, components, graph)
+        }
+        _ => graph.get(schema_name).cloned().unwrap_or_default(),
+    }
+}
+
 fn visit_any_of_cycle(
     schema_name: &str,
+    components: &BTreeMap<String, &ValidatedComponent>,
     graph: &BTreeMap<String, Vec<String>>,
     stack: &mut Vec<String>,
     visited: &mut BTreeSet<String>,
@@ -345,13 +385,9 @@ fn visit_any_of_cycle(
         return Ok(());
     }
 
-    let Some(targets) = graph.get(schema_name) else {
-        return Ok(());
-    };
-
     stack.push(schema_name.to_owned());
-    for target in targets {
-        visit_any_of_cycle(target, graph, stack, visited)?;
+    for target in any_of_cycle_successors(schema_name, components, graph) {
+        visit_any_of_cycle(&target, components, graph, stack, visited)?;
     }
     stack.pop();
     visited.insert(schema_name.to_owned());

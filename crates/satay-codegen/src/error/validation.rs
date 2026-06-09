@@ -227,6 +227,12 @@ pub enum ValidationError {
     #[error("{context}.anyOf[{index}] must be a local component schema reference")]
     UnsupportedAnyOfBranch { context: String, index: usize },
 
+    /// An `anyOf` schema declares no branches.
+    ///
+    /// Error message: `{context} must declare at least one `anyOf` branch`
+    #[error("{context} must declare at least one `anyOf` branch")]
+    EmptyAnyOf { context: String },
+
     /// `anyOf` component schemas form a recursive union cycle.
     ///
     /// Error message: `{context} forms a recursive `anyOf` cycle through schema `{schema}``
