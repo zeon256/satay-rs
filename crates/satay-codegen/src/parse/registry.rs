@@ -3,12 +3,13 @@ use std::collections::BTreeSet;
 use crate::ident::{type_ident, unique_ident};
 use crate::model::{
     Component, ComponentKind, ConstrainedType, EnumVariant, RangeScalar, RangeType, RangeTypeRef,
-    TypeRef, Validation,
+    TypeRef, UnionVariant, Validation,
 };
 
 #[derive(Debug, Default)]
 pub(crate) struct TypeRegistry {
     generated: Vec<ConstrainedType>,
+    inline_unions: Vec<Component>,
     inline_enums: Vec<Component>,
     inline_ranges: Vec<Component>,
     used_names: BTreeSet<String>,
@@ -78,6 +79,23 @@ impl TypeRegistry {
         TypeRef::Named(rust_name)
     }
 
+    pub(crate) fn inline_union_ref(
+        &mut self,
+        type_name_hint: &str,
+        description: Option<String>,
+        variants: Vec<UnionVariant>,
+    ) -> TypeRef {
+        let rust_name = self.generated_type_name(type_name_hint);
+
+        self.inline_unions.push(Component {
+            rust_name: rust_name.clone(),
+            description,
+            kind: ComponentKind::Union(variants),
+        });
+
+        TypeRef::Named(rust_name)
+    }
+
     pub(crate) fn inline_range_ref(
         &mut self,
         type_name_hint: &str,
@@ -103,6 +121,7 @@ impl TypeRegistry {
         self,
         mut components: Vec<Component>,
     ) -> (Vec<Component>, Vec<ConstrainedType>) {
+        components.extend(self.inline_unions);
         components.extend(self.inline_enums);
         components.extend(self.inline_ranges);
         (components, self.generated)

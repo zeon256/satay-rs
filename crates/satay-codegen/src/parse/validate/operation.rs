@@ -13,7 +13,7 @@ use super::super::reference::{
     resolve_parameter, resolve_path_item, resolve_request_body, resolve_response,
 };
 use super::super::resolve::ResolvedDocument;
-use super::schema::validate_type_schema;
+use super::schema::{schema_uses_any_of, validate_type_schema};
 use super::{ValidatedOperation, ValidatedParameter, ValidatedRequestBody, ValidatedResponse};
 use crate::error::ValidationError;
 use crate::model::{HttpMethod, ParameterLocation, PathSegment};
@@ -193,6 +193,12 @@ fn validate_parameter(
 
     if ty.is_nullable() {
         return Err(ValidationError::NullableParameterUnsupported {
+            wire_name: wire_name.clone(),
+        });
+    }
+
+    if ty.contains_any_of() || schema_uses_any_of(document, schema)? {
+        return Err(ValidationError::AnyOfParameterUnsupported {
             wire_name: wire_name.clone(),
         });
     }

@@ -1,11 +1,12 @@
 use crate::ident::{field_ident, type_ident, unique_ident, variant_ident};
 use crate::model::{
-    Component, ComponentKind, ConstrainedType, EnumVariant, Field, RangeType, RangeTypeRef, TypeRef,
+    Component, ComponentKind, ConstrainedType, EnumVariant, Field, RangeType, RangeTypeRef,
+    TypeRef, UnionVariant,
 };
 use crate::parse::registry::TypeRegistry;
 use crate::parse::validate::{
     ValidatedComponent, ValidatedComponentKind, ValidatedDocument, ValidatedField, ValidatedType,
-    ValidatedTypeKind,
+    ValidatedTypeKind, ValidatedUnionVariant,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -115,6 +116,9 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
             (ValidatedTypeKind::Enum(variants), false, None) => {
                 ComponentKind::Enum(variants.clone())
             }
+            (ValidatedTypeKind::AnyOf(variants), false, None) => {
+                ComponentKind::Union(self.parse_union_variants(variants, registry))
+            }
             (ValidatedTypeKind::Range(scalar), false, None) => ComponentKind::Range(RangeType {
                 rust_name,
                 description: description.clone(),
@@ -198,10 +202,28 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
                 description.clone(),
                 registry,
             ),
+            ValidatedTypeKind::AnyOf(variants) => {
+                let variants = self.parse_union_variants(variants, registry);
+                registry.inline_union_ref(type_name_hint, description.clone(), variants)
+            }
             ValidatedTypeKind::Range(scalar) => {
                 registry.inline_range_ref(type_name_hint, description.clone(), *scalar)
             }
         }
+    }
+
+    fn parse_union_variants(
+        &mut self,
+        variants: &[ValidatedUnionVariant],
+        registry: &mut TypeRegistry,
+    ) -> Vec<UnionVariant> {
+        variants
+            .iter()
+            .map(|variant| UnionVariant {
+                rust_name: variant.rust_name.clone(),
+                ty: self.component_ref(&variant.type_name, registry),
+            })
+            .collect()
     }
 
     fn component_ref(&mut self, rust_name: &str, registry: &mut TypeRegistry) -> TypeRef {
@@ -212,7 +234,7 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
         let component = self.validated_component(rust_name);
         let kind = self.parse_component_kind(&component, registry);
         let ty = match &kind {
-            ComponentKind::Struct(_) | ComponentKind::Enum(_) => {
+            ComponentKind::Struct(_) | ComponentKind::Enum(_) | ComponentKind::Union(_) => {
                 TypeRef::Named(rust_name.to_owned())
             }
             ComponentKind::Range(range_type) => TypeRef::Range(RangeTypeRef {

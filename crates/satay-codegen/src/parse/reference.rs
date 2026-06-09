@@ -101,13 +101,12 @@ pub(super) fn schema_type_wire(schema_type: OasSchemaType) -> &'static str {
     }
 }
 
-pub(super) fn reject_composition(
+pub(super) fn reject_one_of_all_of(
     schema: &OasObjectSchema,
     context: &str,
 ) -> Result<(), ValidationError> {
     for (keyword, present) in [
         ("oneOf", !schema.one_of.is_empty()),
-        ("anyOf", !schema.any_of.is_empty()),
         ("allOf", !schema.all_of.is_empty()),
     ] {
         if present {
