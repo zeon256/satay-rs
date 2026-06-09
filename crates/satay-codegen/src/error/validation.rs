@@ -215,6 +215,32 @@ pub enum ValidationError {
         keyword: &'static str,
     },
 
+    /// An `allOf` schema combines supported struct flattening with another schema keyword.
+    ///
+    /// Error message: `{context} uses `allOf` with `{keyword}`; only object branch flattening is supported`
+    #[error("{context} uses `allOf` with `{keyword}`; only object branch flattening is supported")]
+    UnsupportedAllOfSiblingKeyword { context: String, keyword: String },
+
+    /// An `allOf` branch cannot be flattened into a generated Rust struct.
+    ///
+    /// Error message: `{context}.allOf[{index}] must be a local component schema reference or object schema with properties`
+    #[error(
+        "{context}.allOf[{index}] must be a local component schema reference or object schema with properties"
+    )]
+    UnsupportedAllOfBranch { context: String, index: usize },
+
+    /// Two `allOf` branches declare the same object property.
+    ///
+    /// Error message: `{context} declares duplicate `allOf` property `{property}``
+    #[error("{context} declares duplicate `allOf` property `{property}`")]
+    DuplicateAllOfProperty { context: String, property: String },
+
+    /// `allOf` component schemas form a recursive flattening cycle.
+    ///
+    /// Error message: `{context} forms a recursive `allOf` cycle through schema `{schema}``
+    #[error("{context} forms a recursive `allOf` cycle through schema `{schema}`")]
+    RecursiveAllOf { context: String, schema: String },
+
     /// An `anyOf` schema combines a supported union with another schema keyword.
     ///
     /// Error message: `{context} uses `anyOf` with `{keyword}`; only annotation siblings are supported`
