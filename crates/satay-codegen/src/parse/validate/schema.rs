@@ -313,6 +313,8 @@ fn collect_type_any_of_targets(ty: &ValidatedType, targets: &mut Vec<String>) {
             targets.extend(variants.iter().map(|variant| variant.schema_name.clone()));
         }
         ValidatedTypeKind::Array(item) => collect_type_any_of_targets(item, targets),
+        // Keep these arms explicit so future ValidatedTypeKind variants force a
+        // decision about whether they can contain nested anyOf schemas.
         ValidatedTypeKind::Named(_)
         | ValidatedTypeKind::String
         | ValidatedTypeKind::ParsedString(_)
