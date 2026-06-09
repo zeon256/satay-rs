@@ -545,7 +545,9 @@ components:
 
         let search_result = component(&api, "SearchResult");
         match &search_result.kind {
-            ComponentKind::Union(variants) => {
+            ComponentKind::Union(union) => {
+                assert!(union.tag.is_none());
+                let variants = &union.variants;
                 assert_eq!(variants.len(), 2);
                 assert_eq!(variants[0].rust_name, "User");
                 assert_eq!(variants[0].ty, TypeRef::Named("User".to_owned()));
@@ -567,7 +569,9 @@ components:
 
         let envelope_item = component(&api, "EnvelopeItem");
         match &envelope_item.kind {
-            ComponentKind::Union(variants) => {
+            ComponentKind::Union(union) => {
+                assert!(union.tag.is_none());
+                let variants = &union.variants;
                 assert_eq!(variants[0].rust_name, "Organization");
                 assert_eq!(variants[0].ty, TypeRef::Named("Organization".to_owned()));
                 assert_eq!(variants[1].rust_name, "User");
@@ -2187,6 +2191,317 @@ components:
             ValidationError::UnsupportedAnyOfSiblingKeyword { context, keyword } => {
                 assert_eq!(context, "schema `Broken`");
                 assert_eq!(keyword, "type");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+    Organization:
+      type: object
+      properties:
+        id:
+          type: string
+    Broken:
+      oneOf:
+        - $ref: '#/components/schemas/User'
+        - $ref: '#/components/schemas/Organization'
+"##,
+        );
+        match err {
+            ValidationError::UnsupportedComposition { context, keyword } => {
+                assert_eq!(context, "schema `Broken`");
+                assert_eq!(keyword, "oneOf");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Broken:
+      anyOf:
+        - type: object
+          properties:
+            id:
+              type: string
+      discriminator:
+        propertyName: kind
+"##,
+        );
+        match err {
+            ValidationError::UnsupportedDiscriminatorBranch {
+                context,
+                keyword,
+                index,
+            } => {
+                assert_eq!(context, "schema `Broken`");
+                assert_eq!(keyword, "anyOf");
+                assert_eq!(index, 0);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Dog:
+      type: string
+    Cat:
+      type: object
+      properties:
+        name:
+          type: string
+    Pet:
+      oneOf:
+        - $ref: '#/components/schemas/Dog'
+        - $ref: '#/components/schemas/Cat'
+      discriminator:
+        propertyName: kind
+"##,
+        );
+        match err {
+            ValidationError::DiscriminatorBranchNotObject { context, schema } => {
+                assert_eq!(context, "schema `Pet`");
+                assert_eq!(schema, "Dog");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Dog:
+      type: object
+      properties:
+        kind:
+          type: string
+        name:
+          type: string
+    Cat:
+      type: object
+      properties:
+        name:
+          type: string
+    Pet:
+      anyOf:
+        - $ref: '#/components/schemas/Dog'
+        - $ref: '#/components/schemas/Cat'
+      discriminator:
+        propertyName: kind
+"##,
+        );
+        match err {
+            ValidationError::DiscriminatorPropertyConflict {
+                context,
+                schema,
+                property,
+            } => {
+                assert_eq!(context, "schema `Pet`");
+                assert_eq!(schema, "Dog");
+                assert_eq!(property, "kind");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Dog:
+      type: object
+      properties:
+        name:
+          type: string
+    Cat:
+      type: object
+      properties:
+        name:
+          type: string
+    Pet:
+      oneOf:
+        - $ref: '#/components/schemas/Dog'
+        - $ref: '#/components/schemas/Cat'
+      discriminator:
+        propertyName: kind
+        mapping:
+          dog: https://example.test/schemas/Dog
+          cat: Cat
+"##,
+        );
+        match err {
+            ValidationError::InvalidDiscriminatorMapping {
+                context,
+                value,
+                target,
+            } => {
+                assert_eq!(context, "schema `Pet`");
+                assert_eq!(value, "dog");
+                assert_eq!(target, "https://example.test/schemas/Dog");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Dog:
+      type: object
+      properties:
+        name:
+          type: string
+    Cat:
+      type: object
+      properties:
+        name:
+          type: string
+    Wolf:
+      type: object
+      properties:
+        name:
+          type: string
+    Pet:
+      oneOf:
+        - $ref: '#/components/schemas/Dog'
+        - $ref: '#/components/schemas/Cat'
+      discriminator:
+        propertyName: kind
+        mapping:
+          dog: '#/components/schemas/Wolf'
+          cat: Cat
+"##,
+        );
+        match err {
+            ValidationError::InvalidDiscriminatorMapping {
+                context,
+                value,
+                target,
+            } => {
+                assert_eq!(context, "schema `Pet`");
+                assert_eq!(value, "dog");
+                assert_eq!(target, "#/components/schemas/Wolf");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+
+        let err = parse_invalid(
+            r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Dog:
+      type: object
+      properties:
+        name:
+          type: string
+    Cat:
+      type: object
+      properties:
+        name:
+          type: string
+    Pet:
+      oneOf:
+        - $ref: '#/components/schemas/Dog'
+        - $ref: '#/components/schemas/Cat'
+      discriminator:
+        propertyName: kind
+        mapping:
+          dog: Dog
+          hound: '#/components/schemas/Dog'
+          cat: Cat
+"##,
+        );
+        match err {
+            ValidationError::DuplicateDiscriminatorMapping { context, schema } => {
+                assert_eq!(context, "schema `Pet`");
+                assert_eq!(schema, "Dog");
             }
             other => panic!("unexpected error: {other}"),
         }

@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::mem;
 
 use oas3::spec::{
-    ObjectSchema as OasObjectSchema, Schema as OasSchema, SchemaType as OasSchemaType,
-    SchemaTypeSet as OasSchemaTypeSet,
+    Discriminator as OasDiscriminator, ObjectSchema as OasObjectSchema, Schema as OasSchema,
+    SchemaType as OasSchemaType, SchemaTypeSet as OasSchemaTypeSet,
 };
 
 use super::super::helpers::{optional_description, schema_description};
@@ -19,10 +19,10 @@ use super::satay::{
 };
 use super::{
     ValidatedComponent, ValidatedComponentKind, ValidatedField, ValidatedType, ValidatedTypeKind,
-    ValidatedUnionVariant,
+    ValidatedUnion, ValidatedUnionTag, ValidatedUnionVariant,
 };
 use crate::error::ValidationError;
-use crate::ident::{unique_ident, variant_ident};
+use crate::ident::{type_ident, unique_ident, variant_ident};
 use crate::model::{EnumVariant, ParseAs, TypeRef};
 
 pub(super) fn validate_components(
@@ -66,15 +66,15 @@ pub(super) fn validate_type_schema(
     }
 
     let schema = object_schema(schema, context)?;
+    if schema_is_union(schema) {
+        return validate_union_type_schema(document, schema, context);
+    }
     reject_one_of(schema, context)?;
     if !schema.all_of.is_empty() {
         return Err(ValidationError::UnsupportedComposition {
             context: context.to_owned(),
             keyword: "allOf",
         });
-    }
-    if schema_is_any_of_union(schema) {
-        return validate_any_of_type_schema(schema, context);
     }
     let (schema_type, nullable) = schema_type_and_nullable(schema, context)?;
 
@@ -116,7 +116,7 @@ fn schema_uses_any_of_inner(
     }
 
     let schema = object_schema(schema, "anyOf parameter validation")?;
-    if !schema.any_of.is_empty() {
+    if !schema.any_of.is_empty() || !schema.one_of.is_empty() || schema.discriminator.is_some() {
         return Ok(true);
     }
 
@@ -141,9 +141,8 @@ fn validate_component_schema(
         ValidatedComponentKind::Reference(schema_ref_type_name(reference)?)
     } else {
         let schema = object_schema(schema, &context)?;
-        reject_one_of(schema, &context)?;
-        if schema_is_any_of_union(schema) {
-            ValidatedComponentKind::Type(validate_any_of_type_schema(schema, &context)?)
+        if schema_is_union(schema) {
+            ValidatedComponentKind::Type(validate_union_type_schema(document, schema, &context)?)
         } else if !schema.all_of.is_empty() {
             ValidatedComponentKind::Struct(validate_all_of_struct_properties(
                 document,
@@ -214,8 +213,8 @@ fn validate_component_schema(
     })
 }
 
-fn schema_is_any_of_union(schema: &OasObjectSchema) -> bool {
-    if !schema.any_of.is_empty() {
+fn schema_is_union(schema: &OasObjectSchema) -> bool {
+    if !schema.any_of.is_empty() || !schema.one_of.is_empty() || schema.discriminator.is_some() {
         return true;
     }
 
@@ -234,10 +233,36 @@ fn schema_is_empty_any_of_shape(schema: &OasObjectSchema) -> bool {
     reject_any_of_sibling_keywords(schema, "").is_ok()
 }
 
-fn validate_any_of_type_schema(
+fn validate_union_type_schema(
+    document: &ResolvedDocument<'_>,
     schema: &OasObjectSchema,
     context: &str,
 ) -> Result<ValidatedType, ValidationError> {
+    let union = if let Some(discriminator) = schema.discriminator.as_ref() {
+        validate_discriminator_union(document, schema, discriminator, context)?
+    } else {
+        if !schema.one_of.is_empty() {
+            return Err(ValidationError::UnsupportedComposition {
+                context: context.to_owned(),
+                keyword: "oneOf",
+            });
+        }
+        validate_plain_any_of_union(schema, context)?
+    };
+
+    Ok(ValidatedType {
+        kind: ValidatedTypeKind::AnyOf(union),
+        nullable: false,
+        validation: None,
+        description: optional_description(&schema.description),
+        treat_error_as_none: false,
+    })
+}
+
+fn validate_plain_any_of_union(
+    schema: &OasObjectSchema,
+    context: &str,
+) -> Result<ValidatedUnion, ValidationError> {
     reject_any_of_sibling_keywords(schema, context)?;
 
     if schema.any_of.is_empty() {
@@ -262,16 +287,251 @@ fn validate_any_of_type_schema(
             rust_name: unique_ident(type_name.clone(), &mut used),
             type_name,
             schema_name,
+            tag_value: None,
         });
     }
 
-    Ok(ValidatedType {
-        kind: ValidatedTypeKind::AnyOf(variants),
-        nullable: false,
-        validation: None,
-        description: optional_description(&schema.description),
-        treat_error_as_none: false,
+    Ok(ValidatedUnion {
+        variants,
+        tag: None,
     })
+}
+
+fn validate_discriminator_union(
+    document: &ResolvedDocument<'_>,
+    schema: &OasObjectSchema,
+    discriminator: &OasDiscriminator,
+    context: &str,
+) -> Result<ValidatedUnion, ValidationError> {
+    reject_discriminator_union_sibling_keywords(schema, context)?;
+
+    let (keyword, branches) = discriminator_union_branches(schema, context)?;
+    let branch_refs = validate_discriminator_branch_refs(branches, keyword, context)?;
+    let tag_values = validate_discriminator_mapping(discriminator, &branch_refs, context)?;
+
+    let mut used = BTreeSet::new();
+    let mut variants = Vec::with_capacity(branch_refs.len());
+
+    for branch in branch_refs {
+        validate_discriminator_branch_object(
+            document,
+            &branch.schema_name,
+            &discriminator.property_name,
+            context,
+        )?;
+        let tag_value = tag_values
+            .get(&branch.schema_name)
+            .expect("validated discriminator mappings cover every branch")
+            .clone();
+        variants.push(ValidatedUnionVariant {
+            rust_name: unique_ident(branch.type_name.clone(), &mut used),
+            type_name: branch.type_name,
+            schema_name: branch.schema_name,
+            tag_value: Some(tag_value),
+        });
+    }
+
+    Ok(ValidatedUnion {
+        variants,
+        tag: Some(ValidatedUnionTag {
+            property_name: discriminator.property_name.clone(),
+        }),
+    })
+}
+
+#[derive(Debug)]
+struct DiscriminatorBranchRef {
+    type_name: String,
+    schema_name: String,
+}
+
+fn discriminator_union_branches<'a>(
+    schema: &'a OasObjectSchema,
+    context: &str,
+) -> Result<(&'static str, &'a [OasSchema]), ValidationError> {
+    match (!schema.any_of.is_empty(), !schema.one_of.is_empty()) {
+        (true, false) => Ok(("anyOf", &schema.any_of)),
+        (false, true) => Ok(("oneOf", &schema.one_of)),
+        (false, false) | (true, true) => Err(ValidationError::InvalidDiscriminatorUnion {
+            context: context.to_owned(),
+        }),
+    }
+}
+
+fn validate_discriminator_branch_refs(
+    branches: &[OasSchema],
+    keyword: &'static str,
+    context: &str,
+) -> Result<Vec<DiscriminatorBranchRef>, ValidationError> {
+    let mut refs = Vec::with_capacity(branches.len());
+    let mut used_targets = BTreeSet::new();
+
+    for (index, branch) in branches.iter().enumerate() {
+        let Some(reference) = schema_ref(branch, context)? else {
+            return Err(ValidationError::UnsupportedDiscriminatorBranch {
+                context: context.to_owned(),
+                keyword,
+                index,
+            });
+        };
+        let schema_name = local_ref_name(reference, "schemas").map_err(|_| {
+            ValidationError::UnsupportedDiscriminatorBranch {
+                context: context.to_owned(),
+                keyword,
+                index,
+            }
+        })?;
+        if !used_targets.insert(schema_name.clone()) {
+            return Err(ValidationError::InvalidDiscriminatorUnion {
+                context: context.to_owned(),
+            });
+        }
+        refs.push(DiscriminatorBranchRef {
+            type_name: type_ident(&schema_name),
+            schema_name,
+        });
+    }
+
+    Ok(refs)
+}
+
+fn validate_discriminator_mapping(
+    discriminator: &OasDiscriminator,
+    branches: &[DiscriminatorBranchRef],
+    context: &str,
+) -> Result<BTreeMap<String, String>, ValidationError> {
+    let branch_names = branches
+        .iter()
+        .map(|branch| branch.schema_name.clone())
+        .collect::<BTreeSet<_>>();
+
+    let Some(mapping) = discriminator.mapping.as_ref() else {
+        return Ok(branches
+            .iter()
+            .map(|branch| (branch.schema_name.clone(), branch.schema_name.clone()))
+            .collect());
+    };
+
+    let mut by_schema = BTreeMap::new();
+    for (value, target) in mapping {
+        let Some(schema_name) = discriminator_mapping_schema_name(target, &branch_names) else {
+            return Err(ValidationError::InvalidDiscriminatorMapping {
+                context: context.to_owned(),
+                value: value.clone(),
+                target: target.clone(),
+            });
+        };
+
+        if by_schema
+            .insert(schema_name.clone(), value.clone())
+            .is_some()
+        {
+            return Err(ValidationError::DuplicateDiscriminatorMapping {
+                context: context.to_owned(),
+                schema: schema_name,
+            });
+        }
+    }
+
+    for branch in branches {
+        if !by_schema.contains_key(&branch.schema_name) {
+            return Err(ValidationError::MissingDiscriminatorMapping {
+                context: context.to_owned(),
+                schema: branch.schema_name.clone(),
+            });
+        }
+    }
+
+    Ok(by_schema)
+}
+
+fn discriminator_mapping_schema_name(
+    target: &str,
+    branch_names: &BTreeSet<String>,
+) -> Option<String> {
+    let schema_name = if target.starts_with("#/") {
+        local_ref_name(target, "schemas").ok()?
+    } else if target.contains("://") || target.starts_with('/') {
+        return None;
+    } else {
+        target.to_owned()
+    };
+
+    branch_names.contains(&schema_name).then_some(schema_name)
+}
+
+fn validate_discriminator_branch_object(
+    document: &ResolvedDocument<'_>,
+    schema_name: &str,
+    property_name: &str,
+    context: &str,
+) -> Result<(), ValidationError> {
+    let fields = discriminator_branch_fields(document, schema_name, context)?;
+
+    if fields.iter().any(|field| field.wire_name == property_name) {
+        return Err(ValidationError::DiscriminatorPropertyConflict {
+            context: context.to_owned(),
+            schema: schema_name.to_owned(),
+            property: property_name.to_owned(),
+        });
+    }
+
+    Ok(())
+}
+
+fn discriminator_branch_fields(
+    document: &ResolvedDocument<'_>,
+    schema_name: &str,
+    context: &str,
+) -> Result<Vec<ValidatedField>, ValidationError> {
+    let schema = component_schema(document, schema_name)?;
+
+    if schema_ref(schema, context)?.is_some() {
+        return Err(discriminator_branch_not_object(context, schema_name));
+    }
+
+    let schema = object_schema(schema, context)
+        .map_err(|_| discriminator_branch_not_object(context, schema_name))?;
+
+    if !schema.all_of.is_empty() {
+        let mut stack = vec![];
+        return validate_all_of_struct_properties(document, schema_name, schema, &mut stack)
+            .map_err(|err| map_discriminator_branch_error(err, context, schema_name));
+    }
+
+    let (schema_type, nullable) = schema_type_and_nullable(schema, context)
+        .map_err(|_| discriminator_branch_not_object(context, schema_name))?;
+    if nullable {
+        return Err(discriminator_branch_not_object(context, schema_name));
+    }
+
+    match schema_type {
+        Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => {
+            validate_struct_properties(document, schema_name, schema)
+        }
+        _ => Err(discriminator_branch_not_object(context, schema_name)),
+    }
+}
+
+fn map_discriminator_branch_error(
+    err: ValidationError,
+    context: &str,
+    schema_name: &str,
+) -> ValidationError {
+    match err {
+        ValidationError::UnsupportedAllOfBranch { .. }
+        | ValidationError::UnsupportedAllOfSiblingKeyword { .. } => {
+            discriminator_branch_not_object(context, schema_name)
+        }
+        other => other,
+    }
+}
+
+fn discriminator_branch_not_object(context: &str, schema_name: &str) -> ValidationError {
+    ValidationError::DiscriminatorBranchNotObject {
+        context: context.to_owned(),
+        schema: schema_name.to_owned(),
+    }
 }
 
 fn validate_all_of_struct_properties(
@@ -649,6 +909,56 @@ fn reject_any_of_sibling_keywords(
     Ok(())
 }
 
+fn reject_discriminator_union_sibling_keywords(
+    schema: &OasObjectSchema,
+    context: &str,
+) -> Result<(), ValidationError> {
+    for (keyword, present) in [
+        ("allOf", !schema.all_of.is_empty()),
+        ("type", schema.schema_type.is_some()),
+        ("enum", !schema.enum_values.is_empty()),
+        ("const", schema.const_value.is_some()),
+        ("items", schema.items.is_some()),
+        ("prefixItems", !schema.prefix_items.is_empty()),
+        ("properties", !schema.properties.is_empty()),
+        (
+            "additionalProperties",
+            schema.additional_properties.is_some(),
+        ),
+        ("multipleOf", schema.multiple_of.is_some()),
+        ("maximum", schema.maximum.is_some()),
+        ("exclusiveMaximum", schema.exclusive_maximum.is_some()),
+        ("minimum", schema.minimum.is_some()),
+        ("exclusiveMinimum", schema.exclusive_minimum.is_some()),
+        ("maxLength", schema.max_length.is_some()),
+        ("minLength", schema.min_length.is_some()),
+        ("pattern", schema.pattern.is_some()),
+        ("maxItems", schema.max_items.is_some()),
+        ("minItems", schema.min_items.is_some()),
+        ("uniqueItems", schema.unique_items.is_some()),
+        ("maxProperties", schema.max_properties.is_some()),
+        ("minProperties", schema.min_properties.is_some()),
+        ("required", !schema.required.is_empty()),
+        ("format", schema.format.is_some()),
+    ] {
+        if present {
+            return Err(ValidationError::UnsupportedAnyOfSiblingKeyword {
+                context: context.to_owned(),
+                keyword: keyword.to_owned(),
+            });
+        }
+    }
+
+    if let Some(keyword) = schema.extensions.keys().next() {
+        return Err(ValidationError::UnsupportedAnyOfSiblingKeyword {
+            context: context.to_owned(),
+            keyword: format!("x-{keyword}"),
+        });
+    }
+
+    Ok(())
+}
+
 fn reject_any_of_cycles(components: &[ValidatedComponent]) -> Result<(), ValidationError> {
     let components = components
         .iter()
@@ -686,8 +996,13 @@ fn collect_component_any_of_targets(component: &ValidatedComponent, targets: &mu
 
 fn collect_type_any_of_targets(ty: &ValidatedType, targets: &mut Vec<String>) {
     match &ty.kind {
-        ValidatedTypeKind::AnyOf(variants) => {
-            targets.extend(variants.iter().map(|variant| variant.schema_name.clone()));
+        ValidatedTypeKind::AnyOf(union) => {
+            targets.extend(
+                union
+                    .variants
+                    .iter()
+                    .map(|variant| variant.schema_name.clone()),
+            );
         }
         ValidatedTypeKind::Array(item) => collect_type_any_of_targets(item, targets),
         // Keep these arms explicit so future ValidatedTypeKind variants force a

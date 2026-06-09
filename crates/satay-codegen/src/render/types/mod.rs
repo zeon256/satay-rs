@@ -57,11 +57,11 @@ fn render_component(component: &Component, items: &mut Vec<syn::Item>) {
             component.description.as_deref(),
             variants,
         )),
-        ComponentKind::Union(variants) => {
+        ComponentKind::Union(union) => {
             items.push(Item::Enum(unions::render_union(
                 &component.rust_name,
                 component.description.as_deref(),
-                variants,
+                union,
             )));
         }
         ComponentKind::Range(range_type) => items.extend(ranges::render_range_type(range_type)),

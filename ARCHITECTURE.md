@@ -161,6 +161,7 @@ flowchart TD
 
 - `ComponentKind::Struct` for object schemas with properties, including supported component `allOf` object branches flattened during validation.
 - `ComponentKind::Enum` for non-null string enum components.
+- `ComponentKind::Union` for local-ref `anyOf` enums and supported discriminator-tagged `anyOf`/`oneOf` unions.
 - `ComponentKind::Range` for non-null component-level string range schemas from `x-satay.parse-as`.
 - `ComponentKind::Alias` for reference aliases, primitive aliases, arrays, nullable types, parsed string/integer values, ranges, and named aliases without top-level component constraints.
 - `ComponentKind::Nutype` for non-null component schemas with validation constraints.
@@ -335,7 +336,7 @@ Key invariants enforced before rendering:
 
 - Only OpenAPI `3.1.x` documents are accepted.
 - Only supported local references into `#/components/...` are accepted, and supported component-object reference chains are checked for cycles.
-- Unsupported schema composition beyond local-ref `anyOf` unions and component object `allOf` flattening, map objects, inline object schemas outside supported `allOf` branches, boolean JSON Schemas, non-string enums, multi-type schemas beyond one non-null type plus `null`, content parameters, non-JSON bodies, default response bodies, nullable parameters, cookie parameters, array path/header parameters, and unsupported constraint keywords are rejected.
+- Unsupported schema composition beyond local-ref `anyOf` unions, supported discriminator-tagged `anyOf`/`oneOf` unions, and component object `allOf` flattening, map objects, inline object schemas outside supported `allOf` branches, boolean JSON Schemas, non-string enums, multi-type schemas beyond one non-null type plus `null`, content parameters, non-JSON bodies, default response bodies, nullable parameters, cookie parameters, array path/header parameters, and unsupported constraint keywords are rejected.
 - Every operation has a `responses` object.
 - Path parameters declared in the path template and parameter lists match.
 - Request and response bodies used by generated JSON helpers have supported JSON media types.
