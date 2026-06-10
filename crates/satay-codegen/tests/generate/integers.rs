@@ -1,3 +1,4 @@
+use crate::ast::*;
 use crate::common::*;
 
 #[test]
@@ -53,15 +54,12 @@ components:
     )
     .expect("generate integer inference fixture");
 
-    let types_rs = find_file(&files, "types.rs");
-    assert!(types_rs.contents.contains("pub struct BusDirection(u8);"));
-    assert!(types_rs.contents.contains("pub byte: u8"));
-    assert!(
-        types_rs
-            .contents
-            .contains("pub struct BusLegacyDirection(i32);")
-    );
-    assert!(types_rs.contents.contains("pub no_bounds: i32"));
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    assert_tuple_struct(&types_rs, "BusDirection", "u8");
+    assert_tuple_struct(&types_rs, "BusLegacyDirection", "i32");
+    let bus = find_struct(&types_rs, "Bus");
+    assert_field(bus, "byte", "u8");
+    assert_field(bus, "no_bounds", "i32");
 }
 
 #[test]
@@ -97,18 +95,11 @@ paths:
     )
     .expect("generate open-ended integer parameter fixture");
 
-    let parts_rs = find_file(&files, "get_buses/parts.rs");
-    assert!(parts_rs.contents.contains("pub skip: Option<u64>"));
-    assert!(!parts_rs.contents.contains("GetBusesSkipParameter"));
-    let types_rs = find_file(&files, "types.rs");
-    assert!(
-        types_rs
-            .contents
-            .contains("pub struct GetBusesPageParameter(i32);")
-    );
-    assert!(
-        parts_rs
-            .contents
-            .contains("pub page: Option<GetBusesPageParameter>")
-    );
+    let parts_rs = parse_rust(find_file(&files, "get_buses/parts.rs"));
+    let input = find_struct(&parts_rs, "GetBusesInput");
+    assert_field(input, "skip", "Option<u64>");
+    assert!(!contains_ident(&parts_rs, "GetBusesSkipParameter"));
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    assert_tuple_struct(&types_rs, "GetBusesPageParameter", "i32");
+    assert_field(input, "page", "Option<GetBusesPageParameter>");
 }
