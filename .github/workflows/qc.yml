@@ -13,15 +13,26 @@ on:
 permissions:
   contents: read
 
+env:
+  # sccache cannot cache incremental compilation artifacts
+  CARGO_INCREMENTAL: "0"
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+
 jobs:
   fmt:
     name: Format Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-      - name: Setup Rust
-        uses: ./.github/actions/setup-rust
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+          components: rustfmt
       - name: Format Check
+        env:
+          RUSTC_WRAPPER: ""
         run: cargo fmt --all -- --check
 
   clippy:
@@ -39,10 +50,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@30b5ca8b54e1dcffd9548bc87ede1531310fdc67 # v1.20.0
+      - name: Install cargo-dylint and dylint-link
+        run: cargo binstall --no-confirm cargo-dylint dylint-link
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
         with:
           dylint-components: rustfmt
+          cache-directories: |
+            ~/.dylint_drivers
+            target/dylint
       - name: Dylint
         run: cargo dylint --all
 
