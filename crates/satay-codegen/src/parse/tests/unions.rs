@@ -217,6 +217,99 @@ components:
 }
 
 #[test]
+fn parses_one_of_with_inline_singleton_string_enum_branch() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /format:
+    get:
+      operationId: getFormat
+      responses:
+        '200':
+          description: Response format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantsApiResponseFormatOption'
+components:
+  schemas:
+    ResponseFormatText:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - text
+    ResponseFormatJsonObject:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - json_object
+    ResponseFormatJsonSchema:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - json_schema
+    AssistantsApiResponseFormatOption:
+      description: Response format option.
+      oneOf:
+        - type: string
+          description: '`auto` is the default value'
+          enum:
+            - auto
+          x-stainless-const: true
+        - $ref: '#/components/schemas/ResponseFormatText'
+        - $ref: '#/components/schemas/ResponseFormatJsonObject'
+        - $ref: '#/components/schemas/ResponseFormatJsonSchema'
+"#,
+    );
+
+    let format = component(&api, "AssistantsApiResponseFormatOption");
+    match &format.kind {
+        ComponentKind::Union(union) => {
+            assert!(union.tag.is_none());
+            assert_eq!(union.variants.len(), 4);
+            assert_eq!(union.variants[0].rust_name, "Auto");
+            assert_eq!(
+                union.variants[0].ty,
+                TypeRef::Named("AssistantsApiResponseFormatOptionAuto".to_owned())
+            );
+            assert_eq!(union.variants[1].rust_name, "ResponseFormatText");
+            assert_eq!(
+                union.variants[1].ty,
+                TypeRef::Named("ResponseFormatText".to_owned())
+            );
+        }
+        other => panic!("expected AssistantsApiResponseFormatOption union, got {other:?}"),
+    }
+
+    let auto = component(&api, "AssistantsApiResponseFormatOptionAuto");
+    match &auto.kind {
+        ComponentKind::Enum(enum_) => {
+            assert_eq!(enum_.variants.len(), 1);
+            assert_eq!(enum_.variants[0].wire_name, "auto");
+            assert_eq!(enum_.variants[0].rust_name, "Auto");
+            assert!(!enum_.allow_unknown);
+        }
+        other => panic!("expected AssistantsApiResponseFormatOptionAuto enum, got {other:?}"),
+    }
+}
+
+#[test]
 fn parses_union_schemas_with_vendor_metadata_extensions() {
     let api = parse_valid(
         r#"

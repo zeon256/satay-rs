@@ -19,7 +19,7 @@ use super::satay::{
 };
 use super::{
     ValidatedComponent, ValidatedComponentKind, ValidatedField, ValidatedType, ValidatedTypeKind,
-    ValidatedUnion, ValidatedUnionTag, ValidatedUnionVariant,
+    ValidatedUnion, ValidatedUnionTag, ValidatedUnionVariant, ValidatedUnionVariantKind,
 };
 use crate::error::ValidationError;
 use crate::ident::{type_ident, unique_ident, variant_ident};
@@ -271,20 +271,13 @@ fn validate_plain_any_of_union(
     let mut variants = Vec::with_capacity(schema.any_of.len());
 
     for (index, branch) in schema.any_of.iter().enumerate() {
-        let Some(reference) = schema_ref(branch, context)? else {
-            return Err(ValidationError::UnsupportedAnyOfBranch {
-                context: context.to_owned(),
-                index,
-            });
-        };
-        let schema_name = local_ref_name(reference, "schemas")?;
-        let type_name = schema_ref_type_name(reference)?;
-        variants.push(ValidatedUnionVariant {
-            rust_name: unique_ident(type_name.clone(), &mut used),
-            type_name,
-            schema_name,
-            tag_value: None,
-        });
+        variants.push(validate_plain_union_branch(
+            branch,
+            context,
+            index,
+            PlainUnionKeyword::AnyOf,
+            &mut used,
+        )?);
     }
 
     Ok(ValidatedUnion {
@@ -309,26 +302,93 @@ fn validate_plain_one_of_union(
     let mut variants = Vec::with_capacity(schema.one_of.len());
 
     for (index, branch) in schema.one_of.iter().enumerate() {
-        let Some(reference) = schema_ref(branch, context)? else {
-            return Err(ValidationError::UnsupportedOneOfBranch {
-                context: context.to_owned(),
-                index,
-            });
-        };
-        let schema_name = local_ref_name(reference, "schemas")?;
-        let type_name = schema_ref_type_name(reference)?;
-        variants.push(ValidatedUnionVariant {
-            rust_name: unique_ident(type_name.clone(), &mut used),
-            type_name,
-            schema_name,
-            tag_value: None,
-        });
+        variants.push(validate_plain_union_branch(
+            branch,
+            context,
+            index,
+            PlainUnionKeyword::OneOf,
+            &mut used,
+        )?);
     }
 
     Ok(ValidatedUnion {
         variants,
         tag: None,
     })
+}
+
+fn validate_plain_union_branch(
+    branch: &OasSchema,
+    context: &str,
+    index: usize,
+    keyword: PlainUnionKeyword,
+    used: &mut BTreeSet<String>,
+) -> Result<ValidatedUnionVariant, ValidationError> {
+    if let Some(reference) = schema_ref(branch, context)? {
+        let schema_name = local_ref_name(reference, "schemas")?;
+        let type_name = schema_ref_type_name(reference)?;
+        return Ok(ValidatedUnionVariant {
+            rust_name: unique_ident(type_name.clone(), used),
+            kind: ValidatedUnionVariantKind::Reference {
+                type_name,
+                schema_name,
+            },
+            tag_value: None,
+        });
+    }
+
+    let ty = validate_inline_union_enum_branch(branch, context, index, keyword)?;
+    let rust_name = inline_union_enum_variant_name(&ty)
+        .expect("validated inline union enum branch has at least one variant");
+    Ok(ValidatedUnionVariant {
+        rust_name: unique_ident(rust_name, used),
+        kind: ValidatedUnionVariantKind::Inline(ty),
+        tag_value: None,
+    })
+}
+
+fn validate_inline_union_enum_branch(
+    branch: &OasSchema,
+    context: &str,
+    index: usize,
+    keyword: PlainUnionKeyword,
+) -> Result<ValidatedType, ValidationError> {
+    let schema =
+        object_schema(branch, context).map_err(|_| keyword.branch_error(context, index))?;
+    let (schema_type, nullable) = schema_type_and_nullable(schema, context)
+        .map_err(|_| keyword.branch_error(context, index))?;
+
+    if nullable || schema_type != Some(OasSchemaType::String) || schema.enum_values.len() != 1 {
+        return Err(keyword.branch_error(context, index));
+    }
+
+    validate_enum_shape(schema, schema_type, context)
+        .map_err(|_| keyword.branch_error(context, index))?;
+    let explicit_variants = validate_type_enum_satay(schema, context)
+        .map_err(|_| keyword.branch_error(context, index))?;
+    let enum_ = validated_enum(schema, &explicit_variants, context)
+        .map_err(|_| keyword.branch_error(context, index))?;
+    if enum_.variants.len() != 1 {
+        return Err(keyword.branch_error(context, index));
+    }
+
+    Ok(ValidatedType {
+        kind: ValidatedTypeKind::Enum(enum_),
+        nullable,
+        validation: None,
+        description: optional_description(&schema.description),
+        treat_error_as_none: false,
+    })
+}
+
+fn inline_union_enum_variant_name(ty: &ValidatedType) -> Option<String> {
+    let ValidatedTypeKind::Enum(enum_) = &ty.kind else {
+        return None;
+    };
+    enum_
+        .variants
+        .first()
+        .map(|variant| variant.rust_name.clone())
 }
 
 fn validate_discriminator_union(
@@ -359,8 +419,10 @@ fn validate_discriminator_union(
             .clone();
         variants.push(ValidatedUnionVariant {
             rust_name: unique_ident(branch.type_name.clone(), &mut used),
-            type_name: branch.type_name,
-            schema_name: branch.schema_name,
+            kind: ValidatedUnionVariantKind::Reference {
+                type_name: branch.type_name,
+                schema_name: branch.schema_name,
+            },
             tag_value: Some(tag_value),
         });
     }
@@ -920,6 +982,19 @@ impl PlainUnionKeyword {
             Self::OneOf => ValidationError::UnsupportedOneOfSiblingKeyword { context, keyword },
         }
     }
+
+    fn branch_error(self, context: &str, index: usize) -> ValidationError {
+        match self {
+            Self::AnyOf => ValidationError::UnsupportedAnyOfBranch {
+                context: context.to_owned(),
+                index,
+            },
+            Self::OneOf => ValidationError::UnsupportedOneOfBranch {
+                context: context.to_owned(),
+                index,
+            },
+        }
+    }
 }
 
 fn reject_plain_union_sibling_keywords(
@@ -1121,7 +1196,12 @@ fn collect_type_union_targets(
                 union
                     .variants
                     .iter()
-                    .map(|variant| variant.schema_name.clone()),
+                    .filter_map(|variant| match &variant.kind {
+                        ValidatedUnionVariantKind::Reference { schema_name, .. } => {
+                            Some(schema_name.clone())
+                        }
+                        ValidatedUnionVariantKind::Inline(_) => None,
+                    }),
             );
         }
         ValidatedTypeKind::Array(item) => {

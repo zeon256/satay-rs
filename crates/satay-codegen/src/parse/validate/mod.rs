@@ -115,9 +115,17 @@ pub(crate) struct ValidatedUnionTag {
 #[derive(Debug, Clone)]
 pub(crate) struct ValidatedUnionVariant {
     pub(crate) rust_name: String,
-    pub(crate) type_name: String,
-    pub(crate) schema_name: String,
+    pub(crate) kind: ValidatedUnionVariantKind,
     pub(crate) tag_value: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum ValidatedUnionVariantKind {
+    Reference {
+        type_name: String,
+        schema_name: String,
+    },
+    Inline(ValidatedType),
 }
 
 #[derive(Debug)]
