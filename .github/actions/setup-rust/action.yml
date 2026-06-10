@@ -14,6 +14,10 @@ inputs:
     description: "Additional cache key"
     required: false
     default: ""
+  cache-directories:
+    description: "Additional non-workspace directories to cache (newline-separated)"
+    required: false
+    default: ""
   dylint-components:
     description: "Rust components to install for Dylint toolchains (comma-separated)"
     required: false
@@ -28,16 +32,14 @@ runs:
         toolchain: ${{ inputs.toolchain }}
         components: ${{ inputs.components }}
 
-    - name: Install cargo-dylint and dylint-link
-      shell: bash
-      run: |
-        cargo install cargo-dylint
-        cargo install dylint-link
+    - name: Setup sccache
+      uses: mozilla/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # v0.0.10
 
     - name: Cache Cargo dependencies
       uses: swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       with:
         key: ${{ inputs.cache-key }}
+        cache-directories: ${{ inputs.cache-directories }}
 
     - name: Install Dylint toolchain components
       if: ${{ inputs.dylint-components != '' }}
