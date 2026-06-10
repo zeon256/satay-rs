@@ -1,9 +1,12 @@
 //! Assertion helpers that parse generated file contents back into a `syn` AST,
 //! so tests check structure instead of `prettyplease` formatting artifacts.
 
-use proc_macro2::{TokenStream, TokenTree};
+use proc_macro2::{Delimiter, TokenStream, TokenTree};
 use quote::ToTokens;
 use satay_codegen::GeneratedFile;
+use syn::{
+    Expr, ExprLit, Fields, ImplItem, Item, Lit, Meta, MetaNameValue, Type, Visibility,
+};
 
 pub fn parse_rust(file: &GeneratedFile) -> syn::File {
     syn::parse_file(&file.contents).unwrap_or_else(|err| {
@@ -35,10 +38,10 @@ fn canon(stream: TokenStream) -> String {
             match tree {
                 TokenTree::Group(group) => {
                     let (open, close) = match group.delimiter() {
-                        proc_macro2::Delimiter::Parenthesis => ("(", ")"),
-                        proc_macro2::Delimiter::Brace => ("{", "}"),
-                        proc_macro2::Delimiter::Bracket => ("[", "]"),
-                        proc_macro2::Delimiter::None => ("", ""),
+                        Delimiter::Parenthesis => ("(", ")"),
+                        Delimiter::Brace => ("{", "}"),
+                        Delimiter::Bracket => ("[", "]"),
+                        Delimiter::None => ("", ""),
                     };
                     out.push_str(open);
                     push(group.stream(), out);
@@ -57,8 +60,8 @@ fn canon(stream: TokenStream) -> String {
     out
 }
 
-pub fn is_pub(vis: &syn::Visibility) -> bool {
-    matches!(vis, syn::Visibility::Public(_))
+pub fn is_pub(vis: &Visibility) -> bool {
+    matches!(vis, Visibility::Public(_))
 }
 
 macro_rules! finder {
@@ -67,7 +70,7 @@ macro_rules! finder {
             file.items
                 .iter()
                 .find_map(|item| match item {
-                    syn::Item::$variant(inner) if inner.ident == name => Some(inner),
+                    Item::$variant(inner) if inner.ident == name => Some(inner),
                     _ => None,
                 })
                 .unwrap_or_else(|| {
@@ -75,7 +78,7 @@ macro_rules! finder {
                         .items
                         .iter()
                         .filter_map(|item| match item {
-                            syn::Item::$variant(inner) => Some(inner.ident.to_string()),
+                            Item::$variant(inner) => Some(inner.ident.to_string()),
                             _ => None,
                         })
                         .collect::<Vec<_>>();
@@ -98,7 +101,7 @@ pub fn find_fn<'a>(file: &'a syn::File, name: &str) -> &'a syn::ItemFn {
     file.items
         .iter()
         .find_map(|item| match item {
-            syn::Item::Fn(inner) if inner.sig.ident == name => Some(inner),
+            Item::Fn(inner) if inner.sig.ident == name => Some(inner),
             _ => None,
         })
         .unwrap_or_else(|| {
@@ -106,7 +109,7 @@ pub fn find_fn<'a>(file: &'a syn::File, name: &str) -> &'a syn::ItemFn {
                 .items
                 .iter()
                 .filter_map(|item| match item {
-                    syn::Item::Fn(inner) => Some(inner.sig.ident.to_string()),
+                    Item::Fn(inner) => Some(inner.sig.ident.to_string()),
                     _ => None,
                 })
                 .collect::<Vec<_>>();
@@ -117,13 +120,13 @@ pub fn find_fn<'a>(file: &'a syn::File, name: &str) -> &'a syn::ItemFn {
 pub fn has_enum(file: &syn::File, name: &str) -> bool {
     file.items
         .iter()
-        .any(|item| matches!(item, syn::Item::Enum(inner) if inner.ident == name))
+        .any(|item| matches!(item, Item::Enum(inner) if inner.ident == name))
 }
 
-fn type_base_name(ty: &syn::Type) -> Option<String> {
+fn type_base_name(ty: &Type) -> Option<String> {
     match ty {
-        syn::Type::Path(path) => path.path.segments.last().map(|s| s.ident.to_string()),
-        syn::Type::Reference(reference) => type_base_name(&reference.elem),
+        Type::Path(path) => path.path.segments.last().map(|s| s.ident.to_string()),
+        Type::Reference(reference) => type_base_name(&reference.elem),
         _ => None,
     }
 }
@@ -134,13 +137,13 @@ pub fn find_method<'a>(file: &'a syn::File, self_ty: &str, name: &str) -> &'a sy
     file.items
         .iter()
         .filter_map(|item| match item {
-            syn::Item::Impl(imp) if imp.trait_.is_none() => Some(imp),
+            Item::Impl(imp) if imp.trait_.is_none() => Some(imp),
             _ => None,
         })
         .filter(|imp| type_base_name(&imp.self_ty).as_deref() == Some(self_ty))
         .find_map(|imp| {
             imp.items.iter().find_map(|item| match item {
-                syn::ImplItem::Fn(method) if method.sig.ident == name => Some(method),
+                ImplItem::Fn(method) if method.sig.ident == name => Some(method),
                 _ => None,
             })
         })
@@ -185,7 +188,7 @@ pub fn assert_field(item: &syn::ItemStruct, name: &str, ty: &str) {
 pub fn assert_tuple_struct(file: &syn::File, name: &str, inner_ty: &str) {
     let item = find_struct(file, name);
     match &item.fields {
-        syn::Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
+        Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
             assert_eq!(
                 norm(&fields.unnamed[0].ty),
                 norm_str(inner_ty),
@@ -221,10 +224,10 @@ pub fn doc_lines(attrs: &[syn::Attribute]) -> Vec<String> {
         .iter()
         .filter(|attr| attr.path().is_ident("doc"))
         .filter_map(|attr| match &attr.meta {
-            syn::Meta::NameValue(syn::MetaNameValue {
+            Meta::NameValue(MetaNameValue {
                 value:
-                    syn::Expr::Lit(syn::ExprLit {
-                        lit: syn::Lit::Str(text),
+                    Expr::Lit(ExprLit {
+                        lit: Lit::Str(text),
                         ..
                     }),
                 ..
