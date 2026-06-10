@@ -48,7 +48,7 @@ pub(crate) struct Component {
 #[derive(Debug, Clone)]
 pub(crate) enum ComponentKind {
     Struct(Vec<Field>),
-    Enum(Vec<EnumVariant>),
+    Enum(Enum),
     Union(Union),
     Range(RangeType),
     Alias(TypeRef),
@@ -136,6 +136,12 @@ pub(crate) struct Field {
     pub(crate) ty: TypeRef,
     pub(crate) required: bool,
     pub(crate) treat_error_as_none: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct Enum {
+    pub(crate) variants: Vec<EnumVariant>,
+    pub(crate) allow_unknown: bool,
 }
 
 #[derive(Debug, Clone)]

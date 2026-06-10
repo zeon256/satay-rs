@@ -23,7 +23,7 @@ use super::{
 };
 use crate::error::ValidationError;
 use crate::ident::{type_ident, unique_ident, variant_ident};
-use crate::model::{EnumVariant, ParseAs, TypeRef};
+use crate::model::{Enum, EnumVariant, ParseAs, TypeRef};
 
 pub(super) fn validate_components(
     document: &ResolvedDocument<'_>,
@@ -157,7 +157,7 @@ fn validate_component_schema(
                 validate_enum_shape(schema, schema_type, &context)?;
                 let validated_satay = validate_component_enum_satay(schema, &context)?;
                 ValidatedComponentKind::Type(ValidatedType {
-                    kind: ValidatedTypeKind::Enum(validated_enum_variants(
+                    kind: ValidatedTypeKind::Enum(validated_enum(
                         schema,
                         &validated_satay.enum_variants,
                         &context,
@@ -240,13 +240,9 @@ fn validate_union_type_schema(
 ) -> Result<ValidatedType, ValidationError> {
     let union = if let Some(discriminator) = schema.discriminator.as_ref() {
         validate_discriminator_union(document, schema, discriminator, context)?
+    } else if !schema.one_of.is_empty() && schema.any_of.is_empty() {
+        validate_plain_one_of_union(schema, context)?
     } else {
-        if !schema.one_of.is_empty() {
-            return Err(ValidationError::UnsupportedComposition {
-                context: context.to_owned(),
-                keyword: "oneOf",
-            });
-        }
         validate_plain_any_of_union(schema, context)?
     };
 
@@ -277,6 +273,44 @@ fn validate_plain_any_of_union(
     for (index, branch) in schema.any_of.iter().enumerate() {
         let Some(reference) = schema_ref(branch, context)? else {
             return Err(ValidationError::UnsupportedAnyOfBranch {
+                context: context.to_owned(),
+                index,
+            });
+        };
+        let schema_name = local_ref_name(reference, "schemas")?;
+        let type_name = schema_ref_type_name(reference)?;
+        variants.push(ValidatedUnionVariant {
+            rust_name: unique_ident(type_name.clone(), &mut used),
+            type_name,
+            schema_name,
+            tag_value: None,
+        });
+    }
+
+    Ok(ValidatedUnion {
+        variants,
+        tag: None,
+    })
+}
+
+fn validate_plain_one_of_union(
+    schema: &OasObjectSchema,
+    context: &str,
+) -> Result<ValidatedUnion, ValidationError> {
+    reject_plain_one_of_sibling_keywords(schema, context)?;
+
+    if schema.one_of.is_empty() {
+        return Err(ValidationError::EmptyAnyOf {
+            context: context.to_owned(),
+        });
+    }
+
+    let mut used = BTreeSet::new();
+    let mut variants = Vec::with_capacity(schema.one_of.len());
+
+    for (index, branch) in schema.one_of.iter().enumerate() {
+        let Some(reference) = schema_ref(branch, context)? else {
+            return Err(ValidationError::UnsupportedOneOfBranch {
                 context: context.to_owned(),
                 index,
             });
@@ -863,8 +897,45 @@ fn reject_any_of_sibling_keywords(
     schema: &OasObjectSchema,
     context: &str,
 ) -> Result<(), ValidationError> {
+    reject_plain_union_sibling_keywords(schema, context, PlainUnionKeyword::AnyOf)
+}
+
+fn reject_plain_one_of_sibling_keywords(
+    schema: &OasObjectSchema,
+    context: &str,
+) -> Result<(), ValidationError> {
+    reject_plain_union_sibling_keywords(schema, context, PlainUnionKeyword::OneOf)
+}
+
+#[derive(Clone, Copy)]
+enum PlainUnionKeyword {
+    AnyOf,
+    OneOf,
+}
+
+impl PlainUnionKeyword {
+    fn error(self, context: String, keyword: String) -> ValidationError {
+        match self {
+            Self::AnyOf => ValidationError::UnsupportedAnyOfSiblingKeyword { context, keyword },
+            Self::OneOf => ValidationError::UnsupportedOneOfSiblingKeyword { context, keyword },
+        }
+    }
+}
+
+fn reject_plain_union_sibling_keywords(
+    schema: &OasObjectSchema,
+    context: &str,
+    union_keyword: PlainUnionKeyword,
+) -> Result<(), ValidationError> {
     for (keyword, present) in [
-        ("oneOf", !schema.one_of.is_empty()),
+        (
+            "anyOf",
+            matches!(union_keyword, PlainUnionKeyword::OneOf) && !schema.any_of.is_empty(),
+        ),
+        (
+            "oneOf",
+            matches!(union_keyword, PlainUnionKeyword::AnyOf) && !schema.one_of.is_empty(),
+        ),
         ("allOf", !schema.all_of.is_empty()),
         ("type", schema.schema_type.is_some()),
         ("enum", !schema.enum_values.is_empty()),
@@ -894,18 +965,12 @@ fn reject_any_of_sibling_keywords(
         ("discriminator", schema.discriminator.is_some()),
     ] {
         if present {
-            return Err(ValidationError::UnsupportedAnyOfSiblingKeyword {
-                context: context.to_owned(),
-                keyword: keyword.to_owned(),
-            });
+            return Err(union_keyword.error(context.to_owned(), keyword.to_owned()));
         }
     }
 
     if let Some(keyword) = schema.extensions.keys().next() {
-        return Err(ValidationError::UnsupportedAnyOfSiblingKeyword {
-            context: context.to_owned(),
-            keyword: format!("x-{keyword}"),
-        });
+        return Err(union_keyword.error(context.to_owned(), format!("x-{keyword}")));
     }
 
     Ok(())
@@ -1125,11 +1190,7 @@ fn validate_object_type_schema(
         validate_enum_shape(schema, schema_type, context)?;
         let explicit_variants = validate_type_enum_satay(schema, context)?;
         return Ok(ValidatedType {
-            kind: ValidatedTypeKind::Enum(validated_enum_variants(
-                schema,
-                &explicit_variants,
-                context,
-            )?),
+            kind: ValidatedTypeKind::Enum(validated_enum(schema, &explicit_variants, context)?),
             nullable,
             validation: None,
             description,
@@ -1350,11 +1411,11 @@ fn validate_enum_shape(
     Ok(())
 }
 
-fn validated_enum_variants(
+fn validated_enum(
     schema: &OasObjectSchema,
     explicit_variants: &BTreeMap<String, String>,
     context: &str,
-) -> Result<Vec<EnumVariant>, ValidationError> {
+) -> Result<Enum, ValidationError> {
     let mut used = BTreeSet::from(["Unknown".to_owned()]);
 
     for rust_name in explicit_variants.values() {
@@ -1385,5 +1446,10 @@ fn validated_enum_variants(
         });
     }
 
-    Ok(variants)
+    let allow_unknown = variants.is_empty() || schema.enum_values.len() != 1;
+
+    Ok(Enum {
+        variants,
+        allow_unknown,
+    })
 }
