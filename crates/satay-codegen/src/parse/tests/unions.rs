@@ -217,6 +217,86 @@ components:
 }
 
 #[test]
+fn parses_union_schemas_with_vendor_metadata_extensions() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /stream:
+    get:
+      operationId: stream
+      responses:
+        '200':
+          description: Stream event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantStreamEvent'
+components:
+  schemas:
+    ThreadStreamEvent:
+      type: object
+      properties:
+        id:
+          type: string
+    RunStreamEvent:
+      type: object
+      properties:
+        id:
+          type: string
+    AssistantStreamEvent:
+      description: Assistant stream events.
+      oneOf:
+        - $ref: '#/components/schemas/ThreadStreamEvent'
+        - $ref: '#/components/schemas/RunStreamEvent'
+      x-oaiMeta:
+        name: Assistant stream events
+        beta: true
+    SearchResult:
+      anyOf:
+        - $ref: '#/components/schemas/ThreadStreamEvent'
+        - $ref: '#/components/schemas/RunStreamEvent'
+      x-acmeMeta:
+        owner: docs
+    TaggedEvent:
+      oneOf:
+        - $ref: '#/components/schemas/ThreadStreamEvent'
+        - $ref: '#/components/schemas/RunStreamEvent'
+      discriminator:
+        propertyName: event
+      x-oaiMeta:
+        name: Tagged stream events
+"#,
+    );
+
+    let assistant_stream_event = component(&api, "AssistantStreamEvent");
+    match &assistant_stream_event.kind {
+        ComponentKind::Union(union) => {
+            assert!(union.tag.is_none());
+            assert_eq!(union.variants.len(), 2);
+        }
+        other => panic!("expected AssistantStreamEvent union, got {other:?}"),
+    }
+
+    let search_result = component(&api, "SearchResult");
+    assert!(matches!(&search_result.kind, ComponentKind::Union(union) if union.tag.is_none()));
+
+    let tagged_event = component(&api, "TaggedEvent");
+    match &tagged_event.kind {
+        ComponentKind::Union(union) => {
+            assert_eq!(
+                union.tag.as_ref().map(|tag| tag.property_name.as_str()),
+                Some("event")
+            );
+        }
+        other => panic!("expected TaggedEvent union, got {other:?}"),
+    }
+}
+
+#[test]
 fn rejects_empty_any_of() {
     let err = parse_invalid(
         r##"
@@ -388,6 +468,44 @@ components:
         ValidationError::UnsupportedOneOfSiblingKeyword { context, keyword } => {
             assert_eq!(context, "schema `Broken`");
             assert_eq!(keyword, "type");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_satay_extension_on_plain_union_schema() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+    Broken:
+      oneOf:
+        - $ref: '#/components/schemas/User'
+      x-satay:
+        enum-variants: {}
+"##,
+    );
+    match err {
+        ValidationError::UnsupportedOneOfSiblingKeyword { context, keyword } => {
+            assert_eq!(context, "schema `Broken`");
+            assert_eq!(keyword, "x-satay");
         }
         other => panic!("unexpected error: {other}"),
     }

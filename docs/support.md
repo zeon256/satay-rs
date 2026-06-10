@@ -10,6 +10,7 @@ Satay targets OpenAPI 3.1.x and a small, typed subset.
 - String enums with multiple generated variants include Satay's `Unknown` fallback. Single-value string enums are treated as const-like and reject other values during deserialization, which lets untagged `oneOf` branches discriminate on tag fields such as `type`.
 - `anyOf` and `oneOf` unions whose branches are local `#/components/schemas/...` references, rendered as ordered serde-untagged Rust enums. Plain `oneOf` support does not enforce JSON Schema's exact-one validation rule.
 - `anyOf` or `oneOf` unions with an OpenAPI `discriminator`, when every branch is a local `#/components/schemas/...` reference to an object struct component and branch structs do not contain the discriminator property. These render as serde internally tagged Rust enums. Unmapped branches use their component schema name as the wire tag value; explicit `mapping` entries may override individual branches and may target local `#/components/schemas/...` refs or bare component schema names.
+- Non-Satay vendor extensions on supported union schemas, such as `x-oaiMeta`, are treated as metadata annotations and ignored by generation.
 - `allOf` component object schemas whose branches are local component object references or inline object branches, rendered by flattening branch fields into one Rust struct. Component `allOf` must declare at least one branch.
 - Operations for standard HTTP methods with explicit `operationId`, or inferred names from method + path.
 - Path, query, and header parameters declared with `schema`.
