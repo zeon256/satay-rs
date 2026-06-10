@@ -18,10 +18,6 @@ inputs:
     description: "Additional non-workspace directories to cache (newline-separated)"
     required: false
     default: ""
-  dylint-components:
-    description: "Rust components to install for Dylint toolchains (comma-separated)"
-    required: false
-    default: ""
 
 runs:
   using: "composite"
@@ -40,18 +36,3 @@ runs:
       with:
         key: ${{ inputs.cache-key }}
         cache-directories: ${{ inputs.cache-directories }}
-
-    - name: Install Dylint toolchain components
-      if: ${{ inputs.dylint-components != '' }}
-      shell: bash
-      run: |
-        set -euo pipefail
-
-        components="${{ inputs.dylint-components }}"
-        components="${components//,/ }"
-
-        cargo dylint list | while read -r _ toolchain _; do
-          if [ -n "${toolchain:-}" ]; then
-            rustup component add --toolchain "$toolchain" $components
-          fi
-        done

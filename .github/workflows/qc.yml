@@ -50,17 +50,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@30b5ca8b54e1dcffd9548bc87ede1531310fdc67 # v1.20.0
-      - name: Install cargo-dylint and dylint-link
-        run: cargo binstall --no-confirm cargo-dylint dylint-link
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
         with:
-          dylint-components: rustfmt
           cache-directories: |
             ~/.dylint_drivers
             target/dylint
+      # Prebuilt cargo-dylint release binaries cannot build the dylint driver
+      # (they bake in a path dependency that only exists on dylint's own CI),
+      # so this must compile from source. It runs after the cache restore:
+      # warm runs find the binaries in ~/.cargo/bin and skip the build.
+      - name: Install cargo-dylint and dylint-link
+        run: cargo install --locked cargo-dylint dylint-link
+      - name: Install Dylint toolchain components
+        run: |
+          set -euo pipefail
+
+          cargo dylint list | while read -r _ toolchain _; do
+            if [ -n "${toolchain:-}" ]; then
+              rustup component add --toolchain "$toolchain" rustfmt
+            fi
+          done
       - name: Dylint
         run: cargo dylint --all
 
