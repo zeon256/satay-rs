@@ -1,101 +1,6 @@
 use super::*;
 
 #[test]
-fn parses_any_of_component_and_inline_refs_into_ir() {
-    let api = parse_valid(
-        r#"
-openapi: 3.1.0
-info:
-  title: Test API
-  version: 1.0.0
-paths:
-  /search:
-    get:
-      operationId: search
-      responses:
-        '200':
-          description: Search results
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/SearchResult'
-components:
-  schemas:
-    User:
-      type: object
-      required:
-        - id
-      properties:
-        id:
-          type: string
-    Organization:
-      type: object
-      required:
-        - id
-      properties:
-        id:
-          type: string
-    SearchResult:
-      description: A search result.
-      anyOf:
-        - $ref: '#/components/schemas/User'
-        - $ref: '#/components/schemas/Organization'
-    Envelope:
-      type: object
-      required:
-        - item
-      properties:
-        item:
-          anyOf:
-            - $ref: '#/components/schemas/Organization'
-            - $ref: '#/components/schemas/User'
-"#,
-    );
-
-    let search_result = component(&api, "SearchResult");
-    match &search_result.kind {
-        ComponentKind::Union(union) => {
-            assert!(union.tag.is_none());
-            let variants = &union.variants;
-            assert_eq!(variants.len(), 2);
-            assert_eq!(variants[0].rust_name, "User");
-            assert_eq!(variants[0].ty, TypeRef::Named("User".to_owned()));
-            assert_eq!(variants[1].rust_name, "Organization");
-            assert_eq!(variants[1].ty, TypeRef::Named("Organization".to_owned()));
-        }
-        other => panic!("expected SearchResult union, got {other:?}"),
-    }
-
-    let envelope = component(&api, "Envelope");
-    match &envelope.kind {
-        ComponentKind::Struct(fields) => {
-            let item = field(fields, "item");
-            assert_eq!(item.ty, TypeRef::Named("EnvelopeItem".to_owned()));
-            assert!(item.required);
-        }
-        other => panic!("expected Envelope struct, got {other:?}"),
-    }
-
-    let envelope_item = component(&api, "EnvelopeItem");
-    match &envelope_item.kind {
-        ComponentKind::Union(union) => {
-            assert!(union.tag.is_none());
-            let variants = &union.variants;
-            assert_eq!(variants[0].rust_name, "Organization");
-            assert_eq!(variants[0].ty, TypeRef::Named("Organization".to_owned()));
-            assert_eq!(variants[1].rust_name, "User");
-            assert_eq!(variants[1].ty, TypeRef::Named("User".to_owned()));
-        }
-        other => panic!("expected EnvelopeItem union, got {other:?}"),
-    }
-
-    assert_eq!(
-        api.operations[0].responses[0].body,
-        Some(TypeRef::Named("SearchResult".to_owned()))
-    );
-}
-
-#[test]
 fn parses_all_of_component_and_inline_branches_into_ir() {
     let api = parse_valid(
         r#"
@@ -181,7 +86,7 @@ components:
 }
 
 #[test]
-fn rejects_unsupported_all_of_schema_forms_explicitly() {
+fn rejects_all_of_with_sibling_properties_keyword() {
     let err = parse_invalid(
         r##"
 openapi: 3.1.0
@@ -217,7 +122,10 @@ components:
         }
         other => panic!("unexpected error: {other}"),
     }
+}
 
+#[test]
+fn rejects_all_of_with_duplicate_properties_across_branches() {
     let err = parse_invalid(
         r##"
 openapi: 3.1.0
@@ -254,7 +162,10 @@ components:
         }
         other => panic!("unexpected error: {other}"),
     }
+}
 
+#[test]
+fn rejects_all_of_with_primitive_branch() {
     let err = parse_invalid(
         r##"
 openapi: 3.1.0
@@ -282,7 +193,10 @@ components:
         }
         other => panic!("unexpected error: {other}"),
     }
+}
 
+#[test]
+fn rejects_all_of_with_nested_all_of_branch() {
     let err = parse_invalid(
         r##"
 openapi: 3.1.0
@@ -315,7 +229,10 @@ components:
         }
         other => panic!("unexpected error: {other}"),
     }
+}
 
+#[test]
+fn rejects_all_of_branch_referencing_any_of_union() {
     let err = parse_invalid(
         r##"
 openapi: 3.1.0
@@ -361,7 +278,10 @@ components:
         }
         other => panic!("unexpected error: {other}"),
     }
+}
 
+#[test]
+fn rejects_mutually_recursive_all_of_components() {
     let err = parse_invalid(
         r##"
 openapi: 3.1.0
@@ -392,7 +312,10 @@ components:
         }
         other => panic!("unexpected error: {other}"),
     }
+}
 
+#[test]
+fn rejects_all_of_in_parameter_schemas() {
     let err = parse_invalid(
         r##"
 openapi: 3.1.0
@@ -424,7 +347,10 @@ paths:
         }
         other => panic!("unexpected error: {other}"),
     }
+}
 
+#[test]
+fn rejects_all_of_in_inline_property_schemas() {
     let err = parse_invalid(
         r##"
 openapi: 3.1.0
@@ -458,7 +384,10 @@ components:
         }
         other => panic!("unexpected error: {other}"),
     }
+}
 
+#[test]
+fn rejects_empty_all_of() {
     let err = parse_invalid(
         r##"
 openapi: 3.1.0

@@ -63,9 +63,10 @@ fn assert_parameter_segment(segment: &PathSegment, expected: &str) {
     }
 }
 
-mod composition;
+mod all_of;
 mod constraints;
 mod errors;
 mod extensions;
 mod lowering;
 mod naming;
+mod unions;

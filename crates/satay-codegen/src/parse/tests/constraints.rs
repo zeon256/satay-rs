@@ -148,7 +148,7 @@ components:
 }
 
 #[test]
-fn rejects_invalid_validation_bounds_before_rendering() {
+fn rejects_inverted_string_length_bounds() {
     let err = parse_invalid(
         r#"
 openapi: 3.1.0
@@ -182,7 +182,10 @@ components:
         }
         other => panic!("unexpected error: {other}"),
     }
+}
 
+#[test]
+fn rejects_empty_integer_bounds() {
     let err = parse_invalid(
         r#"
 openapi: 3.1.0
@@ -211,7 +214,10 @@ components:
         }
         other => panic!("unexpected error: {other}"),
     }
+}
 
+#[test]
+fn rejects_empty_number_bounds() {
     let err = parse_invalid(
         r#"
 openapi: 3.1.0
