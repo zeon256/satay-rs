@@ -6,8 +6,7 @@ mod schema;
 use super::resolve::ResolvedDocument;
 use crate::error::ValidationError;
 use crate::model::{
-    EnumVariant, HttpMethod, IntegerType, ParameterLocation, ParseAs, PathSegment, RangeScalar,
-    Validation,
+    Enum, HttpMethod, IntegerType, ParameterLocation, ParseAs, PathSegment, RangeScalar, Validation,
 };
 
 #[derive(Debug)]
@@ -97,7 +96,7 @@ pub(crate) enum ValidatedTypeKind {
     F64,
     Bool,
     Array(Box<ValidatedType>),
-    Enum(Vec<EnumVariant>),
+    Enum(Enum),
     AnyOf(ValidatedUnion),
     Range(RangeScalar),
 }

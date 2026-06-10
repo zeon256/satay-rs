@@ -1,7 +1,7 @@
 use crate::ident::{field_ident, type_ident, unique_ident, variant_ident};
 use crate::model::{
-    Component, ComponentKind, ConstrainedType, EnumVariant, Field, RangeType, RangeTypeRef,
-    TypeRef, Union, UnionTag, UnionVariant,
+    Component, ComponentKind, ConstrainedType, Enum, Field, RangeType, RangeTypeRef, TypeRef,
+    Union, UnionTag, UnionVariant,
 };
 use crate::parse::registry::TypeRegistry;
 use crate::parse::validate::{
@@ -113,9 +113,7 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
         let rust_name = type_ident(schema_name);
 
         match (&ty.kind, ty.nullable, ty.validation.as_ref()) {
-            (ValidatedTypeKind::Enum(variants), false, None) => {
-                ComponentKind::Enum(variants.clone())
-            }
+            (ValidatedTypeKind::Enum(enum_), false, None) => ComponentKind::Enum(enum_.clone()),
             (ValidatedTypeKind::AnyOf(union), false, None) => {
                 ComponentKind::Union(self.parse_union(union, registry))
             }
@@ -273,19 +271,19 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
 }
 
 fn parse_inline_enum_ref(
-    mut variants: Vec<EnumVariant>,
+    mut enum_: Enum,
     type_name_hint: &str,
     description: Option<String>,
     registry: &mut TypeRegistry,
 ) -> TypeRef {
     let default_empty_variant = variant_ident("");
-    variants.retain(|variant| {
+    enum_.variants.retain(|variant| {
         !variant.wire_name.is_empty() || variant.rust_name != default_empty_variant
     });
 
-    if variants.is_empty() {
+    if enum_.variants.is_empty() {
         TypeRef::String
     } else {
-        registry.inline_enum_ref(type_name_hint, description, variants)
+        registry.inline_enum_ref(type_name_hint, description, enum_)
     }
 }

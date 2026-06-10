@@ -206,10 +206,10 @@ pub enum ValidationError {
     )]
     MultipleNonNullSchemaTypesUnsupported { context: String },
 
-    /// A schema uses a composition keyword (`allOf`, `anyOf`, `oneOf`) that is outside MVP scope.
+    /// A schema uses a composition keyword (`allOf`, `anyOf`, `oneOf`) in an unsupported context.
     ///
-    /// Error message: `{context} uses `{keyword}`, which is not in the MVP scope`
-    #[error("{context} uses `{keyword}`, which is not in the MVP scope")]
+    /// Error message: `{context} uses `{keyword}`, which is not supported in this context`
+    #[error("{context} uses `{keyword}`, which is not supported in this context")]
     UnsupportedComposition {
         context: String,
         keyword: &'static str,
@@ -252,6 +252,18 @@ pub enum ValidationError {
     /// Error message: `{context}.anyOf[{index}] must be a local component schema reference`
     #[error("{context}.anyOf[{index}] must be a local component schema reference")]
     UnsupportedAnyOfBranch { context: String, index: usize },
+
+    /// A `oneOf` schema combines a supported union with another schema keyword.
+    ///
+    /// Error message: `{context} uses `oneOf` with `{keyword}`; only annotation siblings are supported`
+    #[error("{context} uses `oneOf` with `{keyword}`; only annotation siblings are supported")]
+    UnsupportedOneOfSiblingKeyword { context: String, keyword: String },
+
+    /// A `oneOf` branch is not a local component schema reference.
+    ///
+    /// Error message: `{context}.oneOf[{index}] must be a local component schema reference`
+    #[error("{context}.oneOf[{index}] must be a local component schema reference")]
+    UnsupportedOneOfBranch { context: String, index: usize },
 
     /// A composition schema declares no branches.
     ///

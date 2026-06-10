@@ -235,7 +235,8 @@ components:
 
     let vehicle_type = component(&api, "VehicleType");
     match &vehicle_type.kind {
-        ComponentKind::Enum(variants) => {
+        ComponentKind::Enum(enum_) => {
+            let variants = &enum_.variants;
             assert_eq!(variants.len(), 3);
             assert_eq!(variants[0].wire_name, "SD");
             assert_eq!(variants[0].rust_name, "SingleDecker");
@@ -243,17 +244,20 @@ components:
             assert_eq!(variants[1].rust_name, "DoubleDecker");
             assert_eq!(variants[2].wire_name, "BD");
             assert_eq!(variants[2].rust_name, "Bendy");
+            assert!(enum_.allow_unknown);
         }
         other => panic!("expected VehicleType enum, got {other:?}"),
     }
 
     let arrival_type = component(&api, "ArrivalType");
     match &arrival_type.kind {
-        ComponentKind::Enum(variants) => {
+        ComponentKind::Enum(enum_) => {
+            let variants = &enum_.variants;
             assert_eq!(variants.len(), 3);
             assert_eq!(variants[0].rust_name, "SingleDecker");
             assert_eq!(variants[1].rust_name, "DoubleDecker");
             assert_eq!(variants[2].rust_name, "Bendy");
+            assert!(enum_.allow_unknown);
         }
         other => panic!("expected ArrivalType enum, got {other:?}"),
     }

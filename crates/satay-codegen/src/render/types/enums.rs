@@ -1,29 +1,39 @@
-use crate::model::EnumVariant;
+use quote::quote;
+
+use crate::model::{Enum, EnumVariant};
 
 use super::super::{doc_attrs, ident, lit_str};
 
-pub(super) fn render_enum(
-    name: &str,
-    description: Option<&str>,
-    variants: &[EnumVariant],
-) -> Vec<syn::Item> {
+pub(super) fn render_enum(name: &str, description: Option<&str>, enum_: &Enum) -> Vec<syn::Item> {
     let name = ident(name);
     let docs = doc_attrs(description);
-    let variant_defs = variants.iter().map(render_enum_variant).collect::<Vec<_>>();
-    let as_str_arms = variants
+    let variant_defs = enum_
+        .variants
+        .iter()
+        .map(render_enum_variant)
+        .collect::<Vec<_>>();
+    let unknown_variant = enum_.allow_unknown.then(|| {
+        quote!(
+            #[default]
+            #[cfg_attr(feature = "serde", serde(other))]
+            Unknown
+        )
+    });
+    let derive_default = enum_.allow_unknown.then(|| quote!(, Default));
+    let as_str_arms = enum_
+        .variants
         .iter()
         .map(render_enum_as_str_arm)
         .collect::<Vec<_>>();
+    let unknown_as_str_arm = enum_.allow_unknown.then(|| quote!(Self::Unknown => "",));
 
     let enum_item = syn::parse_quote!(
         #(#docs)*
-        #[derive(Debug, Clone, PartialEq, Eq, Default)]
+        #[derive(Debug, Clone, PartialEq, Eq #derive_default)]
         #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
         pub enum #name {
-            #(#variant_defs),*,
-            #[default]
-            #[cfg_attr(feature = "serde", serde(other))]
-            Unknown,
+            #(#variant_defs,)*
+            #unknown_variant
         }
     );
     let inherent_impl = syn::parse_quote!(
@@ -31,7 +41,7 @@ pub(super) fn render_enum(
             pub const fn as_str(&self) -> &'static str {
                 match self {
                     #(#as_str_arms)*
-                    Self::Unknown => "",
+                    #unknown_as_str_arm
                 }
             }
         }

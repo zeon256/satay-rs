@@ -96,6 +96,127 @@ components:
 }
 
 #[test]
+fn parses_one_of_component_and_inline_refs_into_ir() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /assistant:
+    get:
+      operationId: getAssistant
+      responses:
+        '200':
+          description: Assistant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantObject'
+components:
+  schemas:
+    AssistantToolsCode:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - code_interpreter
+    AssistantToolsFileSearch:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - file_search
+    AssistantToolsFunction:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - function
+    AssistantTool:
+      oneOf:
+        - $ref: '#/components/schemas/AssistantToolsCode'
+        - $ref: '#/components/schemas/AssistantToolsFileSearch'
+        - $ref: '#/components/schemas/AssistantToolsFunction'
+    AssistantObject:
+      type: object
+      required:
+        - tools
+      properties:
+        tools:
+          type: array
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/AssistantToolsCode'
+              - $ref: '#/components/schemas/AssistantToolsFileSearch'
+              - $ref: '#/components/schemas/AssistantToolsFunction'
+"#,
+    );
+
+    let assistant_tool = component(&api, "AssistantTool");
+    match &assistant_tool.kind {
+        ComponentKind::Union(union) => {
+            assert!(union.tag.is_none());
+            let variants = &union.variants;
+            assert_eq!(variants.len(), 3);
+            assert_eq!(variants[0].rust_name, "AssistantToolsCode");
+            assert_eq!(
+                variants[0].ty,
+                TypeRef::Named("AssistantToolsCode".to_owned())
+            );
+            assert_eq!(variants[1].rust_name, "AssistantToolsFileSearch");
+            assert_eq!(
+                variants[1].ty,
+                TypeRef::Named("AssistantToolsFileSearch".to_owned())
+            );
+            assert_eq!(variants[2].rust_name, "AssistantToolsFunction");
+            assert_eq!(
+                variants[2].ty,
+                TypeRef::Named("AssistantToolsFunction".to_owned())
+            );
+        }
+        other => panic!("expected AssistantTool union, got {other:?}"),
+    }
+
+    let assistant = component(&api, "AssistantObject");
+    match &assistant.kind {
+        ComponentKind::Struct(fields) => {
+            let tools = field(fields, "tools");
+            assert_eq!(
+                tools.ty,
+                TypeRef::Array(Box::new(TypeRef::Named(
+                    "AssistantObjectToolsItem".to_owned()
+                )))
+            );
+            assert!(tools.required);
+        }
+        other => panic!("expected AssistantObject struct, got {other:?}"),
+    }
+
+    let tools_item = component(&api, "AssistantObjectToolsItem");
+    match &tools_item.kind {
+        ComponentKind::Union(union) => {
+            assert!(union.tag.is_none());
+            let variants = &union.variants;
+            assert_eq!(variants[0].rust_name, "AssistantToolsCode");
+            assert_eq!(variants[1].rust_name, "AssistantToolsFileSearch");
+            assert_eq!(variants[2].rust_name, "AssistantToolsFunction");
+        }
+        other => panic!("expected AssistantObjectToolsItem union, got {other:?}"),
+    }
+}
+
+#[test]
 fn rejects_empty_any_of() {
     let err = parse_invalid(
         r##"
@@ -195,7 +316,7 @@ components:
 }
 
 #[test]
-fn rejects_one_of_without_discriminator() {
+fn rejects_one_of_with_inline_primitive_branch() {
     let err = parse_invalid(
         r##"
 openapi: 3.1.0
@@ -223,14 +344,50 @@ components:
           type: string
     Broken:
       oneOf:
-        - $ref: '#/components/schemas/User'
-        - $ref: '#/components/schemas/Organization'
+        - type: string
 "##,
     );
     match err {
-        ValidationError::UnsupportedComposition { context, keyword } => {
+        ValidationError::UnsupportedOneOfBranch { context, index } => {
             assert_eq!(context, "schema `Broken`");
-            assert_eq!(keyword, "oneOf");
+            assert_eq!(index, 0);
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_one_of_with_sibling_type_keyword() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+    Broken:
+      type: object
+      oneOf:
+        - $ref: '#/components/schemas/User'
+"##,
+    );
+    match err {
+        ValidationError::UnsupportedOneOfSiblingKeyword { context, keyword } => {
+            assert_eq!(context, "schema `Broken`");
+            assert_eq!(keyword, "type");
         }
         other => panic!("unexpected error: {other}"),
     }

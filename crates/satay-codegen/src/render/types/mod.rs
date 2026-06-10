@@ -52,10 +52,10 @@ fn render_component(component: &Component, items: &mut Vec<syn::Item>) {
                 true,
             )));
         }
-        ComponentKind::Enum(variants) => items.extend(enums::render_enum(
+        ComponentKind::Enum(enum_) => items.extend(enums::render_enum(
             &component.rust_name,
             component.description.as_deref(),
-            variants,
+            enum_,
         )),
         ComponentKind::Union(union) => {
             items.push(Item::Enum(unions::render_union(

@@ -2,8 +2,8 @@ use std::collections::BTreeSet;
 
 use crate::ident::{type_ident, unique_ident};
 use crate::model::{
-    Component, ComponentKind, ConstrainedType, EnumVariant, RangeScalar, RangeType, RangeTypeRef,
-    TypeRef, Union, Validation,
+    Component, ComponentKind, ConstrainedType, Enum, RangeScalar, RangeType, RangeTypeRef, TypeRef,
+    Union, Validation,
 };
 
 #[derive(Debug, Default)]
@@ -66,14 +66,14 @@ impl TypeRegistry {
         &mut self,
         type_name_hint: &str,
         description: Option<String>,
-        variants: Vec<EnumVariant>,
+        enum_: Enum,
     ) -> TypeRef {
         let rust_name = self.generated_type_name(type_name_hint);
 
         self.inline_enums.push(Component {
             rust_name: rust_name.clone(),
             description,
-            kind: ComponentKind::Enum(variants),
+            kind: ComponentKind::Enum(enum_),
         });
 
         TypeRef::Named(rust_name)
@@ -150,7 +150,7 @@ fn stable_suffix(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::IntegerType;
+    use crate::model::{EnumVariant, IntegerType};
 
     #[test]
     fn stable_suffix_is_deterministic() {
@@ -211,10 +211,13 @@ mod tests {
         let first = registry.inline_enum_ref(
             "User name",
             None,
-            vec![EnumVariant {
-                wire_name: "active".to_owned(),
-                rust_name: "Active".to_owned(),
-            }],
+            Enum {
+                variants: vec![EnumVariant {
+                    wire_name: "active".to_owned(),
+                    rust_name: "Active".to_owned(),
+                }],
+                allow_unknown: true,
+            },
         );
         let second =
             registry.inline_range_ref("User name", None, RangeScalar::Integer(IntegerType::U8));
@@ -249,10 +252,13 @@ mod tests {
         let inline_enum = registry.inline_enum_ref(
             "Search state",
             None,
-            vec![EnumVariant {
-                wire_name: "open".to_owned(),
-                rust_name: "Open".to_owned(),
-            }],
+            Enum {
+                variants: vec![EnumVariant {
+                    wire_name: "open".to_owned(),
+                    rust_name: "Open".to_owned(),
+                }],
+                allow_unknown: true,
+            },
         );
         let inline_range = registry.inline_range_ref(
             "Search window",
