@@ -2,6 +2,7 @@ use std::fs;
 
 use satay_codegen::{Error, ValidationError};
 
+use crate::ast::*;
 use crate::common::*;
 
 #[test]
@@ -58,22 +59,14 @@ components:
     )
     .expect("generate allOf fixture");
 
-    let types_rs = find_file(&files, "types.rs");
-    assert!(types_rs.contents.contains("/// A flattened child."));
-    assert!(types_rs.contents.contains("pub struct Child"));
-
-    let child_start = types_rs
-        .contents
-        .find("pub struct Child")
-        .expect("Child struct exists");
-    let child_end = usize::min(types_rs.contents.len(), child_start + 400);
-    let child = &types_rs.contents[child_start..child_end];
-    let id = child.find("pub id: String").expect("id field exists");
-    let tag = child.find("pub tag: String").expect("tag field exists");
-    let name = child.find("pub name: String").expect("name field exists");
-    assert!(id < tag);
-    assert!(tag < name);
-    assert!(child.contains("pub nickname: Option<String>"));
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    let child = find_struct(&types_rs, "Child");
+    assert_doc(&child.attrs, "A flattened child.");
+    assert_eq!(field_names(child), ["id", "tag", "name", "nickname"]);
+    assert_field(child, "id", "String");
+    assert_field(child, "tag", "String");
+    assert_field(child, "name", "String");
+    assert_field(child, "nickname", "Option<String>");
 }
 
 #[test]

@@ -1,5 +1,6 @@
 use std::fs;
 
+use crate::ast::*;
 use crate::common::*;
 
 #[test]
@@ -125,10 +126,13 @@ fn generated_response_name_collision_compiles_and_decodes() {
     let files =
         satay_codegen::generate(RESPONSE_NAME_COLLISION).expect("generate collision fixture");
 
-    let parts = find_file(&files, "psi/parts.rs");
-    assert!(parts.contents.contains("pub enum PsiOperationResponse"));
-    assert!(parts.contents.contains("Ok(PsiResponse)"));
-    assert!(!parts.contents.contains("pub enum PsiResponse"));
+    let parts = parse_rust(find_file(&files, "psi/parts.rs"));
+    let response = find_enum(&parts, "PsiOperationResponse");
+    assert_eq!(
+        norm(&variant(response, "Ok").fields),
+        norm_str("(PsiResponse)")
+    );
+    assert!(!has_enum(&parts, "PsiResponse"));
 
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();
@@ -175,31 +179,38 @@ mod tests {
 fn generated_constrained_fixture_enforces_openapi_bounds() {
     let files = satay_codegen::generate(CONSTRAINED).expect("generate constrained fixture");
 
-    let types_rs = find_file(&files, "types.rs");
-    assert!(types_rs.contents.contains("#[nutype::nutype("));
-    assert!(types_rs.contents.contains("validate(less_or_equal = 130)"));
-    assert!(types_rs.contents.contains("pub struct Age(u8);"));
-    assert!(
-        types_rs
-            .contents
-            .contains("validate(len_char_min = 1, len_char_max = 80)")
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    assert_tuple_struct(&types_rs, "Age", "u8");
+    assert_attr_contains(
+        &find_struct(&types_rs, "Age").attrs,
+        "nutype::nutype",
+        "validate(less_or_equal = 130)",
     );
-    assert!(
-        types_rs
-            .contents
-            .contains("validate(len_char_min = 1, len_char_max = 40)")
+    assert_attr_contains(
+        &find_struct(&types_rs, "UserName").attrs,
+        "nutype::nutype",
+        "validate(len_char_min = 1, len_char_max = 80)",
     );
-    assert!(
-        types_rs
-            .contents
-            .contains("validate(finite, greater = 0.0, less = 1.0)")
+    assert_attr_contains(
+        &find_struct(&types_rs, "UserNickname").attrs,
+        "nutype::nutype",
+        "validate(len_char_min = 1, len_char_max = 40)",
     );
-    assert!(
-        types_rs
-            .contents
-            .contains("pub nickname: Option<UserNickname>,")
+    assert_attr_contains(
+        &find_struct(&types_rs, "UserScore").attrs,
+        "nutype::nutype",
+        "validate(finite, greater = 0.0, less = 1.0)",
     );
-    assert!(types_rs.contents.contains("regex = \"^[a-zA-Z0-9-]+$\""));
+    assert_field(
+        find_struct(&types_rs, "User"),
+        "nickname",
+        "Option<UserNickname>",
+    );
+    assert_attr_contains(
+        &find_struct(&types_rs, "GetUserUserIdParameter").attrs,
+        "nutype::nutype",
+        r#"regex = "^[a-zA-Z0-9-]+$""#,
+    );
 
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();

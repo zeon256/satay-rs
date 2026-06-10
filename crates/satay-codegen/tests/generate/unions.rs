@@ -1,5 +1,6 @@
 use std::fs;
 
+use crate::ast::*;
 use crate::common::*;
 
 #[test]
@@ -46,25 +47,17 @@ components:
     )
     .expect("generate anyOf fixture");
 
-    let types_rs = find_file(&files, "types.rs");
-    assert!(types_rs.contents.contains("/// A search result."));
-    assert!(types_rs.contents.contains("pub enum SearchResult"));
-    assert!(
-        types_rs
-            .contents
-            .contains("#[cfg_attr(feature = \"serde\", serde(untagged))]")
-    );
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    let union = find_enum(&types_rs, "SearchResult");
+    assert_doc(&union.attrs, "A search result.");
+    assert_attr_contains(&union.attrs, "cfg_attr", "serde(untagged)");
 
-    let union_start = types_rs
-        .contents
-        .find("pub enum SearchResult")
-        .expect("SearchResult union exists");
-    let union = &types_rs.contents[union_start..];
-    let user = union.find("User(User)").expect("User variant exists");
-    let organization = union
-        .find("Organization(Organization)")
-        .expect("Organization variant exists");
-    assert!(user < organization);
+    assert_eq!(variant_names(union), ["User", "Organization"]);
+    assert_eq!(norm(&variant(union, "User").fields), norm_str("(User)"));
+    assert_eq!(
+        norm(&variant(union, "Organization").fields),
+        norm_str("(Organization)")
+    );
 }
 
 #[test]
@@ -112,26 +105,19 @@ components:
     )
     .expect("generate discriminator anyOf fixture");
 
-    let types_rs = find_file(&files, "types.rs");
-    assert!(
-        types_rs
-            .contents
-            .contains("#[cfg_attr(feature = \"serde\", serde(tag = \"kind\"))]")
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    let union = find_enum(&types_rs, "SearchResult");
+    assert_attr_contains(&union.attrs, "cfg_attr", r#"serde(tag = "kind")"#);
+    assert!(!contains_tokens(&types_rs, "serde(untagged)"));
+    assert_attr_contains(
+        &variant(union, "User").attrs,
+        "cfg_attr",
+        r#"serde(rename = "User")"#,
     );
-    assert!(
-        !types_rs
-            .contents
-            .contains("#[cfg_attr(feature = \"serde\", serde(untagged))]")
-    );
-    assert!(
-        types_rs
-            .contents
-            .contains("#[cfg_attr(feature = \"serde\", serde(rename = \"User\"))]")
-    );
-    assert!(
-        types_rs
-            .contents
-            .contains("#[cfg_attr(feature = \"serde\", serde(rename = \"Organization\"))]")
+    assert_attr_contains(
+        &variant(union, "Organization").attrs,
+        "cfg_attr",
+        r#"serde(rename = "Organization")"#,
     );
 }
 
@@ -182,19 +168,19 @@ components:
     )
     .expect("generate discriminator oneOf fixture");
 
-    let types_rs = find_file(&files, "types.rs");
-    assert!(
-        types_rs
-            .contents
-            .contains("#[cfg_attr(feature = \"serde\", serde(tag = \"kind\"))]")
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    let union = find_enum(&types_rs, "Pet");
+    assert_attr_contains(&union.attrs, "cfg_attr", r#"serde(tag = "kind")"#);
+    assert_attr_contains(
+        &variant(union, "Dog").attrs,
+        "cfg_attr",
+        r#"serde(rename = "dog")"#,
     );
-    let union_start = types_rs
-        .contents
-        .find("pub enum Pet")
-        .expect("Pet union exists");
-    let union = &types_rs.contents[union_start..];
-    assert!(union.contains("#[cfg_attr(feature = \"serde\", serde(rename = \"dog\"))]"));
-    assert!(union.contains("#[cfg_attr(feature = \"serde\", serde(rename = \"Cat\"))]"));
+    assert_attr_contains(
+        &variant(union, "Cat").attrs,
+        "cfg_attr",
+        r#"serde(rename = "Cat")"#,
+    );
 }
 
 #[test]

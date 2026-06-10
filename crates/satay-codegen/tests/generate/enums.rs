@@ -1,46 +1,35 @@
 use std::fs;
 
+use crate::ast::*;
 use crate::common::*;
 
 #[test]
 fn inline_enum_generates_proper_enum_types() {
     let files = satay_codegen::generate(INLINE_ENUM).expect("generate inline-enum fixture");
 
-    let types_rs = find_file(&files, "types.rs");
-    assert!(types_rs.contents.contains("pub enum ItemCategory"));
-    assert!(types_rs.contents.contains("pub enum ItemCondition"));
-    assert!(types_rs.contents.contains("pub struct Item"));
-    assert!(types_rs.contents.contains("#[default]"));
-    assert!(types_rs.contents.contains("serde(other)"));
-    assert!(!types_rs.contents.contains(r#"rename = """#));
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    let item = find_struct(&types_rs, "Item");
+    assert_field(item, "category", "ItemCategory");
+    assert_field(item, "condition", "ItemCondition");
+    assert!(!contains_tokens(&types_rs, r#"rename = """#));
 
-    let item_struct_start = types_rs
-        .contents
-        .find("pub struct Item")
-        .expect("Item struct exists");
-    let item_struct = &types_rs.contents[item_struct_start..];
-    assert!(item_struct.contains("category: ItemCategory"));
-    assert!(item_struct.contains("condition: ItemCondition"));
+    let category = find_enum(&types_rs, "ItemCategory");
+    assert_eq!(
+        variant_names(category),
+        ["Electronics", "Clothing", "Food", "Unknown"]
+    );
+    let unknown = variant(category, "Unknown");
+    assert!(has_attr(&unknown.attrs, "default"));
+    assert_attr_contains(&unknown.attrs, "cfg_attr", "serde(other)");
 
-    let category_enum_start = types_rs
-        .contents
-        .find("pub enum ItemCategory")
-        .expect("ItemCategory enum exists");
-    let category_enum = &types_rs.contents[category_enum_start..category_enum_start + 400];
-    assert!(category_enum.contains("Electronics"));
-    assert!(category_enum.contains("Clothing"));
-    assert!(category_enum.contains("Food"));
-    assert!(category_enum.contains("Unknown"));
-
-    let condition_enum_start = types_rs
-        .contents
-        .find("pub enum ItemCondition")
-        .expect("ItemCondition enum exists");
-    let condition_enum = &types_rs.contents[condition_enum_start..condition_enum_start + 400];
-    assert!(condition_enum.contains("New"));
-    assert!(condition_enum.contains("Used"));
-    assert!(condition_enum.contains("Refurbished"));
-    assert!(condition_enum.contains("Unknown"));
+    let condition = find_enum(&types_rs, "ItemCondition");
+    assert_eq!(
+        variant_names(condition),
+        ["New", "Used", "Refurbished", "Unknown"]
+    );
+    let unknown = variant(condition, "Unknown");
+    assert!(has_attr(&unknown.attrs, "default"));
+    assert_attr_contains(&unknown.attrs, "cfg_attr", "serde(other)");
 }
 
 #[test]
@@ -88,24 +77,33 @@ components:
     )
     .expect("generate enum variants fixture");
 
-    let types_rs = find_file(&files, "types.rs");
-    let enum_start = types_rs
-        .contents
-        .find("pub enum BusArrivalTimingType")
-        .expect("BusArrivalTimingType enum exists");
-    let enum_contents = &types_rs.contents[enum_start..enum_start + 600];
-
-    assert!(enum_contents.contains("SingleDecker"));
-    assert!(enum_contents.contains("DoubleDecker"));
-    assert!(enum_contents.contains("Bendy"));
-    assert!(enum_contents.contains(r#"serde(rename = "SD")"#));
-    assert!(enum_contents.contains(r#"serde(rename = "DD")"#));
-    assert!(enum_contents.contains(r#"serde(rename = "BD")"#));
-    assert!(enum_contents.contains("serde(other)"));
-    assert!(!enum_contents.contains("Sd"));
-    assert!(!enum_contents.contains("Dd"));
-    assert!(!enum_contents.contains("Bd"));
-    assert!(!enum_contents.contains(r#"rename = """#));
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    let timing = find_enum(&types_rs, "BusArrivalTimingType");
+    assert_eq!(
+        variant_names(timing),
+        ["SingleDecker", "DoubleDecker", "Bendy", "Unknown"]
+    );
+    assert_attr_contains(
+        &variant(timing, "SingleDecker").attrs,
+        "cfg_attr",
+        r#"serde(rename = "SD")"#,
+    );
+    assert_attr_contains(
+        &variant(timing, "DoubleDecker").attrs,
+        "cfg_attr",
+        r#"serde(rename = "DD")"#,
+    );
+    assert_attr_contains(
+        &variant(timing, "Bendy").attrs,
+        "cfg_attr",
+        r#"serde(rename = "BD")"#,
+    );
+    assert_attr_contains(
+        &variant(timing, "Unknown").attrs,
+        "cfg_attr",
+        "serde(other)",
+    );
+    assert!(!contains_tokens(&types_rs, r#"rename = """#));
 }
 
 #[test]

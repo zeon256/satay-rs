@@ -1,5 +1,6 @@
 use std::fs;
 
+use crate::ast::*;
 use crate::common::*;
 
 #[test]
@@ -92,77 +93,68 @@ components:
     )
     .expect("generate parse-as fixture");
 
-    let types_rs = find_file(&files, "types.rs");
-    assert!(types_rs.contents.contains("pub type ReadingId = u32"));
-    assert!(types_rs.contents.contains("pub id: u32"));
-    assert!(types_rs.contents.contains("pub value: f64"));
-    assert!(types_rs.contents.contains("pub count: u8"));
-    assert!(types_rs.contents.contains("pub monitored: bool"));
-    assert!(
-        types_rs
-            .contents
-            .contains("pub seen_at: satay_runtime::OffsetDateTime")
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    assert_eq!(
+        norm(&find_type_alias(&types_rs, "ReadingId").ty),
+        norm_str("u32")
     );
-    assert!(
-        types_rs
-            .contents
-            .contains("pub starts_at: Option<satay_runtime::Time>")
+    let reading = find_struct(&types_rs, "Reading");
+    assert_field(reading, "id", "u32");
+    assert_field(reading, "value", "f64");
+    assert_field(reading, "count", "u8");
+    assert_field(reading, "monitored", "bool");
+    assert_field(reading, "seen_at", "satay_runtime::OffsetDateTime");
+    assert_field(reading, "starts_at", "Option<satay_runtime::Time>");
+    assert_field(reading, "no_service_at", "Option<satay_runtime::Time>");
+    assert_field(reading, "alias_id", "u32");
+    assert_field(reading, "frequency", "ReadingFrequency");
+    assert_field(reading, "tolerance", "ReadingTolerance");
+    let frequency = find_struct(&types_rs, "ReadingFrequency");
+    assert_field(frequency, "min", "Option<u8>");
+    assert_field(frequency, "max", "Option<u8>");
+    let tolerance = find_struct(&types_rs, "ReadingTolerance");
+    assert_field(tolerance, "min", "Option<f64>");
+    assert_attr_contains(
+        &field(reading, "id").attrs,
+        "cfg_attr",
+        r#"with = "satay_runtime::serde_string::as_u32""#,
     );
-    assert!(
-        types_rs
-            .contents
-            .contains("pub no_service_at: Option<satay_runtime::Time>")
+    assert_attr_contains(
+        &field(reading, "value").attrs,
+        "cfg_attr",
+        r#"with = "satay_runtime::serde_string::as_f64""#,
     );
-    assert!(types_rs.contents.contains("pub alias_id: u32"));
-    assert!(
-        types_rs
-            .contents
-            .contains("pub frequency: ReadingFrequency")
+    assert_attr_contains(
+        &field(reading, "monitored").attrs,
+        "cfg_attr",
+        r#"with = "satay_runtime::serde_integer::as_bool""#,
     );
-    assert!(
-        types_rs
-            .contents
-            .contains("pub tolerance: ReadingTolerance")
+    assert_attr_contains(
+        &field(reading, "seen_at").attrs,
+        "cfg_attr",
+        r#"with = "satay_runtime::serde_string::as_offset_datetime""#,
     );
-    assert!(types_rs.contents.contains("pub struct ReadingFrequency"));
-    assert!(types_rs.contents.contains("pub min: Option<u8>"));
-    assert!(types_rs.contents.contains("pub max: Option<u8>"));
-    assert!(types_rs.contents.contains("pub struct ReadingTolerance"));
-    assert!(types_rs.contents.contains("pub min: Option<f64>"));
-    assert!(
-        types_rs
-            .contents
-            .contains("with = \"satay_runtime::serde_string::as_u32\"")
+    assert_attr_contains(
+        &field(reading, "starts_at").attrs,
+        "cfg_attr",
+        r#"with = "satay_runtime::serde_string::as_time::option""#,
     );
-    assert!(
-        types_rs
-            .contents
-            .contains("with = \"satay_runtime::serde_string::as_f64\"")
-    );
-    assert!(
-        types_rs
-            .contents
-            .contains("with = \"satay_runtime::serde_integer::as_bool\"")
-    );
-    assert!(
-        types_rs
-            .contents
-            .contains("with = \"satay_runtime::serde_string::as_offset_datetime\"")
-    );
-    assert!(
-        types_rs
-            .contents
-            .contains("with = \"satay_runtime::serde_string::as_time::option\"")
-    );
-    assert!(
-        types_rs
-            .contents
-            .contains("with = \"satay_runtime::serde_string::as_u32\"")
+    assert_attr_contains(
+        &field(reading, "alias_id").attrs,
+        "cfg_attr",
+        r#"with = "satay_runtime::serde_string::as_u32""#,
     );
 
-    let parts_rs = find_file(&files, "get_reading/parts.rs");
-    assert!(parts_rs.contents.contains("pub reading_id: u32"));
-    assert!(parts_rs.contents.contains("input.reading_id.to_string()"));
+    let parts_rs = parse_rust(find_file(&files, "get_reading/parts.rs"));
+    assert_field(
+        find_struct(&parts_rs, "GetReadingInput"),
+        "reading_id",
+        "u32",
+    );
+    assert!(contains_tokens(
+        find_fn(&parts_rs, "get_reading_parts"),
+        "input.reading_id.to_string()"
+    ));
 
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();
@@ -261,17 +253,16 @@ paths:
     )
     .expect("generate parse-as date fixture");
 
-    let parts_rs = find_file(&files, "psi/parts.rs");
-    assert!(
-        parts_rs
-            .contents
-            .contains("pub date: Option<satay_runtime::Date>")
+    let parts_rs = parse_rust(find_file(&files, "psi/parts.rs"));
+    assert_field(
+        find_struct(&parts_rs, "PsiInput"),
+        "date",
+        "Option<satay_runtime::Date>",
     );
-    assert!(
-        parts_rs
-            .contents
-            .contains("satay_runtime::format_date(value)")
-    );
+    assert!(contains_tokens(
+        find_fn(&parts_rs, "psi_parts"),
+        "satay_runtime::format_date(value)"
+    ));
 
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();
@@ -331,17 +322,16 @@ paths:
     )
     .expect("generate parse-as naive-datetime fixture");
 
-    let parts_rs = find_file(&files, "psi/parts.rs");
-    assert!(
-        parts_rs
-            .contents
-            .contains("pub date: Option<satay_runtime::PrimitiveDateTime>")
+    let parts_rs = parse_rust(find_file(&files, "psi/parts.rs"));
+    assert_field(
+        find_struct(&parts_rs, "PsiInput"),
+        "date",
+        "Option<satay_runtime::PrimitiveDateTime>",
     );
-    assert!(
-        parts_rs
-            .contents
-            .contains("satay_runtime::format_naive_datetime(value)")
-    );
+    assert!(contains_tokens(
+        find_fn(&parts_rs, "psi_parts"),
+        "satay_runtime::format_naive_datetime(value)"
+    ));
 
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();
@@ -426,59 +416,46 @@ components:
     )
     .expect("generate unixtime fixture");
 
-    let types_rs = find_file(&files, "types.rs");
-    assert!(
-        types_rs
-            .contents
-            .contains("pub type EventTime = satay_runtime::OffsetDateTime")
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    assert_eq!(
+        norm(&find_type_alias(&types_rs, "EventTime").ty),
+        norm_str("satay_runtime::OffsetDateTime")
     );
-    assert!(
-        types_rs
-            .contents
-            .contains("pub started_at: satay_runtime::OffsetDateTime")
+    let event = find_struct(&types_rs, "Event");
+    assert_field(event, "started_at", "satay_runtime::OffsetDateTime");
+    assert_field(event, "ended_at", "Option<satay_runtime::OffsetDateTime>");
+    assert_field(event, "created_at_string", "satay_runtime::OffsetDateTime");
+    assert_attr_contains(
+        &field(event, "started_at").attrs,
+        "cfg_attr",
+        r#"with = "satay_runtime::serde_integer::as_unix_time""#,
     );
-    assert!(
-        types_rs
-            .contents
-            .contains("pub ended_at: Option<satay_runtime::OffsetDateTime>")
+    assert_attr_contains(
+        &field(event, "ended_at").attrs,
+        "cfg_attr",
+        r#"with = "satay_runtime::serde_integer::as_unix_time::option""#,
     );
-    assert!(
-        types_rs
-            .contents
-            .contains("pub created_at_string: satay_runtime::OffsetDateTime")
+    assert_attr_contains(
+        &field(event, "created_at_string").attrs,
+        "cfg_attr",
+        r#"with = "satay_runtime::serde_string::as_unix_time""#,
     );
-    assert!(
-        types_rs
-            .contents
-            .contains("with = \"satay_runtime::serde_integer::as_unix_time\"")
-    );
-    assert!(
-        types_rs
-            .contents
-            .contains("with = \"satay_runtime::serde_integer::as_unix_time::option\"")
-    );
-    assert!(
-        types_rs
-            .contents
-            .contains("with = \"satay_runtime::serde_string::as_unix_time\"")
-    );
-    assert!(
-        types_rs
-            .contents
-            .contains("with = \"satay_runtime::serde_string::as_unix_time::option\"")
+    assert_attr_contains(
+        &field(event, "ended_at_string").attrs,
+        "cfg_attr",
+        r#"with = "satay_runtime::serde_string::as_unix_time::option""#,
     );
 
-    let parts_rs = find_file(&files, "get_events/parts.rs");
-    assert!(
-        parts_rs
-            .contents
-            .contains("pub at: satay_runtime::OffsetDateTime")
+    let parts_rs = parse_rust(find_file(&files, "get_events/parts.rs"));
+    assert_field(
+        find_struct(&parts_rs, "GetEventsInput"),
+        "at",
+        "satay_runtime::OffsetDateTime",
     );
-    assert!(
-        parts_rs
-            .contents
-            .contains("satay_runtime::format_unix_time(&input.at)")
-    );
+    assert!(contains_tokens(
+        find_fn(&parts_rs, "get_events_parts"),
+        "satay_runtime::format_unix_time(&input.at)"
+    ));
 
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();
