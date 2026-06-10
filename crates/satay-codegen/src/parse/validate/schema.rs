@@ -969,8 +969,8 @@ fn reject_plain_union_sibling_keywords(
         }
     }
 
-    if let Some(keyword) = schema.extensions.keys().next() {
-        return Err(union_keyword.error(context.to_owned(), format!("x-{keyword}")));
+    if let Some(keyword) = unsupported_union_extension(schema) {
+        return Err(union_keyword.error(context.to_owned(), keyword));
     }
 
     Ok(())
@@ -1016,14 +1016,30 @@ fn reject_discriminator_union_sibling_keywords(
         }
     }
 
-    if let Some(keyword) = schema.extensions.keys().next() {
+    if let Some(keyword) = unsupported_union_extension(schema) {
         return Err(ValidationError::UnsupportedAnyOfSiblingKeyword {
             context: context.to_owned(),
-            keyword: format!("x-{keyword}"),
+            keyword,
         });
     }
 
     Ok(())
+}
+
+fn unsupported_union_extension(schema: &OasObjectSchema) -> Option<String> {
+    schema
+        .extensions
+        .keys()
+        .find(|keyword| keyword.as_str() == "satay" || keyword.as_str() == "x-satay")
+        .map(|keyword| extension_wire_keyword(keyword))
+}
+
+fn extension_wire_keyword(keyword: &str) -> String {
+    if keyword.starts_with("x-") {
+        keyword.to_owned()
+    } else {
+        format!("x-{keyword}")
+    }
 }
 
 fn reject_any_of_cycles(components: &[ValidatedComponent]) -> Result<(), ValidationError> {

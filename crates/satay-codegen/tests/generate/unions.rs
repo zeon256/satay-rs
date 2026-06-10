@@ -114,6 +114,9 @@ components:
         - $ref: '#/components/schemas/AssistantToolsCode'
         - $ref: '#/components/schemas/AssistantToolsFileSearch'
         - $ref: '#/components/schemas/AssistantToolsFunction'
+      x-oaiMeta:
+        name: Assistant tools
+        beta: true
     AssistantObject:
       type: object
       required:
