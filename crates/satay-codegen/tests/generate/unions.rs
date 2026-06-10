@@ -176,6 +176,95 @@ components:
 }
 
 #[test]
+fn one_of_generates_inline_singleton_string_enum_branch() {
+    let files = satay_codegen::generate(
+        r##"
+openapi: 3.1.0
+info:
+  title: Response Format API
+  version: 1.0.0
+paths:
+  /format:
+    get:
+      operationId: getFormat
+      responses:
+        '200':
+          description: Response format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantsApiResponseFormatOption'
+components:
+  schemas:
+    ResponseFormatText:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - text
+    ResponseFormatJsonObject:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - json_object
+    ResponseFormatJsonSchema:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - json_schema
+    AssistantsApiResponseFormatOption:
+      description: Response format option.
+      oneOf:
+        - type: string
+          description: '`auto` is the default value'
+          enum:
+            - auto
+          x-stainless-const: true
+        - $ref: '#/components/schemas/ResponseFormatText'
+        - $ref: '#/components/schemas/ResponseFormatJsonObject'
+        - $ref: '#/components/schemas/ResponseFormatJsonSchema'
+"##,
+    )
+    .expect("generate oneOf inline singleton enum fixture");
+
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    let union = find_enum(&types_rs, "AssistantsApiResponseFormatOption");
+    assert_doc(&union.attrs, "Response format option.");
+    assert_attr_contains(&union.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(
+        variant_names(union),
+        [
+            "Auto",
+            "ResponseFormatText",
+            "ResponseFormatJsonObject",
+            "ResponseFormatJsonSchema"
+        ]
+    );
+    assert_eq!(
+        norm(&variant(union, "Auto").fields),
+        norm_str("(AssistantsApiResponseFormatOptionAuto)")
+    );
+
+    let auto = find_enum(&types_rs, "AssistantsApiResponseFormatOptionAuto");
+    assert_eq!(variant_names(auto), ["Auto"]);
+    assert!(!contains_tokens(
+        &types_rs,
+        "AssistantsApiResponseFormatOptionAuto :: Unknown"
+    ));
+}
+
+#[test]
 fn any_of_discriminator_generates_tagged_union_types() {
     let files = satay_codegen::generate(
         r##"
@@ -486,6 +575,135 @@ mod tests {
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(crate_dir, "test", &[], "oneOf generated crate tests");
+}
+
+#[test]
+fn generated_one_of_inline_singleton_branch_serializes_and_deserializes() {
+    let files = satay_codegen::generate(
+        r##"
+openapi: 3.1.0
+info:
+  title: Response Format API
+  version: 1.0.0
+paths:
+  /format:
+    get:
+      operationId: getFormat
+      responses:
+        '200':
+          description: Response format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantsApiResponseFormatOption'
+components:
+  schemas:
+    ResponseFormatText:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - text
+    ResponseFormatJsonObject:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - json_object
+    ResponseFormatJsonSchema:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - json_schema
+    AssistantsApiResponseFormatOption:
+      oneOf:
+        - type: string
+          enum:
+            - auto
+          x-stainless-const: true
+        - $ref: '#/components/schemas/ResponseFormatText'
+        - $ref: '#/components/schemas/ResponseFormatJsonObject'
+        - $ref: '#/components/schemas/ResponseFormatJsonSchema'
+"##,
+    )
+    .expect("generate oneOf inline singleton runtime fixture");
+
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+
+    let runtime_path = runtime_path_toml();
+
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::*;
+
+    #[test]
+    fn one_of_inline_singleton_deserializes_string_branch() {
+        let response = satay_runtime::ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: br#""auto""#.to_vec(),
+        };
+
+        let decoded = decode_get_format_response(response).expect("decoded response");
+        match decoded {
+            GetFormatResponse::Ok(AssistantsApiResponseFormatOption::Auto(value)) => {
+                assert_eq!(value, AssistantsApiResponseFormatOptionAuto::Auto);
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn one_of_inline_singleton_deserializes_object_branch() {
+        let response = satay_runtime::ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: br#"{"type":"json_object"}"#.to_vec(),
+        };
+
+        let decoded = decode_get_format_response(response).expect("decoded response");
+        match decoded {
+            GetFormatResponse::Ok(AssistantsApiResponseFormatOption::ResponseFormatJsonObject(value)) => {
+                assert_eq!(value.type_, ResponseFormatJsonObjectType::JsonObject);
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn one_of_inline_singleton_serializes_string_branch() {
+        let value = AssistantsApiResponseFormatOption::Auto(
+            AssistantsApiResponseFormatOptionAuto::Auto,
+        );
+        let encoded = serde_json::to_value(value).expect("serialized response format");
+        assert_eq!(encoded, serde_json::json!("auto"));
+    }
+}
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    run_temp_cargo(
+        crate_dir,
+        "test",
+        &[],
+        "oneOf inline singleton generated crate tests",
+    );
 }
 
 #[test]
