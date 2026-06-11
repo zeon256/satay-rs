@@ -204,6 +204,10 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
                 let union = self.parse_union(union, type_name_hint, registry);
                 registry.inline_union_ref(type_name_hint, description.clone(), union)
             }
+            ValidatedTypeKind::InlineStruct(fields) => {
+                let fields = self.parse_struct_fields(type_name_hint, fields, registry);
+                registry.inline_struct_ref(type_name_hint, description.clone(), fields)
+            }
             ValidatedTypeKind::Range(scalar) => {
                 registry.inline_range_ref(type_name_hint, description.clone(), *scalar)
             }

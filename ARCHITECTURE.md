@@ -154,12 +154,13 @@ flowchart TD
 
 - Component names are reserved first to prevent collisions.
 - Inline constrained schemas become generated `ConstrainedType`s and are referenced through `TypeRef::Constrained`.
+- Inline supported `allOf` object schemas become extra `ComponentKind::Struct` components and are referenced through `TypeRef::Named`.
 - Inline string enums become extra `ComponentKind::Enum` components and are referenced through `TypeRef::Named`.
 - Inline range schemas from `x-satay.parse-as` become extra `ComponentKind::Range` components and are referenced through `TypeRef::Range`.
 
 `lower/schema.rs` converts component schemas and nested type schemas into:
 
-- `ComponentKind::Struct` for object schemas with properties, including supported component `allOf` object branches flattened during validation.
+- `ComponentKind::Struct` for object schemas with properties, including supported component and generated inline `allOf` object branches flattened during validation.
 - `ComponentKind::Enum` for non-null string enum components.
 - `ComponentKind::Union` for local-ref `anyOf` enums and supported discriminator-tagged `anyOf`/`oneOf` unions.
 - `ComponentKind::Range` for non-null component-level string range schemas from `x-satay.parse-as`.
@@ -336,7 +337,7 @@ Key invariants enforced before rendering:
 
 - Only OpenAPI `3.1.x` documents are accepted.
 - Only supported local references into `#/components/...` are accepted, and supported component-object reference chains are checked for cycles.
-- Unsupported schema composition beyond local-ref `anyOf` unions, supported discriminator-tagged `anyOf`/`oneOf` unions, and component object `allOf` flattening, map objects, inline object schemas outside supported `allOf` branches, boolean JSON Schemas, non-string enums, multi-type schemas beyond one non-null type plus `null`, content parameters, non-JSON bodies, default response bodies, nullable parameters, cookie parameters, array path/header parameters, and unsupported constraint keywords are rejected.
+- Unsupported schema composition beyond local-ref `anyOf` unions, supported discriminator-tagged `anyOf`/`oneOf` unions, and object-branch `allOf` flattening in component or JSON type positions, map objects, inline object schemas outside supported `allOf` branches, boolean JSON Schemas, non-string enums, multi-type schemas beyond one non-null type plus `null`, content parameters, non-JSON bodies, default response bodies, nullable parameters, `allOf` parameters, cookie parameters, array path/header parameters, and unsupported constraint keywords are rejected.
 - Every operation has a `responses` object.
 - Path parameters declared in the path template and parameter lists match.
 - Request and response bodies used by generated JSON helpers have supported JSON media types.

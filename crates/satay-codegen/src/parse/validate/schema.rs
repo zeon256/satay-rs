@@ -71,9 +71,14 @@ pub(super) fn validate_type_schema(
     }
     reject_one_of(schema, context)?;
     if !schema.all_of.is_empty() {
-        return Err(ValidationError::UnsupportedComposition {
-            context: context.to_owned(),
-            keyword: "allOf",
+        return Ok(ValidatedType {
+            kind: ValidatedTypeKind::InlineStruct(validate_inline_all_of_struct_properties(
+                document, schema, context,
+            )?),
+            nullable: false,
+            validation: None,
+            description: optional_description(&schema.description),
+            treat_error_as_none: false,
         });
     }
     let (schema_type, nullable) = schema_type_and_nullable(schema, context)?;
@@ -94,6 +99,14 @@ pub(super) fn schema_uses_any_of(
 ) -> Result<bool, ValidationError> {
     let mut visited = BTreeSet::new();
     schema_uses_any_of_inner(document, schema, &mut visited)
+}
+
+pub(super) fn schema_uses_all_of(
+    document: &ResolvedDocument<'_>,
+    schema: &OasSchema,
+) -> Result<bool, ValidationError> {
+    let mut visited = BTreeSet::new();
+    schema_uses_all_of_inner(document, schema, &mut visited)
 }
 
 fn schema_uses_any_of_inner(
@@ -124,6 +137,45 @@ fn schema_uses_any_of_inner(
         && schema_uses_any_of_inner(document, items, visited)?
     {
         return Ok(true);
+    }
+
+    Ok(false)
+}
+
+fn schema_uses_all_of_inner(
+    document: &ResolvedDocument<'_>,
+    schema: &OasSchema,
+    visited: &mut BTreeSet<String>,
+) -> Result<bool, ValidationError> {
+    if let Some(reference) = schema_ref(schema, "allOf parameter validation")? {
+        let name = local_ref_name(reference, "schemas")?;
+        if !visited.insert(name.clone()) {
+            return Ok(false);
+        }
+        let target = document
+            .spec
+            .components
+            .as_ref()
+            .and_then(|components| components.schemas.get(&name))
+            .ok_or(ValidationError::MissingJsonPointerToken { token: name })?;
+        return schema_uses_all_of_inner(document, target, visited);
+    }
+
+    let schema = object_schema(schema, "allOf parameter validation")?;
+    if !schema.all_of.is_empty() {
+        return Ok(true);
+    }
+
+    if let Some(items) = schema.items.as_deref()
+        && schema_uses_all_of_inner(document, items, visited)?
+    {
+        return Ok(true);
+    }
+
+    for property in schema.properties.values() {
+        if schema_uses_all_of_inner(document, property, visited)? {
+            return Ok(true);
+        }
     }
 
     Ok(false)
@@ -822,6 +874,18 @@ fn validate_all_of_struct_properties(
     result
 }
 
+fn validate_inline_all_of_struct_properties(
+    document: &ResolvedDocument<'_>,
+    schema: &OasObjectSchema,
+    context: &str,
+) -> Result<Vec<ValidatedField>, ValidationError> {
+    reject_all_of_sibling_keywords(schema, context)?;
+
+    let mut stack = vec![];
+    let mut collector = AllOfFieldCollector::new(document, &mut stack);
+    collector.collect_with_context(context, schema, context)
+}
+
 struct AllOfFieldCollector<'a, 'doc> {
     document: &'a ResolvedDocument<'doc>,
     stack: &'a mut Vec<String>,
@@ -844,8 +908,18 @@ impl<'a, 'doc> AllOfFieldCollector<'a, 'doc> {
         schema_name: &str,
         schema: &OasObjectSchema,
     ) -> Result<Vec<ValidatedField>, ValidationError> {
+        let context = format!("schema `{schema_name}`");
+        self.collect_with_context(schema_name, schema, &context)
+    }
+
+    fn collect_with_context(
+        &mut self,
+        schema_name: &str,
+        schema: &OasObjectSchema,
+        context: &str,
+    ) -> Result<Vec<ValidatedField>, ValidationError> {
         for (index, branch) in schema.all_of.iter().enumerate() {
-            self.collect_branch_fields(schema_name, branch, index)?;
+            self.collect_branch_fields(schema_name, branch, index, context)?;
         }
 
         Ok(mem::take(&mut self.fields))
@@ -860,25 +934,25 @@ impl<'a, 'doc> AllOfFieldCollector<'a, 'doc> {
         schema_name: &str,
         branch: &OasSchema,
         index: usize,
+        context: &str,
     ) -> Result<(), ValidationError> {
-        let context = format!("schema `{schema_name}`");
-        if let Some(reference) = schema_ref(branch, &context)? {
+        if let Some(reference) = schema_ref(branch, context)? {
             let branch_schema_name = local_ref_name(reference, "schemas").map_err(|_| {
                 ValidationError::UnsupportedAllOfBranch {
-                    context: context.clone(),
+                    context: context.to_owned(),
                     index,
                 }
             })?;
-            return self.collect_component_fields(&branch_schema_name, &context, index);
+            return self.collect_component_fields(&branch_schema_name, context, index);
         }
 
-        let schema = object_schema(branch, &context).map_err(|_| {
+        let schema = object_schema(branch, context).map_err(|_| {
             ValidationError::UnsupportedAllOfBranch {
-                context: context.clone(),
+                context: context.to_owned(),
                 index,
             }
         })?;
-        self.collect_object_fields(schema_name, schema, &context, index, false)
+        self.collect_object_fields(schema_name, schema, context, index, false)
     }
 
     fn collect_component_fields(
@@ -949,7 +1023,7 @@ impl<'a, 'doc> AllOfFieldCollector<'a, 'doc> {
             let all_of_context = format!("schema `{schema_name}`");
             reject_all_of_sibling_keywords(schema, &all_of_context)?;
             for (nested_index, branch) in schema.all_of.iter().enumerate() {
-                self.collect_branch_fields(schema_name, branch, nested_index)?;
+                self.collect_branch_fields(schema_name, branch, nested_index, &all_of_context)?;
             }
             return Ok(());
         }
@@ -1381,6 +1455,11 @@ fn collect_type_union_targets(
         ValidatedTypeKind::Array(item) => {
             collect_type_union_targets(item, schemas_by_rust_name, targets);
         }
+        ValidatedTypeKind::InlineStruct(fields) => {
+            for field in fields {
+                collect_type_union_targets(&field.ty, schemas_by_rust_name, targets);
+            }
+        }
         ValidatedTypeKind::Named(rust_name) => {
             if let Some(schema_name) = schemas_by_rust_name.get(rust_name) {
                 targets.push(schema_name.clone());
@@ -1585,6 +1664,7 @@ fn validation_base_type(kind: &ValidatedTypeKind) -> Option<TypeRef> {
         | ValidatedTypeKind::ParsedInteger(_)
         | ValidatedTypeKind::Enum(_)
         | ValidatedTypeKind::AnyOf(_)
+        | ValidatedTypeKind::InlineStruct(_)
         | ValidatedTypeKind::Range(_) => None,
     }
 }

@@ -2,13 +2,14 @@ use std::collections::BTreeSet;
 
 use crate::ident::{type_ident, unique_ident};
 use crate::model::{
-    Component, ComponentKind, ConstrainedType, Enum, RangeScalar, RangeType, RangeTypeRef, TypeRef,
-    Union, Validation,
+    Component, ComponentKind, ConstrainedType, Enum, Field, RangeScalar, RangeType, RangeTypeRef,
+    TypeRef, Union, Validation,
 };
 
 #[derive(Debug, Default)]
 pub(crate) struct TypeRegistry {
     generated: Vec<ConstrainedType>,
+    inline_structs: Vec<Component>,
     inline_unions: Vec<Component>,
     inline_enums: Vec<Component>,
     inline_ranges: Vec<Component>,
@@ -60,6 +61,23 @@ impl TypeRegistry {
             rust_name,
             inner: Box::new(inner),
         }
+    }
+
+    pub(crate) fn inline_struct_ref(
+        &mut self,
+        type_name_hint: &str,
+        description: Option<String>,
+        fields: Vec<Field>,
+    ) -> TypeRef {
+        let rust_name = self.generated_type_name(type_name_hint);
+
+        self.inline_structs.push(Component {
+            rust_name: rust_name.clone(),
+            description,
+            kind: ComponentKind::Struct(fields),
+        });
+
+        TypeRef::Named(rust_name)
     }
 
     pub(crate) fn inline_enum_ref(
@@ -121,6 +139,7 @@ impl TypeRegistry {
         self,
         mut components: Vec<Component>,
     ) -> (Vec<Component>, Vec<ConstrainedType>) {
+        components.extend(self.inline_structs);
         components.extend(self.inline_unions);
         components.extend(self.inline_enums);
         components.extend(self.inline_ranges);
@@ -265,6 +284,18 @@ mod tests {
             None,
             RangeScalar::Integer(IntegerType::U16),
         );
+        let inline_struct = registry.inline_struct_ref(
+            "Search result",
+            None,
+            vec![Field {
+                wire_name: "id".to_owned(),
+                rust_name: "id".to_owned(),
+                description: None,
+                ty: TypeRef::String,
+                required: true,
+                treat_error_as_none: false,
+            }],
+        );
 
         assert!(matches!(constrained, TypeRef::Constrained { .. }));
         assert_eq!(inline_enum, TypeRef::Named("SearchState".to_owned()));
@@ -275,6 +306,7 @@ mod tests {
                 scalar: RangeScalar::Integer(IntegerType::U16),
             })
         );
+        assert_eq!(inline_struct, TypeRef::Named("SearchResult".to_owned()));
 
         let base = vec![Component {
             rust_name: "Existing".to_owned(),
@@ -288,7 +320,7 @@ mod tests {
                 .iter()
                 .map(|component| component.rust_name.as_str())
                 .collect::<Vec<_>>(),
-            ["Existing", "SearchState", "SearchWindow"]
+            ["Existing", "SearchResult", "SearchState", "SearchWindow"]
         );
         assert_eq!(constrained_types.len(), 1);
         assert_eq!(constrained_types[0].rust_name, "SearchTerm");

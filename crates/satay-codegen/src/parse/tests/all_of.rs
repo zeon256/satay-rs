@@ -86,6 +86,94 @@ components:
 }
 
 #[test]
+fn parses_inline_all_of_array_items_into_generated_struct_ir() {
+    let api = parse_valid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /messages:
+    get:
+      operationId: listMessages
+      responses:
+        '200':
+          description: Messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatCompletionMessageList'
+components:
+  schemas:
+    ChatCompletionResponseMessage:
+      type: object
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+        content:
+          type: string
+    ChatCompletionMessageList:
+      type: object
+      required:
+        - object
+        - data
+        - first_id
+        - last_id
+        - has_more
+      properties:
+        object:
+          type: string
+        data:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/ChatCompletionResponseMessage'
+              - type: object
+                required:
+                  - id
+                properties:
+                  id:
+                    type: string
+        first_id:
+          type: string
+        last_id:
+          type: string
+        has_more:
+          type: boolean
+"##,
+    );
+
+    let list = component(&api, "ChatCompletionMessageList");
+    match &list.kind {
+        ComponentKind::Struct(fields) => {
+            assert_eq!(
+                field(fields, "data").ty,
+                TypeRef::Array(Box::new(TypeRef::Named(
+                    "ChatCompletionMessageListDataItem".to_owned()
+                )))
+            );
+        }
+        other => panic!("expected ChatCompletionMessageList struct, got {other:?}"),
+    }
+
+    let item = component(&api, "ChatCompletionMessageListDataItem");
+    match &item.kind {
+        ComponentKind::Struct(fields) => {
+            assert_eq!(fields.len(), 3);
+            assert_eq!(field(fields, "role").ty, TypeRef::String);
+            assert_eq!(field(fields, "content").ty, TypeRef::String);
+            assert_eq!(field(fields, "id").ty, TypeRef::String);
+            assert!(field(fields, "id").required);
+        }
+        other => panic!("expected generated inline item struct, got {other:?}"),
+    }
+}
+
+#[test]
 fn rejects_all_of_with_sibling_properties_keyword() {
     let err = parse_invalid(
         r##"
@@ -350,8 +438,8 @@ paths:
 }
 
 #[test]
-fn rejects_all_of_in_inline_property_schemas() {
-    let err = parse_invalid(
+fn parses_all_of_in_inline_property_schemas() {
+    let api = parse_valid(
         r##"
 openapi: 3.1.0
 info:
@@ -377,10 +465,140 @@ components:
                   type: string
 "##,
     );
+
+    let parent = component(&api, "Parent");
+    match &parent.kind {
+        ComponentKind::Struct(fields) => {
+            assert_eq!(
+                field(fields, "child").ty,
+                TypeRef::Named("ParentChild".to_owned())
+            );
+        }
+        other => panic!("expected Parent struct, got {other:?}"),
+    }
+
+    let child = component(&api, "ParentChild");
+    match &child.kind {
+        ComponentKind::Struct(fields) => {
+            assert_eq!(fields.len(), 1);
+            assert_eq!(field(fields, "id").ty, TypeRef::String);
+        }
+        other => panic!("expected ParentChild struct, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_inline_all_of_with_duplicate_properties() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Parent:
+      type: object
+      properties:
+        child:
+          allOf:
+            - type: object
+              properties:
+                id:
+                  type: string
+            - type: object
+              properties:
+                id:
+                  type: string
+"##,
+    );
     match err {
-        ValidationError::UnsupportedComposition { context, keyword } => {
+        ValidationError::DuplicateAllOfProperty { context, property } => {
             assert_eq!(context, "property `Parent.child`");
-            assert_eq!(keyword, "allOf");
+            assert_eq!(property, "id");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_inline_all_of_with_primitive_branch() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Parent:
+      type: object
+      properties:
+        children:
+          type: array
+          items:
+            allOf:
+              - type: string
+"##,
+    );
+    match err {
+        ValidationError::UnsupportedAllOfBranch { context, index } => {
+            assert_eq!(context, "property `Parent.children` items");
+            assert_eq!(index, 0);
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_inline_all_of_with_sibling_properties_keyword() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Parent:
+      type: object
+      properties:
+        child:
+          allOf:
+            - type: object
+              properties:
+                id:
+                  type: string
+          properties:
+            extra:
+              type: string
+"##,
+    );
+    match err {
+        ValidationError::UnsupportedAllOfSiblingKeyword { context, keyword } => {
+            assert_eq!(context, "property `Parent.child`");
+            assert_eq!(keyword, "properties");
         }
         other => panic!("unexpected error: {other}"),
     }
