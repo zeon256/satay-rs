@@ -259,10 +259,12 @@ pub enum ValidationError {
     #[error("{context} uses `anyOf` with `{keyword}`; only annotation siblings are supported")]
     UnsupportedAnyOfSiblingKeyword { context: String, keyword: String },
 
-    /// An `anyOf` branch is not a local component schema reference.
+    /// An `anyOf` branch is not a supported union branch.
     ///
-    /// Error message: `{context}.anyOf[{index}] must be a local component schema reference`
-    #[error("{context}.anyOf[{index}] must be a local component schema reference")]
+    /// Error message: `{context}.anyOf[{index}] must be a local component schema reference, inline string enum, inline primitive schema, or null schema`
+    #[error(
+        "{context}.anyOf[{index}] must be a local component schema reference, inline string enum, inline primitive schema, or null schema"
+    )]
     UnsupportedAnyOfBranch { context: String, index: usize },
 
     /// A `oneOf` schema combines a supported union with another schema keyword.
@@ -271,11 +273,32 @@ pub enum ValidationError {
     #[error("{context} uses `oneOf` with `{keyword}`; only annotation siblings are supported")]
     UnsupportedOneOfSiblingKeyword { context: String, keyword: String },
 
-    /// A `oneOf` branch is not a local component schema reference.
+    /// A `oneOf` branch is not a supported union branch.
     ///
-    /// Error message: `{context}.oneOf[{index}] must be a local component schema reference`
-    #[error("{context}.oneOf[{index}] must be a local component schema reference")]
+    /// Error message: `{context}.oneOf[{index}] must be a local component schema reference, inline string enum, inline primitive schema, or null schema`
+    #[error(
+        "{context}.oneOf[{index}] must be a local component schema reference, inline string enum, inline primitive schema, or null schema"
+    )]
     UnsupportedOneOfBranch { context: String, index: usize },
+
+    /// A plain `anyOf` or `oneOf` union has more than one null branch.
+    ///
+    /// Error message: `{context}.{keyword}[{index}] duplicates the union null branch`
+    #[error("{context}.{keyword}[{index}] duplicates the union null branch")]
+    DuplicateUnionNullBranch {
+        context: String,
+        keyword: &'static str,
+        index: usize,
+    },
+
+    /// A nullable plain `anyOf` or `oneOf` union has no non-null branches.
+    ///
+    /// Error message: `{context}.{keyword} must declare at least one non-null branch`
+    #[error("{context}.{keyword} must declare at least one non-null branch")]
+    NullableUnionWithoutVariants {
+        context: String,
+        keyword: &'static str,
+    },
 
     /// A composition schema declares no branches.
     ///

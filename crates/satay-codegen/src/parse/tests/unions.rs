@@ -388,6 +388,138 @@ components:
 }
 
 #[test]
+fn parses_one_of_with_nullable_inline_primitive_branches() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /message:
+    get:
+      operationId: getMessage
+      responses:
+        '200':
+          description: Message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+components:
+  schemas:
+    ContentPart:
+      type: object
+      required:
+        - type
+        - text
+      properties:
+        type:
+          type: string
+          enum:
+            - text
+        text:
+          type: string
+    Message:
+      type: object
+      properties:
+        content:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                $ref: '#/components/schemas/ContentPart'
+            - type: "null"
+"#,
+    );
+
+    let message = component(&api, "Message");
+    match &message.kind {
+        ComponentKind::Struct(fields) => {
+            let content = field(fields, "content");
+            assert_eq!(
+                content.ty,
+                TypeRef::Option(Box::new(TypeRef::Named("MessageContent".to_owned())))
+            );
+            assert!(!content.required);
+        }
+        other => panic!("expected Message struct, got {other:?}"),
+    }
+
+    let content = component(&api, "MessageContent");
+    match &content.kind {
+        ComponentKind::Union(union) => {
+            assert!(union.tag.is_none());
+            assert_eq!(union.variants.len(), 2);
+            assert_eq!(union.variants[0].rust_name, "String");
+            assert_eq!(union.variants[0].ty, TypeRef::String);
+            assert_eq!(union.variants[1].rust_name, "Array");
+            assert_eq!(
+                union.variants[1].ty,
+                TypeRef::Array(Box::new(TypeRef::Named("ContentPart".to_owned())))
+            );
+        }
+        other => panic!("expected MessageContent union, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_any_of_with_inline_primitive_branches() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /value:
+    get:
+      operationId: getValue
+      responses:
+        '200':
+          description: Primitive value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrimitiveValue'
+components:
+  schemas:
+    PrimitiveValue:
+      anyOf:
+        - type: string
+        - type: integer
+        - type: number
+        - type: boolean
+        - type: array
+          items:
+            type: string
+"#,
+    );
+
+    let value = component(&api, "PrimitiveValue");
+    match &value.kind {
+        ComponentKind::Union(union) => {
+            assert!(union.tag.is_none());
+            assert_eq!(union.variants.len(), 5);
+            assert_eq!(union.variants[0].rust_name, "String");
+            assert_eq!(union.variants[0].ty, TypeRef::String);
+            assert_eq!(union.variants[1].rust_name, "Integer");
+            assert_eq!(union.variants[1].ty, TypeRef::Integer(IntegerType::I64));
+            assert_eq!(union.variants[2].rust_name, "Number");
+            assert_eq!(union.variants[2].ty, TypeRef::F64);
+            assert_eq!(union.variants[3].rust_name, "Boolean");
+            assert_eq!(union.variants[3].ty, TypeRef::Bool);
+            assert_eq!(union.variants[4].rust_name, "Array");
+            assert_eq!(
+                union.variants[4].ty,
+                TypeRef::Array(Box::new(TypeRef::String))
+            );
+        }
+        other => panic!("expected PrimitiveValue union, got {other:?}"),
+    }
+}
+
+#[test]
 fn parses_any_of_open_string_enum_branch() {
     let api = parse_valid(
         r#"
@@ -784,7 +916,7 @@ components:
 }
 
 #[test]
-fn rejects_any_of_with_inline_primitive_branch() {
+fn rejects_any_of_with_duplicate_null_branch() {
     let err = parse_invalid(
         r##"
 openapi: 3.1.0
@@ -803,10 +935,83 @@ components:
     Broken:
       anyOf:
         - type: string
+        - type: "null"
+        - type: "null"
 "##,
     );
     match err {
-        ValidationError::UnsupportedAnyOfBranch { context, index } => {
+        ValidationError::DuplicateUnionNullBranch {
+            context,
+            keyword,
+            index,
+        } => {
+            assert_eq!(context, "schema `Broken`");
+            assert_eq!(keyword, "anyOf");
+            assert_eq!(index, 2);
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_one_of_with_only_null_branch() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Broken:
+      oneOf:
+        - type: "null"
+"##,
+    );
+    match err {
+        ValidationError::NullableUnionWithoutVariants { context, keyword } => {
+            assert_eq!(context, "schema `Broken`");
+            assert_eq!(keyword, "oneOf");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_one_of_with_inline_object_branch() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Broken:
+      oneOf:
+        - type: object
+          properties:
+            id:
+              type: string
+        - type: string
+"##,
+    );
+    match err {
+        ValidationError::UnsupportedOneOfBranch { context, index } => {
             assert_eq!(context, "schema `Broken`");
             assert_eq!(index, 0);
         }
@@ -848,47 +1053,6 @@ components:
         ValidationError::UnsupportedAnyOfSiblingKeyword { context, keyword } => {
             assert_eq!(context, "schema `Broken`");
             assert_eq!(keyword, "type");
-        }
-        other => panic!("unexpected error: {other}"),
-    }
-}
-
-#[test]
-fn rejects_one_of_with_inline_primitive_branch() {
-    let err = parse_invalid(
-        r##"
-openapi: 3.1.0
-info:
-  title: Test API
-  version: 1.0.0
-paths:
-  /ping:
-    get:
-      operationId: ping
-      responses:
-        '204':
-          description: No content
-components:
-  schemas:
-    User:
-      type: object
-      properties:
-        id:
-          type: string
-    Organization:
-      type: object
-      properties:
-        id:
-          type: string
-    Broken:
-      oneOf:
-        - type: string
-"##,
-    );
-    match err {
-        ValidationError::UnsupportedOneOfBranch { context, index } => {
-            assert_eq!(context, "schema `Broken`");
-            assert_eq!(index, 0);
         }
         other => panic!("unexpected error: {other}"),
     }
