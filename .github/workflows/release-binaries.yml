@@ -90,6 +90,7 @@ jobs:
           package: satay-cli
           workspace: true
           locked: true
+          profile: dist
           target: ${{ matrix.target }}
           ref: refs/tags/${{ env.RELEASE_TAG }}
           tar: all
