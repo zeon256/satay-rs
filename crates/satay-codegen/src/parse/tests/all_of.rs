@@ -477,6 +477,58 @@ components:
 }
 
 #[test]
+fn rejects_inline_all_of_cycle_through_discriminator_branch() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    C:
+      type: object
+      properties:
+        u:
+          oneOf:
+            - $ref: '#/components/schemas/C2'
+            - $ref: '#/components/schemas/C3'
+          discriminator:
+            propertyName: kind
+    C2:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+        next:
+          allOf:
+            - $ref: '#/components/schemas/C'
+    C3:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+"##,
+    );
+    match err {
+        ValidationError::RecursiveAllOf { context, schema } => {
+            assert_eq!(context, "schema `C`");
+            assert_eq!(schema, "C");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
 fn rejects_all_of_in_parameter_schemas() {
     let err = parse_invalid(
         r##"

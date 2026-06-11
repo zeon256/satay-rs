@@ -84,7 +84,7 @@ fn validate_type_schema_with_stack(
 
     let schema = object_schema(schema, context)?;
     if schema_is_union(schema) {
-        return validate_union_type_schema(document, schema, context);
+        return validate_union_type_schema(document, schema, context, stack);
     }
     reject_one_of(schema, context)?;
     if !schema.all_of.is_empty() {
@@ -212,7 +212,9 @@ fn validate_component_schema(
     } else {
         let schema = object_schema(schema, &context)?;
         if schema_is_union(schema) {
-            ValidatedComponentKind::Type(validate_union_type_schema(document, schema, &context)?)
+            ValidatedComponentKind::Type(validate_union_type_schema(
+                document, schema, &context, stack,
+            )?)
         } else if !schema.all_of.is_empty() {
             ValidatedComponentKind::Struct(validate_all_of_struct_properties(
                 document,
@@ -314,13 +316,14 @@ fn validate_union_type_schema(
     document: &ResolvedDocument<'_>,
     schema: &OasObjectSchema,
     context: &str,
+    stack: &mut Vec<String>,
 ) -> Result<ValidatedType, ValidationError> {
     if let Some(open_enum) = validate_open_string_enum_any_of(schema, context)? {
         return Ok(open_enum);
     }
 
     let union = if let Some(discriminator) = schema.discriminator.as_ref() {
-        validate_discriminator_union(document, schema, discriminator, context)?
+        validate_discriminator_union(document, schema, discriminator, context, stack)?
     } else if !schema.one_of.is_empty() && schema.any_of.is_empty() {
         validate_plain_one_of_union(schema, context)?
     } else {
@@ -642,6 +645,7 @@ fn validate_discriminator_union(
     schema: &OasObjectSchema,
     discriminator: &OasDiscriminator,
     context: &str,
+    stack: &mut Vec<String>,
 ) -> Result<ValidatedUnion, ValidationError> {
     reject_discriminator_union_sibling_keywords(schema, context)?;
 
@@ -658,6 +662,7 @@ fn validate_discriminator_union(
             &branch.schema_name,
             &discriminator.property_name,
             context,
+            stack,
         )?;
         let tag_value = tag_values
             .get(&branch.schema_name)
@@ -809,8 +814,9 @@ fn validate_discriminator_branch_object(
     schema_name: &str,
     property_name: &str,
     context: &str,
+    stack: &mut Vec<String>,
 ) -> Result<(), ValidationError> {
-    let fields = discriminator_branch_fields(document, schema_name, context)?;
+    let fields = discriminator_branch_fields(document, schema_name, context, stack)?;
 
     if fields.iter().any(|field| field.wire_name == property_name) {
         return Err(ValidationError::DiscriminatorPropertyConflict {
@@ -827,6 +833,7 @@ fn discriminator_branch_fields(
     document: &ResolvedDocument<'_>,
     schema_name: &str,
     context: &str,
+    stack: &mut Vec<String>,
 ) -> Result<Vec<ValidatedField>, ValidationError> {
     let schema = component_schema(document, schema_name)?;
 
@@ -838,12 +845,9 @@ fn discriminator_branch_fields(
         .map_err(|_| discriminator_branch_not_object(context, schema_name))?;
 
     if !schema.all_of.is_empty() {
-        let mut stack = vec![];
-        return validate_all_of_struct_properties(document, schema_name, schema, &mut stack)
+        return validate_all_of_struct_properties(document, schema_name, schema, stack)
             .map_err(|err| map_discriminator_branch_error(err, context, schema_name));
     }
-
-    let mut stack = vec![];
 
     let (schema_type, nullable) = schema_type_and_nullable(schema, context)
         .map_err(|_| discriminator_branch_not_object(context, schema_name))?;
@@ -853,7 +857,7 @@ fn discriminator_branch_fields(
 
     match schema_type {
         Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => {
-            validate_struct_properties(document, schema_name, schema, &mut stack)
+            validate_struct_properties(document, schema_name, schema, stack)
         }
         _ => Err(discriminator_branch_not_object(context, schema_name)),
     }
