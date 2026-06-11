@@ -3,6 +3,48 @@ use std::fs;
 use crate::ast::*;
 use crate::common::*;
 
+const NULLABLE_INLINE_PRIMITIVE_ONE_OF: &str = r##"
+openapi: 3.1.0
+info:
+  title: Message API
+  version: 1.0.0
+paths:
+  /message:
+    get:
+      operationId: getMessage
+      responses:
+        '200':
+          description: Message
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+components:
+  schemas:
+    ContentPart:
+      type: object
+      required:
+        - type
+        - text
+      properties:
+        type:
+          type: string
+          enum:
+            - text
+        text:
+          type: string
+    Message:
+      type: object
+      properties:
+        content:
+          oneOf:
+            - type: string
+            - type: array
+              items:
+                $ref: '#/components/schemas/ContentPart'
+            - type: "null"
+"##;
+
 #[test]
 fn any_of_generates_untagged_union_types() {
     let files = satay_codegen::generate(
@@ -324,6 +366,28 @@ components:
         &types_rs,
         "AssistantsApiToolChoiceOptionEnum :: Other"
     ));
+}
+
+#[test]
+fn one_of_generates_nullable_inline_primitive_union_branch() {
+    let files = satay_codegen::generate(NULLABLE_INLINE_PRIMITIVE_ONE_OF)
+        .expect("generate nullable oneOf inline primitive fixture");
+
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    let message = find_struct(&types_rs, "Message");
+    assert_field(message, "content", "Option<MessageContent>");
+
+    let content = find_enum(&types_rs, "MessageContent");
+    assert_attr_contains(&content.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(variant_names(content), ["String", "Array"]);
+    assert_eq!(
+        norm(&variant(content, "String").fields),
+        norm_str("(String)")
+    );
+    assert_eq!(
+        norm(&variant(content, "Array").fields),
+        norm_str("(Vec<ContentPart>)")
+    );
 }
 
 #[test]
@@ -714,6 +778,79 @@ mod tests {
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(crate_dir, "test", &[], "oneOf generated crate tests");
+}
+
+#[test]
+fn generated_nullable_inline_primitive_one_of_deserializes_and_serializes() {
+    let files = satay_codegen::generate(NULLABLE_INLINE_PRIMITIVE_ONE_OF)
+        .expect("generate nullable oneOf inline primitive runtime fixture");
+
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+
+    let runtime_path = runtime_path_toml();
+
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::*;
+
+    #[test]
+    fn string_content_deserializes_to_string_variant() {
+        let value: Message = serde_json::from_str(r#"{"content":"hello"}"#)
+            .expect("message with string content");
+
+        match value.content {
+            Some(MessageContent::String(text)) => assert_eq!(text, "hello"),
+            other => panic!("unexpected content: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn array_content_deserializes_to_array_variant() {
+        let value: Message = serde_json::from_str(
+            r#"{"content":[{"type":"text","text":"hello"}]}"#,
+        )
+        .expect("message with array content");
+
+        match value.content {
+            Some(MessageContent::Array(parts)) => {
+                assert_eq!(parts.len(), 1);
+                assert_eq!(parts[0].text, "hello");
+            }
+            other => panic!("unexpected content: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn null_content_deserializes_to_none() {
+        let value: Message = serde_json::from_str(r#"{"content":null}"#)
+            .expect("message with null content");
+
+        assert_eq!(value.content, None);
+    }
+
+    #[test]
+    fn absent_optional_content_serializes_as_absent() {
+        let value = Message { content: None };
+        let encoded = serde_json::to_value(value).expect("serialized message");
+
+        assert_eq!(encoded, serde_json::json!({}));
+    }
+}
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    run_temp_cargo(
+        crate_dir,
+        "test",
+        &[],
+        "nullable oneOf inline primitive generated crate tests",
+    );
 }
 
 #[test]

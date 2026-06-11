@@ -323,17 +323,22 @@ fn validate_union_type_schema(
         return Ok(open_enum);
     }
 
-    let union = if let Some(discriminator) = schema.discriminator.as_ref() {
-        validate_discriminator_union(document, schema, discriminator, context, stack)?
+    let (union, nullable) = if let Some(discriminator) = schema.discriminator.as_ref() {
+        (
+            validate_discriminator_union(document, schema, discriminator, context, stack)?,
+            false,
+        )
     } else if !schema.one_of.is_empty() && schema.any_of.is_empty() {
-        validate_plain_one_of_union(schema, context)?
+        let plain = validate_plain_one_of_union(document, schema, context, stack)?;
+        (plain.union, plain.nullable)
     } else {
-        validate_plain_any_of_union(schema, context)?
+        let plain = validate_plain_any_of_union(document, schema, context, stack)?;
+        (plain.union, plain.nullable)
     };
 
     Ok(ValidatedType {
         kind: ValidatedTypeKind::AnyOf(union),
-        nullable: false,
+        nullable,
         validation: None,
         description: optional_description(&schema.description),
         treat_error_as_none: false,
@@ -505,9 +510,11 @@ fn open_string_any_of_object_branch<'a>(
 }
 
 fn validate_plain_any_of_union(
+    document: &ResolvedDocument<'_>,
     schema: &OasObjectSchema,
     context: &str,
-) -> Result<ValidatedUnion, ValidationError> {
+    stack: &mut Vec<String>,
+) -> Result<ValidatedPlainUnion, ValidationError> {
     reject_any_of_sibling_keywords(schema, context)?;
 
     if schema.any_of.is_empty() {
@@ -518,27 +525,47 @@ fn validate_plain_any_of_union(
 
     let mut used = BTreeSet::new();
     let mut variants = Vec::with_capacity(schema.any_of.len());
+    let mut nullable = false;
 
     for (index, branch) in schema.any_of.iter().enumerate() {
-        variants.push(validate_plain_union_branch(
+        match validate_plain_union_branch(
+            document,
             branch,
             context,
             index,
             PlainUnionKeyword::AnyOf,
             &mut used,
-        )?);
+            stack,
+        )? {
+            PlainUnionBranch::Variant(variant) => variants.push(variant),
+            PlainUnionBranch::Null => {
+                if nullable {
+                    return Err(PlainUnionKeyword::AnyOf.duplicate_null_error(context, index));
+                }
+                nullable = true;
+            }
+        }
     }
 
-    Ok(ValidatedUnion {
-        variants,
-        tag: None,
+    if variants.is_empty() {
+        return Err(PlainUnionKeyword::AnyOf.null_only_error(context));
+    }
+
+    Ok(ValidatedPlainUnion {
+        union: ValidatedUnion {
+            variants,
+            tag: None,
+        },
+        nullable,
     })
 }
 
 fn validate_plain_one_of_union(
+    document: &ResolvedDocument<'_>,
     schema: &OasObjectSchema,
     context: &str,
-) -> Result<ValidatedUnion, ValidationError> {
+    stack: &mut Vec<String>,
+) -> Result<ValidatedPlainUnion, ValidationError> {
     reject_plain_one_of_sibling_keywords(schema, context)?;
 
     if schema.one_of.is_empty() {
@@ -549,82 +576,145 @@ fn validate_plain_one_of_union(
 
     let mut used = BTreeSet::new();
     let mut variants = Vec::with_capacity(schema.one_of.len());
+    let mut nullable = false;
 
     for (index, branch) in schema.one_of.iter().enumerate() {
-        variants.push(validate_plain_union_branch(
+        match validate_plain_union_branch(
+            document,
             branch,
             context,
             index,
             PlainUnionKeyword::OneOf,
             &mut used,
-        )?);
+            stack,
+        )? {
+            PlainUnionBranch::Variant(variant) => variants.push(variant),
+            PlainUnionBranch::Null => {
+                if nullable {
+                    return Err(PlainUnionKeyword::OneOf.duplicate_null_error(context, index));
+                }
+                nullable = true;
+            }
+        }
     }
 
-    Ok(ValidatedUnion {
-        variants,
-        tag: None,
+    if variants.is_empty() {
+        return Err(PlainUnionKeyword::OneOf.null_only_error(context));
+    }
+
+    Ok(ValidatedPlainUnion {
+        union: ValidatedUnion {
+            variants,
+            tag: None,
+        },
+        nullable,
     })
 }
 
+struct ValidatedPlainUnion {
+    union: ValidatedUnion,
+    nullable: bool,
+}
+
+enum PlainUnionBranch {
+    Variant(ValidatedUnionVariant),
+    Null,
+}
+
 fn validate_plain_union_branch(
+    document: &ResolvedDocument<'_>,
     branch: &OasSchema,
     context: &str,
     index: usize,
     keyword: PlainUnionKeyword,
     used: &mut BTreeSet<String>,
-) -> Result<ValidatedUnionVariant, ValidationError> {
+    stack: &mut Vec<String>,
+) -> Result<PlainUnionBranch, ValidationError> {
     if let Some(reference) = schema_ref(branch, context)? {
         let schema_name = local_ref_name(reference, "schemas")?;
         let type_name = schema_ref_type_name(reference)?;
-        return Ok(ValidatedUnionVariant {
+        return Ok(PlainUnionBranch::Variant(ValidatedUnionVariant {
             rust_name: unique_ident(type_name.clone(), used),
             kind: ValidatedUnionVariantKind::Reference {
                 type_name,
                 schema_name,
             },
             tag_value: None,
-        });
+        }));
     }
 
-    let ty = validate_inline_union_enum_branch(branch, context, index, keyword)?;
-    let rust_name = inline_union_enum_variant_name(&ty)
-        .expect("validated inline union enum branch has at least one variant");
-    Ok(ValidatedUnionVariant {
+    let schema =
+        object_schema(branch, context).map_err(|_| keyword.branch_error(context, index))?;
+    if inline_union_null_branch(schema) {
+        return Ok(PlainUnionBranch::Null);
+    }
+
+    let (ty, rust_name) =
+        validate_inline_plain_union_branch(document, schema, context, index, keyword, stack)?;
+    Ok(PlainUnionBranch::Variant(ValidatedUnionVariant {
         rust_name: unique_ident(rust_name, used),
         kind: ValidatedUnionVariantKind::Inline(ty),
         tag_value: None,
-    })
+    }))
 }
 
-fn validate_inline_union_enum_branch(
-    branch: &OasSchema,
+fn validate_inline_plain_union_branch(
+    document: &ResolvedDocument<'_>,
+    schema: &OasObjectSchema,
     context: &str,
     index: usize,
     keyword: PlainUnionKeyword,
-) -> Result<ValidatedType, ValidationError> {
-    let schema =
-        object_schema(branch, context).map_err(|_| keyword.branch_error(context, index))?;
+    stack: &mut Vec<String>,
+) -> Result<(ValidatedType, String), ValidationError> {
     let (schema_type, nullable) = schema_type_and_nullable(schema, context)
         .map_err(|_| keyword.branch_error(context, index))?;
 
-    if nullable || schema_type != Some(OasSchemaType::String) || schema.enum_values.is_empty() {
+    if nullable {
         return Err(keyword.branch_error(context, index));
     }
 
-    validate_enum_shape(schema, schema_type, context)
-        .map_err(|_| keyword.branch_error(context, index))?;
-    let explicit_variants = validate_type_enum_satay(schema, context)
-        .map_err(|_| keyword.branch_error(context, index))?;
-    let enum_ = validated_enum(schema, &explicit_variants, EnumFallback::None, context)
-        .map_err(|_| keyword.branch_error(context, index))?;
+    if !schema.enum_values.is_empty() {
+        if schema_type != Some(OasSchemaType::String) {
+            return Err(keyword.branch_error(context, index));
+        }
 
-    Ok(ValidatedType {
-        kind: ValidatedTypeKind::Enum(enum_),
-        nullable,
-        validation: None,
-        description: optional_description(&schema.description),
-        treat_error_as_none: false,
-    })
+        validate_enum_shape(schema, schema_type, context)
+            .map_err(|_| keyword.branch_error(context, index))?;
+        let explicit_variants = validate_type_enum_satay(schema, context)
+            .map_err(|_| keyword.branch_error(context, index))?;
+        let enum_ = validated_enum(schema, &explicit_variants, EnumFallback::None, context)
+            .map_err(|_| keyword.branch_error(context, index))?;
+        let ty = ValidatedType {
+            kind: ValidatedTypeKind::Enum(enum_),
+            nullable,
+            validation: None,
+            description: optional_description(&schema.description),
+            treat_error_as_none: false,
+        };
+        let rust_name = inline_union_enum_variant_name(&ty)
+            .expect("validated inline union enum branch has at least one variant");
+        return Ok((ty, rust_name));
+    }
+
+    let Some(schema_type) = schema_type else {
+        return Err(keyword.branch_error(context, index));
+    };
+    let Some(rust_name) = inline_primitive_union_variant_name(schema_type) else {
+        return Err(keyword.branch_error(context, index));
+    };
+
+    let ty = validate_object_type_schema(
+        document,
+        schema,
+        Some(schema_type),
+        false,
+        context,
+        false,
+        stack,
+    )
+    .map_err(|_| keyword.branch_error(context, index))?;
+
+    Ok((ty, rust_name.to_owned()))
 }
 
 fn inline_union_enum_variant_name(ty: &ValidatedType) -> Option<String> {
@@ -639,6 +729,24 @@ fn inline_union_enum_variant_name(ty: &ValidatedType) -> Option<String> {
     } else {
         Some("Enum".to_owned())
     }
+}
+
+fn inline_primitive_union_variant_name(schema_type: OasSchemaType) -> Option<&'static str> {
+    match schema_type {
+        OasSchemaType::String => Some("String"),
+        OasSchemaType::Integer => Some("Integer"),
+        OasSchemaType::Number => Some("Number"),
+        OasSchemaType::Boolean => Some("Boolean"),
+        OasSchemaType::Array => Some("Array"),
+        OasSchemaType::Object | OasSchemaType::Null => None,
+    }
+}
+
+fn inline_union_null_branch(schema: &OasObjectSchema) -> bool {
+    matches!(
+        schema.schema_type.as_ref(),
+        Some(OasSchemaTypeSet::Single(OasSchemaType::Null))
+    )
 }
 
 fn validate_discriminator_union(
@@ -1437,6 +1545,13 @@ enum PlainUnionKeyword {
 }
 
 impl PlainUnionKeyword {
+    fn wire(self) -> &'static str {
+        match self {
+            Self::AnyOf => "anyOf",
+            Self::OneOf => "oneOf",
+        }
+    }
+
     fn error(self, context: String, keyword: String) -> ValidationError {
         match self {
             Self::AnyOf => ValidationError::UnsupportedAnyOfSiblingKeyword { context, keyword },
@@ -1454,6 +1569,21 @@ impl PlainUnionKeyword {
                 context: context.to_owned(),
                 index,
             },
+        }
+    }
+
+    fn duplicate_null_error(self, context: &str, index: usize) -> ValidationError {
+        ValidationError::DuplicateUnionNullBranch {
+            context: context.to_owned(),
+            keyword: self.wire(),
+            index,
+        }
+    }
+
+    fn null_only_error(self, context: &str) -> ValidationError {
+        ValidationError::NullableUnionWithoutVariants {
+            context: context.to_owned(),
+            keyword: self.wire(),
         }
     }
 }
