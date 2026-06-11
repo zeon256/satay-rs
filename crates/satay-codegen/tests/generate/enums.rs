@@ -60,7 +60,7 @@ components:
               SD: SingleDecker
               DD: DoubleDecker
               BD: Bendy
-              "": Empty
+              "": Unknown
 "#,
     )
     .expect("generate enum variants fixture");
@@ -69,7 +69,7 @@ components:
     let timing = find_enum(&types_rs, "BusArrivalTimingType");
     assert_eq!(
         variant_names(timing),
-        ["SingleDecker", "DoubleDecker", "Bendy", "Empty"]
+        ["SingleDecker", "DoubleDecker", "Bendy", "Unknown"]
     );
     assert_attr_contains(
         &variant(timing, "SingleDecker").attrs,
@@ -87,7 +87,7 @@ components:
         r#"serde(rename = "BD")"#,
     );
     assert_attr_contains(
-        &variant(timing, "Empty").attrs,
+        &variant(timing, "Unknown").attrs,
         "cfg_attr",
         r#"serde(rename = "")"#,
     );
