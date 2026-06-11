@@ -678,9 +678,9 @@ components:
 }
 
 #[test]
-fn rejects_any_of_open_string_enum_when_string_branch_has_validation_keywords() {
-    let err = parse_invalid(
-        r##"
+fn parses_constrained_string_branch_as_plain_union_not_open_enum() {
+    let api = parse_valid(
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -695,25 +695,47 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Broken'
+                $ref: '#/components/schemas/Model'
 components:
   schemas:
-    Broken:
+    Model:
       anyOf:
         - type: string
           minLength: 1
         - type: string
           enum:
             - known-model
-"##,
+"#,
     );
 
-    match err {
-        ValidationError::UnsupportedAnyOfBranch { context, index } => {
-            assert_eq!(context, "schema `Broken`");
-            assert_eq!(index, 0);
+    let model = component(&api, "Model");
+    match &model.kind {
+        ComponentKind::Union(union) => {
+            assert!(union.tag.is_none());
+            let variants = &union.variants;
+            assert_eq!(variants.len(), 2);
+            assert_eq!(variants[0].rust_name, "String");
+            match &variants[0].ty {
+                TypeRef::Constrained { rust_name, inner } => {
+                    assert_eq!(rust_name, "ModelString");
+                    assert_eq!(inner.as_ref(), &TypeRef::String);
+                }
+                other => panic!("expected constrained string variant, got {other:?}"),
+            }
+            assert_eq!(variants[1].rust_name, "KnownModel");
+            assert_eq!(variants[1].ty, TypeRef::Named("ModelKnownModel".to_owned()));
         }
-        other => panic!("unexpected error: {other}"),
+        other => panic!("expected Model union, got {other:?}"),
+    }
+
+    let known_model = component(&api, "ModelKnownModel");
+    match &known_model.kind {
+        ComponentKind::Enum(enum_) => {
+            assert_eq!(enum_.variants.len(), 1);
+            assert_eq!(enum_.variants[0].wire_name, "known-model");
+            assert_eq!(enum_.fallback, EnumFallback::None);
+        }
+        other => panic!("expected ModelKnownModel enum, got {other:?}"),
     }
 }
 
