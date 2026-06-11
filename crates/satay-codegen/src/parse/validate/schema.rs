@@ -24,7 +24,9 @@ use super::{
 };
 use crate::error::ValidationError;
 use crate::ident::{type_ident, unique_ident, variant_ident};
-use crate::model::{Enum, EnumFallback, EnumVariant, ParseAs, TypeRef};
+use crate::model::{
+    Enum, EnumFallback, EnumVariant, IntegerLimit, IntegerType, ParseAs, TypeRef, Validation,
+};
 
 pub(super) fn validate_components(
     document: &ResolvedDocument<'_>,
@@ -525,6 +527,7 @@ fn validate_plain_any_of_union(
 
     let mut used = BTreeSet::new();
     let mut variants = Vec::with_capacity(schema.any_of.len());
+    let mut variant_indexes = Vec::with_capacity(schema.any_of.len());
     let mut nullable = false;
 
     for (index, branch) in schema.any_of.iter().enumerate() {
@@ -537,7 +540,18 @@ fn validate_plain_any_of_union(
             &mut used,
             stack,
         )? {
-            PlainUnionBranch::Variant(variant) => variants.push(*variant),
+            PlainUnionBranch::Variant(variant) => {
+                reject_shadowed_plain_union_branch(
+                    &variants,
+                    &variant_indexes,
+                    variant.as_ref(),
+                    PlainUnionKeyword::AnyOf,
+                    context,
+                    index,
+                )?;
+                variants.push(*variant);
+                variant_indexes.push(index);
+            }
             PlainUnionBranch::Null => {
                 if nullable {
                     return Err(PlainUnionKeyword::AnyOf.duplicate_null_error(context, index));
@@ -576,6 +590,7 @@ fn validate_plain_one_of_union(
 
     let mut used = BTreeSet::new();
     let mut variants = Vec::with_capacity(schema.one_of.len());
+    let mut variant_indexes = Vec::with_capacity(schema.one_of.len());
     let mut nullable = false;
 
     for (index, branch) in schema.one_of.iter().enumerate() {
@@ -588,7 +603,18 @@ fn validate_plain_one_of_union(
             &mut used,
             stack,
         )? {
-            PlainUnionBranch::Variant(variant) => variants.push(*variant),
+            PlainUnionBranch::Variant(variant) => {
+                reject_shadowed_plain_union_branch(
+                    &variants,
+                    &variant_indexes,
+                    variant.as_ref(),
+                    PlainUnionKeyword::OneOf,
+                    context,
+                    index,
+                )?;
+                variants.push(*variant);
+                variant_indexes.push(index);
+            }
             PlainUnionBranch::Null => {
                 if nullable {
                     return Err(PlainUnionKeyword::OneOf.duplicate_null_error(context, index));
@@ -715,6 +741,212 @@ fn validate_inline_plain_union_branch(
     .map_err(|_| keyword.branch_error(context, index))?;
 
     Ok((ty, rust_name.to_owned()))
+}
+
+fn reject_shadowed_plain_union_branch(
+    previous_variants: &[ValidatedUnionVariant],
+    previous_indexes: &[usize],
+    current: &ValidatedUnionVariant,
+    keyword: PlainUnionKeyword,
+    context: &str,
+    index: usize,
+) -> Result<(), ValidationError> {
+    for (shadowed_by, previous) in previous_indexes
+        .iter()
+        .copied()
+        .zip(previous_variants.iter())
+    {
+        if plain_union_branch_shadows(previous, current) {
+            return Err(ValidationError::ShadowedUnionBranch {
+                context: context.to_owned(),
+                keyword: keyword.wire(),
+                index,
+                shadowed_by,
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn plain_union_branch_shadows(
+    previous: &ValidatedUnionVariant,
+    current: &ValidatedUnionVariant,
+) -> bool {
+    let (ValidatedUnionVariantKind::Inline(previous), ValidatedUnionVariantKind::Inline(current)) =
+        (&previous.kind, &current.kind)
+    else {
+        return false;
+    };
+
+    inline_plain_union_branch_shadows(previous, current)
+}
+
+fn inline_plain_union_branch_shadows(previous: &ValidatedType, current: &ValidatedType) -> bool {
+    if is_unconstrained_string_branch(previous) && is_inline_string_branch(current) {
+        return true;
+    }
+
+    if constrained_string_branch_shadows_enum(previous, current) {
+        return true;
+    }
+
+    if is_unconstrained_number_branch(previous) && is_inline_number_or_integer_branch(current) {
+        return true;
+    }
+
+    if let Some(previous_type) = unconstrained_integer_branch(previous)
+        && let Some((current_type, current_validation)) = integer_branch(current)
+        && integer_branch_range_covers(previous_type, current_type, current_validation)
+    {
+        return true;
+    }
+
+    is_unconstrained_bool_branch(previous) && is_inline_bool_branch(current)
+}
+
+fn is_unconstrained_string_branch(ty: &ValidatedType) -> bool {
+    matches!(ty.kind, ValidatedTypeKind::String) && ty.validation.is_none()
+}
+
+fn is_inline_string_branch(ty: &ValidatedType) -> bool {
+    matches!(
+        ty.kind,
+        ValidatedTypeKind::String | ValidatedTypeKind::Enum(_)
+    )
+}
+
+fn constrained_string_branch_shadows_enum(
+    previous: &ValidatedType,
+    current: &ValidatedType,
+) -> bool {
+    let (
+        ValidatedTypeKind::String,
+        Some(Validation::String {
+            min_length,
+            max_length,
+            pattern: None,
+        }),
+    ) = (&previous.kind, previous.validation.as_ref())
+    else {
+        return false;
+    };
+
+    let ValidatedTypeKind::Enum(enum_) = &current.kind else {
+        return false;
+    };
+
+    enum_.variants.iter().all(|variant| {
+        string_value_satisfies_length_bounds(&variant.wire_name, *min_length, *max_length)
+    })
+}
+
+fn string_value_satisfies_length_bounds(
+    value: &str,
+    min_length: Option<u64>,
+    max_length: Option<u64>,
+) -> bool {
+    let length = value.chars().count() as u64;
+
+    if let Some(min_length) = min_length
+        && length < min_length
+    {
+        return false;
+    }
+
+    if let Some(max_length) = max_length
+        && length > max_length
+    {
+        return false;
+    }
+
+    true
+}
+
+fn is_unconstrained_number_branch(ty: &ValidatedType) -> bool {
+    matches!(ty.kind, ValidatedTypeKind::F32 | ValidatedTypeKind::F64) && ty.validation.is_none()
+}
+
+fn is_inline_number_or_integer_branch(ty: &ValidatedType) -> bool {
+    matches!(
+        ty.kind,
+        ValidatedTypeKind::F32 | ValidatedTypeKind::F64 | ValidatedTypeKind::Integer(_)
+    )
+}
+
+fn unconstrained_integer_branch(ty: &ValidatedType) -> Option<IntegerType> {
+    match (&ty.kind, ty.validation.as_ref()) {
+        (ValidatedTypeKind::Integer(integer_type), None) => Some(*integer_type),
+        _ => None,
+    }
+}
+
+fn integer_branch(ty: &ValidatedType) -> Option<(IntegerType, Option<&Validation>)> {
+    match &ty.kind {
+        ValidatedTypeKind::Integer(integer_type) => Some((*integer_type, ty.validation.as_ref())),
+        _ => None,
+    }
+}
+
+fn integer_branch_range_covers(
+    previous_type: IntegerType,
+    current_type: IntegerType,
+    current_validation: Option<&Validation>,
+) -> bool {
+    let current_min = integer_branch_min(current_type, current_validation);
+    let current_max = integer_branch_max(current_type, current_validation);
+
+    previous_type.min_value() <= current_min && previous_type.max_value() >= current_max
+}
+
+fn integer_branch_min(integer_type: IntegerType, validation: Option<&Validation>) -> i128 {
+    let type_min = integer_type.min_value();
+    let Some(Validation::Integer {
+        minimum: Some(minimum),
+        ..
+    }) = validation
+    else {
+        return type_min;
+    };
+
+    type_min.max(effective_integer_min(*minimum))
+}
+
+fn integer_branch_max(integer_type: IntegerType, validation: Option<&Validation>) -> i128 {
+    let type_max = integer_type.max_value();
+    let Some(Validation::Integer {
+        maximum: Some(maximum),
+        ..
+    }) = validation
+    else {
+        return type_max;
+    };
+
+    type_max.min(effective_integer_max(*maximum))
+}
+
+fn effective_integer_min(limit: IntegerLimit) -> i128 {
+    if limit.exclusive {
+        limit.value.saturating_add(1)
+    } else {
+        limit.value
+    }
+}
+
+fn effective_integer_max(limit: IntegerLimit) -> i128 {
+    if limit.exclusive {
+        limit.value.saturating_sub(1)
+    } else {
+        limit.value
+    }
+}
+
+fn is_unconstrained_bool_branch(ty: &ValidatedType) -> bool {
+    matches!(ty.kind, ValidatedTypeKind::Bool) && ty.validation.is_none()
+}
+
+fn is_inline_bool_branch(ty: &ValidatedType) -> bool {
+    matches!(ty.kind, ValidatedTypeKind::Bool)
 }
 
 fn inline_union_enum_variant_name(ty: &ValidatedType) -> Option<String> {
