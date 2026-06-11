@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.3.0...satay-codegen-v0.4.1) - 2026-06-11
+
+### Added
+
+- *(codegen)* generate named structs for inline object allOf
+- *(codegen)* support open and inline string enums
+- *(codegen)* support inline singleton union branches
+- *(codegen)* support ref-only oneOf unions
+
+### Fixed
+
+- *(codegen)* reject shadowed plain union branches
+- *(codegen)* ensure that big enum variant is boxed
+- *(codegen)* support inline primitive oneOf branches
+- *(codegen)* omit redundant serde rename for raw identifiers
+- *(codegen)* support embedded discriminator fields
+- *(codegen)* thread recursion stack through discriminator branches
+- *(codegen)* reject recursive inline allOf
+- *(codegen)* preserve open enum branch descriptions
+- *(codegen)* make open string enum detection exhaustive
+- *(codegen)* restore const as_str for closed enums
+- *(codegen)* reserve Other only for open enum fallback
+- *(codegen)* allow Unknown as an enum variant
+- *(codegen)* allow vendor metadata on union schemas
+
+### Other
+
+- *(codegen)* constrained string union branches parse instead of erroring
+- *(codegen)* ensure that code is formatted properly
+- *(codegen)* ensure dylint lints passes
+- *(codegen)* make sure that the test use syn instead of checking strings
+- *(codegen)* split rejects_unsupported_openapi_31_schema_forms_explicitly
+- *(codegen)* split tests and functionality
+
 ## [0.4.0](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.3.0...satay-codegen-v0.4.0) - 2026-06-11
 
 ### Added
