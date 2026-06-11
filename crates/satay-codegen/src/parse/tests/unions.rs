@@ -701,7 +701,7 @@ components:
     Model:
       anyOf:
         - type: string
-          minLength: 1
+          minLength: 12
         - type: string
           enum:
             - known-model
@@ -1001,6 +1001,168 @@ components:
         ValidationError::NullableUnionWithoutVariants { context, keyword } => {
             assert_eq!(context, "schema `Broken`");
             assert_eq!(keyword, "oneOf");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_one_of_with_unconstrained_string_shadowing_string_enum_branch() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Broken:
+      oneOf:
+        - type: string
+        - type: string
+          enum:
+            - auto
+            - none
+"##,
+    );
+    match err {
+        ValidationError::ShadowedUnionBranch {
+            context,
+            keyword,
+            index,
+            shadowed_by,
+        } => {
+            assert_eq!(context, "schema `Broken`");
+            assert_eq!(keyword, "oneOf");
+            assert_eq!(index, 1);
+            assert_eq!(shadowed_by, 0);
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_any_of_with_constrained_string_shadowing_string_enum_branch() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Broken:
+      anyOf:
+        - type: string
+          minLength: 1
+        - type: string
+          enum:
+            - known-model
+"##,
+    );
+    match err {
+        ValidationError::ShadowedUnionBranch {
+            context,
+            keyword,
+            index,
+            shadowed_by,
+        } => {
+            assert_eq!(context, "schema `Broken`");
+            assert_eq!(keyword, "anyOf");
+            assert_eq!(index, 1);
+            assert_eq!(shadowed_by, 0);
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_one_of_with_number_shadowing_integer_branch() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Broken:
+      oneOf:
+        - type: number
+        - type: integer
+"##,
+    );
+    match err {
+        ValidationError::ShadowedUnionBranch {
+            context,
+            keyword,
+            index,
+            shadowed_by,
+        } => {
+            assert_eq!(context, "schema `Broken`");
+            assert_eq!(keyword, "oneOf");
+            assert_eq!(index, 1);
+            assert_eq!(shadowed_by, 0);
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_one_of_with_duplicate_boolean_branch() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Broken:
+      oneOf:
+        - type: boolean
+        - type: boolean
+"##,
+    );
+    match err {
+        ValidationError::ShadowedUnionBranch {
+            context,
+            keyword,
+            index,
+            shadowed_by,
+        } => {
+            assert_eq!(context, "schema `Broken`");
+            assert_eq!(keyword, "oneOf");
+            assert_eq!(index, 1);
+            assert_eq!(shadowed_by, 0);
         }
         other => panic!("unexpected error: {other}"),
     }

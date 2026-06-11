@@ -300,6 +300,19 @@ pub enum ValidationError {
         keyword: &'static str,
     },
 
+    /// A plain `anyOf` or `oneOf` union has a branch that is statically shadowed by an earlier branch.
+    ///
+    /// Error message: `{context}.{keyword}[{index}] is shadowed by earlier branch {shadowed_by} under ordered serde untagged deserialization`
+    #[error(
+        "{context}.{keyword}[{index}] is shadowed by earlier branch {shadowed_by} under ordered serde untagged deserialization"
+    )]
+    ShadowedUnionBranch {
+        context: String,
+        keyword: &'static str,
+        index: usize,
+        shadowed_by: usize,
+    },
+
     /// A composition schema declares no branches.
     ///
     /// Raised for empty `anyOf` and, today, for empty component `allOf` that is routed
