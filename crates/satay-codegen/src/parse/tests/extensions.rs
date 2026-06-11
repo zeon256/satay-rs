@@ -211,7 +211,7 @@ components:
             SD: SingleDecker
             DD: DoubleDecker
             BD: Bendy
-            "": Empty
+            "": Unknown
     Arrival:
       type: object
       required:
@@ -229,7 +229,7 @@ components:
               SD: SingleDecker
               DD: DoubleDecker
               BD: Bendy
-              "": Empty
+              "": Unknown
 "#,
     );
 
@@ -245,7 +245,7 @@ components:
             assert_eq!(variants[2].wire_name, "BD");
             assert_eq!(variants[2].rust_name, "Bendy");
             assert_eq!(variants[3].wire_name, "");
-            assert_eq!(variants[3].rust_name, "Empty");
+            assert_eq!(variants[3].rust_name, "Unknown");
             assert_eq!(enum_.fallback, EnumFallback::None);
         }
         other => panic!("expected VehicleType enum, got {other:?}"),
@@ -259,7 +259,7 @@ components:
             assert_eq!(variants[0].rust_name, "SingleDecker");
             assert_eq!(variants[1].rust_name, "DoubleDecker");
             assert_eq!(variants[2].rust_name, "Bendy");
-            assert_eq!(variants[3].rust_name, "Empty");
+            assert_eq!(variants[3].rust_name, "Unknown");
             assert_eq!(enum_.fallback, EnumFallback::None);
         }
         other => panic!("expected ArrivalType enum, got {other:?}"),

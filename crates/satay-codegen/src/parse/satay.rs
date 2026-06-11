@@ -46,7 +46,7 @@ pub(super) fn parse_satay_enum_variants(
             });
         };
         let rust_name = variant_ident(rust_name);
-        if matches!(rust_name.as_str(), "Other" | "Unknown") {
+        if rust_name == "Other" {
             return Err(ValidationError::ReservedSatayEnumVariantName {
                 context: context.to_owned(),
                 wire_name: wire_name.clone(),

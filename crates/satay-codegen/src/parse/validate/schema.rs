@@ -1647,7 +1647,7 @@ fn validated_enum(
     fallback: EnumFallback,
     context: &str,
 ) -> Result<Enum, ValidationError> {
-    let mut used = BTreeSet::from(["Other".to_owned(), "Unknown".to_owned()]);
+    let mut used = BTreeSet::from(["Other".to_owned()]);
 
     for rust_name in explicit_variants.values() {
         used.insert(rust_name.clone());
