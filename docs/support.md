@@ -11,7 +11,7 @@ Satay targets OpenAPI 3.1.x and a small, typed subset.
 - `anyOf` and `oneOf` unions whose branches are local `#/components/schemas/...` references or inline string enums, rendered as ordered serde-untagged Rust enums. Plain `oneOf` support does not enforce JSON Schema's exact-one validation rule.
 - `anyOf` or `oneOf` unions with an OpenAPI `discriminator`, when every branch is a local `#/components/schemas/...` reference to an object struct component and branch structs do not contain the discriminator property. These render as serde internally tagged Rust enums. Unmapped branches use their component schema name as the wire tag value; explicit `mapping` entries may override individual branches and may target local `#/components/schemas/...` refs or bare component schema names.
 - Non-Satay vendor extensions on supported union schemas, such as `x-oaiMeta`, are treated as metadata annotations and ignored by generation.
-- `allOf` component object schemas whose branches are local component object references or inline object branches, rendered by flattening branch fields into one Rust struct. Component `allOf` must declare at least one branch.
+- `allOf` object schemas whose branches are local component object references or inline object branches, rendered by flattening branch fields into one Rust struct. Component `allOf` uses the component name; nested JSON schemas such as object properties, array items, request bodies, and response bodies generate named inline structs.
 - Operations for standard HTTP methods with explicit `operationId`, or inferred names from method + path.
 - Path, query, and header parameters declared with `schema`.
 - Path-level parameters with operation-level overrides.
@@ -50,9 +50,9 @@ These are known gaps rather than silent compatibility promises:
 - Array path parameters and OpenAPI parameter style/explode variants beyond repeated query pairs.
 - Non-JSON request or response bodies, including form, multipart, and raw byte bodies.
 - Default response bodies.
-- Inline object schemas outside `components.schemas`.
+- Inline object schemas outside `components.schemas`, except supported object-branch `allOf` schemas that generate named inline structs.
 - Map schemas / `additionalProperties`.
-- `anyOf`/`oneOf` inline object branches, inline non-enum primitive branches outside the supported open string enum shape, `anyOf`/`oneOf` parameters, recursive union cycles, full JSON Schema `anyOf`/`oneOf` validation semantics, discriminator union branches that are ref-only component aliases, multiple discriminator mapping values targeting the same branch, remote or absolute discriminator mapping targets, OpenAPI `allOf` base discriminator/inheritance patterns, `allOf` outside `components.schemas`, empty `allOf` arrays, and `allOf` scalar/intersection semantics. Empty `allOf: []` is rejected with `EmptyAnyOf` (the same error as empty `anyOf`) because both share the empty composition-shape validation path.
+- `anyOf`/`oneOf` inline object branches, inline non-enum primitive branches outside the supported open string enum shape, `anyOf`/`oneOf` parameters, recursive union cycles, full JSON Schema `anyOf`/`oneOf` validation semantics, discriminator union branches that are ref-only component aliases, multiple discriminator mapping values targeting the same branch, remote or absolute discriminator mapping targets, OpenAPI `allOf` base discriminator/inheritance patterns, `allOf` parameters, empty `allOf` arrays, and `allOf` scalar/intersection semantics. Empty `allOf: []` is rejected with `EmptyAnyOf` (the same error as empty `anyOf`) because both share the empty composition-shape validation path.
 - JSON Schema boolean schemas (`true` / `false`).
 - `$ref` siblings other than Satay-owned `x-satay` extensions.
 - Non-string enums.

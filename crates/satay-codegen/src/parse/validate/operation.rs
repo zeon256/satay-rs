@@ -13,7 +13,7 @@ use super::super::reference::{
     resolve_parameter, resolve_path_item, resolve_request_body, resolve_response,
 };
 use super::super::resolve::ResolvedDocument;
-use super::schema::{schema_uses_any_of, validate_type_schema};
+use super::schema::{schema_uses_all_of, schema_uses_any_of, validate_type_schema};
 use super::{ValidatedOperation, ValidatedParameter, ValidatedRequestBody, ValidatedResponse};
 use crate::error::ValidationError;
 use crate::model::{HttpMethod, ParameterLocation, PathSegment};
@@ -189,11 +189,25 @@ fn validate_parameter(
                 wire_name: wire_name.clone(),
             })?;
 
+    if schema_uses_all_of(document, schema)? {
+        return Err(ValidationError::UnsupportedComposition {
+            context: format!("parameter `{wire_name}`"),
+            keyword: "allOf",
+        });
+    }
+
     let ty = validate_type_schema(document, schema, &format!("parameter `{wire_name}`"), false)?;
 
     if ty.is_nullable() {
         return Err(ValidationError::NullableParameterUnsupported {
             wire_name: wire_name.clone(),
+        });
+    }
+
+    if ty.contains_inline_struct() {
+        return Err(ValidationError::UnsupportedComposition {
+            context: format!("parameter `{wire_name}`"),
+            keyword: "allOf",
         });
     }
 

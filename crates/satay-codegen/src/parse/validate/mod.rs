@@ -71,6 +71,32 @@ impl ValidatedType {
         match &self.kind {
             ValidatedTypeKind::AnyOf(_) => true,
             ValidatedTypeKind::Array(item) => item.contains_any_of(),
+            ValidatedTypeKind::InlineStruct(fields) => {
+                fields.iter().any(|field| field.ty.contains_any_of())
+            }
+            ValidatedTypeKind::Named(_)
+            | ValidatedTypeKind::String
+            | ValidatedTypeKind::ParsedString(_)
+            | ValidatedTypeKind::ParsedInteger(_)
+            | ValidatedTypeKind::Integer(_)
+            | ValidatedTypeKind::F32
+            | ValidatedTypeKind::F64
+            | ValidatedTypeKind::Bool
+            | ValidatedTypeKind::Enum(_)
+            | ValidatedTypeKind::Range(_) => false,
+        }
+    }
+
+    pub(crate) fn contains_inline_struct(&self) -> bool {
+        match &self.kind {
+            ValidatedTypeKind::InlineStruct(_) => true,
+            ValidatedTypeKind::Array(item) => item.contains_inline_struct(),
+            ValidatedTypeKind::AnyOf(union) => {
+                union.variants.iter().any(|variant| match &variant.kind {
+                    ValidatedUnionVariantKind::Reference { .. } => false,
+                    ValidatedUnionVariantKind::Inline(ty) => ty.contains_inline_struct(),
+                })
+            }
             ValidatedTypeKind::Named(_)
             | ValidatedTypeKind::String
             | ValidatedTypeKind::ParsedString(_)
@@ -98,6 +124,7 @@ pub(crate) enum ValidatedTypeKind {
     Array(Box<ValidatedType>),
     Enum(Enum),
     AnyOf(ValidatedUnion),
+    InlineStruct(Vec<ValidatedField>),
     Range(RangeScalar),
 }
 

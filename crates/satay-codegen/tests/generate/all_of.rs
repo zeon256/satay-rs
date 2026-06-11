@@ -152,6 +152,262 @@ mod tests {
 }
 
 #[test]
+fn inline_all_of_array_items_generate_named_flattened_structs() {
+    let files = satay_codegen::generate(
+        r##"
+openapi: 3.1.0
+info:
+  title: Messages API
+  version: 1.0.0
+paths:
+  /messages:
+    get:
+      operationId: listMessages
+      responses:
+        '200':
+          description: Messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatCompletionMessageList'
+components:
+  schemas:
+    ChatCompletionRequestMessageContentPartText:
+      type: object
+      required:
+        - type
+        - text
+      properties:
+        type:
+          type: string
+          enum:
+            - text
+        text:
+          type: string
+    ChatCompletionRequestMessageContentPartImage:
+      type: object
+      required:
+        - type
+        - image_url
+      properties:
+        type:
+          type: string
+          enum:
+            - image_url
+        image_url:
+          type: string
+    ChatCompletionResponseMessage:
+      type: object
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+        content:
+          type: string
+    ChatCompletionMessageList:
+      type: object
+      required:
+        - object
+        - data
+        - first_id
+        - last_id
+        - has_more
+      properties:
+        object:
+          type: string
+          enum:
+            - list
+        data:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/ChatCompletionResponseMessage'
+              - type: object
+                required:
+                  - id
+                properties:
+                  id:
+                    type: string
+                  content_parts:
+                    type: array
+                    items:
+                      oneOf:
+                        - $ref: '#/components/schemas/ChatCompletionRequestMessageContentPartText'
+                        - $ref: '#/components/schemas/ChatCompletionRequestMessageContentPartImage'
+        first_id:
+          type: string
+        last_id:
+          type: string
+        has_more:
+          type: boolean
+"##,
+    )
+    .expect("generate inline allOf array item fixture");
+
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    let list = find_struct(&types_rs, "ChatCompletionMessageList");
+    assert_field(list, "data", "Vec<ChatCompletionMessageListDataItem>");
+
+    let item = find_struct(&types_rs, "ChatCompletionMessageListDataItem");
+    assert_eq!(
+        field_names(item),
+        ["role", "content", "id", "content_parts"]
+    );
+    assert_field(item, "role", "String");
+    assert_field(item, "content", "String");
+    assert_field(item, "id", "String");
+    assert_field(
+        item,
+        "content_parts",
+        "Option<Vec<ChatCompletionMessageListDataItemContentPartsItem>>",
+    );
+}
+
+#[test]
+fn generated_inline_all_of_array_items_decode_flattened_fields() {
+    let files = satay_codegen::generate(
+        r##"
+openapi: 3.1.0
+info:
+  title: Messages API
+  version: 1.0.0
+paths:
+  /messages:
+    get:
+      operationId: listMessages
+      responses:
+        '200':
+          description: Messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatCompletionMessageList'
+components:
+  schemas:
+    ChatCompletionRequestMessageContentPartText:
+      type: object
+      required:
+        - type
+        - text
+      properties:
+        type:
+          type: string
+          enum:
+            - text
+        text:
+          type: string
+    ChatCompletionRequestMessageContentPartImage:
+      type: object
+      required:
+        - type
+        - image_url
+      properties:
+        type:
+          type: string
+          enum:
+            - image_url
+        image_url:
+          type: string
+    ChatCompletionResponseMessage:
+      type: object
+      required:
+        - role
+        - content
+      properties:
+        role:
+          type: string
+        content:
+          type: string
+    ChatCompletionMessageList:
+      type: object
+      required:
+        - object
+        - data
+        - first_id
+        - last_id
+        - has_more
+      properties:
+        object:
+          type: string
+          enum:
+            - list
+        data:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/ChatCompletionResponseMessage'
+              - type: object
+                required:
+                  - id
+                properties:
+                  id:
+                    type: string
+                  content_parts:
+                    type: array
+                    items:
+                      oneOf:
+                        - $ref: '#/components/schemas/ChatCompletionRequestMessageContentPartText'
+                        - $ref: '#/components/schemas/ChatCompletionRequestMessageContentPartImage'
+        first_id:
+          type: string
+        last_id:
+          type: string
+        has_more:
+          type: boolean
+"##,
+    )
+    .expect("generate inline allOf runtime fixture");
+
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+
+    let runtime_path = runtime_path_toml();
+
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::*;
+
+    #[test]
+    fn decodes_inline_all_of_array_items() {
+        let response = satay_runtime::ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: br#"{"object":"list","data":[{"role":"user","content":"hello","id":"chatcmpl-1-0","content_parts":[{"type":"text","text":"hello"}]}],"first_id":"chatcmpl-1-0","last_id":"chatcmpl-1-0","has_more":false}"#.to_vec(),
+        };
+
+        let decoded = decode_list_messages_response(response).expect("decoded response");
+        match decoded {
+            ListMessagesResponse::Ok(list) => {
+                assert_eq!(list.data.len(), 1);
+                let item = &list.data[0];
+                assert_eq!(item.role, "user");
+                assert_eq!(item.content, "hello");
+                assert_eq!(item.id, "chatcmpl-1-0");
+                assert_eq!(item.content_parts.as_ref().expect("content parts").len(), 1);
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+}
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    run_temp_cargo(
+        crate_dir,
+        "test",
+        &[],
+        "inline allOf array item generated crate tests",
+    );
+}
+
+#[test]
 fn all_of_rejects_duplicate_properties() {
     let err = satay_codegen::generate(
         r##"
