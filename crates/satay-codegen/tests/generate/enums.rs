@@ -160,10 +160,10 @@ components:
       type: object
       properties:
         model:
-          description: The model to use for transcription.
           anyOf:
             - type: string
             - type: string
+              description: Known transcription models.
               enum:
                 - whisper-1
                 - gpt-4o-mini-transcribe
@@ -180,6 +180,7 @@ components:
     assert_field(transcription, "model", "Option<AudioTranscriptionModel>");
 
     let model = find_enum(&types_rs, "AudioTranscriptionModel");
+    assert_doc(&model.attrs, "Known transcription models.");
     assert_eq!(
         variant_names(model),
         [

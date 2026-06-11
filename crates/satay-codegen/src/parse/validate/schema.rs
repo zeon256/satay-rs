@@ -136,7 +136,7 @@ fn validate_component_schema(
     stack: &mut Vec<String>,
 ) -> Result<ValidatedComponent, ValidationError> {
     let context = format!("schema `{schema_name}`");
-    let description = schema_description(schema);
+    let schema_description = schema_description(schema);
     let kind = if let Some(reference) = schema_ref(schema, &context)? {
         ValidatedComponentKind::Reference(schema_ref_type_name(reference)?)
     } else {
@@ -206,6 +206,10 @@ fn validate_component_schema(
             }
         }
     };
+    let description = schema_description.or_else(|| match &kind {
+        ValidatedComponentKind::Type(ty) => ty.description.clone(),
+        _ => None,
+    });
 
     Ok(ValidatedComponent {
         schema_name: schema_name.to_owned(),
@@ -294,8 +298,11 @@ fn validate_open_string_enum_any_of(
         return Ok(None);
     }
 
+    let description =
+        optional_description(&schema.description).or_else(|| enum_branch.description.clone());
+
     Ok(Some(ValidatedType {
-        description: optional_description(&schema.description),
+        description,
         ..enum_branch
     }))
 }
