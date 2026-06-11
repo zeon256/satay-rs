@@ -634,7 +634,7 @@ components:
               SEA: SeatsAvailable
               SDA: StandingAvailable
               LSD: LimitedStanding
-              "": Unknown
+              "": Unspecified
 
         Feature:
           type: string
@@ -647,7 +647,7 @@ components:
           x-satay:
             enum-variants:
               WAB: WheelchairAccessible
-              "": Unknown
+              "": Unspecified
 
         Type:
           type: string
@@ -664,7 +664,7 @@ components:
               SD: SingleDecker
               DD: DoubleDecker
               BD: Bendy
-              "": Unknown
+              "": Unspecified
 
         Monitored:
           type: integer

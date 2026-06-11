@@ -119,7 +119,7 @@ Supported values are `auto`, `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, and 
 
 ## `enum-variants`
 
-Use `x-satay.enum-variants` on string enums when the wire values are terse codes but the Rust variants should be descriptive. Map each wire value to the desired Rust variant name. Mapping a value to `Unknown` folds it into Satay's generated fallback variant.
+Use `x-satay.enum-variants` on string enums when the wire values are terse codes but the Rust variants should be descriptive. Map each wire value to the desired Rust variant name. `Other` and `Unknown` are reserved for generated fallback semantics and cannot be used as explicit variant names.
 
 ```yaml
 Type:
@@ -130,10 +130,10 @@ Type:
       SD: SingleDecker
       DD: DoubleDecker
       BD: Bendy
-      "": Unknown
+      "": Empty
 ```
 
-This generates `SingleDecker`, `DoubleDecker`, and `Bendy` variants with `serde(rename = "...")` attributes, plus the default `Unknown` fallback.
+This generates `SingleDecker`, `DoubleDecker`, `Bendy`, and `Empty` variants with `serde(rename = "...")` attributes where needed.
 
 ## `treat-error-as-none`
 

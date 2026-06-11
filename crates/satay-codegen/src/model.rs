@@ -141,7 +141,13 @@ pub(crate) struct Field {
 #[derive(Debug, Clone)]
 pub(crate) struct Enum {
     pub(crate) variants: Vec<EnumVariant>,
-    pub(crate) allow_unknown: bool,
+    pub(crate) fallback: EnumFallback,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EnumFallback {
+    None,
+    OtherString,
 }
 
 #[derive(Debug, Clone)]

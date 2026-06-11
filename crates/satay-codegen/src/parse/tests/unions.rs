@@ -303,9 +303,153 @@ components:
             assert_eq!(enum_.variants.len(), 1);
             assert_eq!(enum_.variants[0].wire_name, "auto");
             assert_eq!(enum_.variants[0].rust_name, "Auto");
-            assert!(!enum_.allow_unknown);
+            assert_eq!(enum_.fallback, EnumFallback::None);
         }
         other => panic!("expected AssistantsApiResponseFormatOptionAuto enum, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_one_of_with_inline_multi_value_string_enum_branch() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /tool-choice:
+    get:
+      operationId: getToolChoice
+      responses:
+        '200':
+          description: Tool choice
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AssistantsApiToolChoiceOption'
+components:
+  schemas:
+    AssistantsNamedToolChoice:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          enum:
+            - file_search
+            - function
+    AssistantsApiToolChoiceOption:
+      description: Tool choice option.
+      oneOf:
+        - type: string
+          enum:
+            - none
+            - auto
+            - required
+        - $ref: '#/components/schemas/AssistantsNamedToolChoice'
+"#,
+    );
+
+    let option = component(&api, "AssistantsApiToolChoiceOption");
+    match &option.kind {
+        ComponentKind::Union(union) => {
+            assert!(union.tag.is_none());
+            assert_eq!(union.variants.len(), 2);
+            assert_eq!(union.variants[0].rust_name, "Enum");
+            assert_eq!(
+                union.variants[0].ty,
+                TypeRef::Named("AssistantsApiToolChoiceOptionEnum".to_owned())
+            );
+            assert_eq!(union.variants[1].rust_name, "AssistantsNamedToolChoice");
+            assert_eq!(
+                union.variants[1].ty,
+                TypeRef::Named("AssistantsNamedToolChoice".to_owned())
+            );
+        }
+        other => panic!("expected AssistantsApiToolChoiceOption union, got {other:?}"),
+    }
+
+    let enum_branch = component(&api, "AssistantsApiToolChoiceOptionEnum");
+    match &enum_branch.kind {
+        ComponentKind::Enum(enum_) => {
+            assert_eq!(enum_.variants.len(), 3);
+            assert_eq!(enum_.variants[0].wire_name, "none");
+            assert_eq!(enum_.variants[0].rust_name, "None");
+            assert_eq!(enum_.variants[1].wire_name, "auto");
+            assert_eq!(enum_.variants[1].rust_name, "Auto");
+            assert_eq!(enum_.variants[2].wire_name, "required");
+            assert_eq!(enum_.variants[2].rust_name, "Required");
+            assert_eq!(enum_.fallback, EnumFallback::None);
+        }
+        other => panic!("expected AssistantsApiToolChoiceOptionEnum enum, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_any_of_open_string_enum_branch() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /transcription:
+    get:
+      operationId: getTranscription
+      responses:
+        '200':
+          description: Transcription
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AudioTranscription'
+components:
+  schemas:
+    AudioTranscription:
+      type: object
+      properties:
+        model:
+          description: The model to use for transcription.
+          anyOf:
+            - type: string
+            - type: string
+              enum:
+                - whisper-1
+                - gpt-4o-mini-transcribe
+                - gpt-4o-transcribe
+"#,
+    );
+
+    let transcription = component(&api, "AudioTranscription");
+    match &transcription.kind {
+        ComponentKind::Struct(fields) => {
+            let model = field(fields, "model");
+            assert_eq!(
+                model.ty,
+                TypeRef::Named("AudioTranscriptionModel".to_owned())
+            );
+            assert!(!model.required);
+        }
+        other => panic!("expected AudioTranscription struct, got {other:?}"),
+    }
+
+    let model = component(&api, "AudioTranscriptionModel");
+    match &model.kind {
+        ComponentKind::Enum(enum_) => {
+            let variants = &enum_.variants;
+            assert_eq!(variants.len(), 3);
+            assert_eq!(variants[0].wire_name, "whisper-1");
+            assert_eq!(variants[0].rust_name, "Whisper1");
+            assert_eq!(variants[1].wire_name, "gpt-4o-mini-transcribe");
+            assert_eq!(variants[1].rust_name, "Gpt4oMiniTranscribe");
+            assert_eq!(variants[2].wire_name, "gpt-4o-transcribe");
+            assert_eq!(variants[2].rust_name, "Gpt4oTranscribe");
+            assert_eq!(enum_.fallback, EnumFallback::OtherString);
+        }
+        other => panic!("expected AudioTranscriptionModel enum, got {other:?}"),
     }
 }
 
