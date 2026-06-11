@@ -482,12 +482,17 @@ components:
           deprecated: false
           example: future-model
         - type: string
+          description: Known model identifiers.
           enum:
             - known-model
 "#,
     );
 
     let model = component(&api, "Model");
+    assert_eq!(
+        model.description.as_deref(),
+        Some("Known model identifiers.")
+    );
     match &model.kind {
         ComponentKind::Enum(enum_) => {
             assert_eq!(enum_.variants.len(), 1);
@@ -496,6 +501,48 @@ components:
         }
         other => panic!("expected Model enum, got {other:?}"),
     }
+}
+
+#[test]
+fn parses_any_of_open_string_enum_prefers_outer_description() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /model:
+    get:
+      operationId: getModel
+      responses:
+        '200':
+          description: Model
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Model'
+components:
+  schemas:
+    Model:
+      description: Preferred model identifier.
+      anyOf:
+        - type: string
+        - type: string
+          description: Known model identifiers.
+          enum:
+            - known-model
+"#,
+    );
+
+    let model = component(&api, "Model");
+    assert_eq!(
+        model.description.as_deref(),
+        Some("Preferred model identifier.")
+    );
+    assert!(
+        matches!(&model.kind, ComponentKind::Enum(enum_) if enum_.fallback == EnumFallback::OtherString)
+    );
 }
 
 #[test]
