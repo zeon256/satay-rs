@@ -1,12 +1,13 @@
 use crate::ident::{field_ident, type_ident, unique_ident, variant_ident};
 use crate::model::{
     Component, ComponentKind, ConstrainedType, Enum, Field, RangeType, RangeTypeRef, TypeRef,
-    Union, UnionTag, UnionVariant,
+    Union, UnionTag, UnionTagStyle, UnionVariant,
 };
 use crate::parse::registry::TypeRegistry;
 use crate::parse::validate::{
     ValidatedComponent, ValidatedComponentKind, ValidatedDocument, ValidatedField, ValidatedType,
-    ValidatedTypeKind, ValidatedUnion, ValidatedUnionVariant, ValidatedUnionVariantKind,
+    ValidatedTypeKind, ValidatedUnion, ValidatedUnionTagStyle, ValidatedUnionVariant,
+    ValidatedUnionVariantKind,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -224,6 +225,10 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
             variants: self.parse_union_variants(&union.variants, type_name_hint, registry),
             tag: union.tag.as_ref().map(|tag| UnionTag {
                 property_name: tag.property_name.clone(),
+                style: match tag.style {
+                    ValidatedUnionTagStyle::InternallyTagged => UnionTagStyle::InternallyTagged,
+                    ValidatedUnionTagStyle::EmbeddedField => UnionTagStyle::EmbeddedField,
+                },
             }),
         }
     }

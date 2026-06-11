@@ -1,11 +1,13 @@
-use crate::model::{Union, UnionVariant};
+use crate::model::{Union, UnionTagStyle, UnionVariant};
 
 use super::super::{doc_attrs, ident, lit_str, rust_type};
 
 pub(super) fn render_union(name: &str, description: Option<&str>, union: &Union) -> syn::ItemEnum {
     let name = ident(name);
     let docs = doc_attrs(description);
-    let serde_tag_attr: syn::Attribute = if let Some(tag) = &union.tag {
+    let serde_tag_attr: syn::Attribute = if let Some(tag) = &union.tag
+        && tag.style == UnionTagStyle::InternallyTagged
+    {
         let property_name = lit_str(&tag.property_name);
         syn::parse_quote!(#[cfg_attr(feature = "serde", serde(tag = #property_name))])
     } else {

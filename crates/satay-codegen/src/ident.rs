@@ -31,7 +31,7 @@ pub(crate) fn response_variant_ident(status: u16) -> String {
 
 pub(crate) fn field_ident(value: &str) -> String {
     let ident = value.to_snake_case();
-    sanitize_ident(&ident, "field", IdentKind::Value)
+    sanitize_ident(&ident, "field", IdentKind::Field)
 }
 
 pub(crate) fn function_ident(value: &str) -> String {
@@ -42,6 +42,7 @@ pub(crate) fn function_ident(value: &str) -> String {
 #[derive(Debug, Clone, Copy)]
 enum IdentKind {
     Type,
+    Field,
     Value,
 }
 
@@ -72,12 +73,16 @@ fn sanitize_ident(value: &str, fallback: &str, kind: IdentKind) -> String {
     if starts_with_digit {
         match kind {
             IdentKind::Type => ident.insert_str(0, fallback),
-            IdentKind::Value => ident.insert(0, '_'),
+            IdentKind::Field | IdentKind::Value => ident.insert(0, '_'),
         }
     }
 
     if is_rust_keyword(&ident) {
-        ident.push('_');
+        if matches!(kind, IdentKind::Field) && can_use_raw_identifier(&ident) {
+            ident.insert_str(0, "r#");
+        } else {
+            ident.push('_');
+        }
     }
     ident
 }
@@ -152,6 +157,10 @@ fn is_rust_keyword(value: &str) -> bool {
     )
 }
 
+fn can_use_raw_identifier(value: &str) -> bool {
+    !matches!(value, "self" | "Self" | "crate" | "super")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,7 +168,8 @@ mod tests {
     #[test]
     fn escapes_rust_keywords_for_types_and_values() {
         assert_eq!(type_ident("type"), "Type");
-        assert_eq!(field_ident("type"), "type_");
+        assert_eq!(field_ident("type"), "r#type");
+        assert_eq!(field_ident("self"), "self_");
         assert_eq!(function_ident("async"), "async_");
         assert_eq!(variant_ident("Self"), "Self_");
     }

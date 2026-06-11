@@ -666,6 +666,95 @@ components:
 }
 
 #[test]
+fn parses_discriminator_with_embedded_singleton_type_fields_into_ir() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Tool API
+  version: 1.0.0
+paths:
+  /tool:
+    get:
+      operationId: getTool
+      responses:
+        '200':
+          description: Tool call
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolCall'
+components:
+  schemas:
+    FunctionToolCall:
+      type: object
+      required:
+        - id
+        - type
+        - function
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum:
+            - function
+        function:
+          type: string
+    CustomToolCall:
+      type: object
+      required:
+        - id
+        - type
+        - custom
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum:
+            - custom
+        custom:
+          type: string
+    ToolCall:
+      oneOf:
+        - $ref: '#/components/schemas/FunctionToolCall'
+        - $ref: '#/components/schemas/CustomToolCall'
+      discriminator:
+        propertyName: type
+        mapping:
+          function: '#/components/schemas/FunctionToolCall'
+          custom: CustomToolCall
+"#,
+    );
+
+    let function_tool_call = component(&api, "FunctionToolCall");
+    match &function_tool_call.kind {
+        ComponentKind::Struct(fields) => {
+            assert_eq!(field(fields, "type").rust_name, "r#type");
+        }
+        other => panic!("expected FunctionToolCall struct, got {other:?}"),
+    }
+
+    let tool_call = component(&api, "ToolCall");
+    match &tool_call.kind {
+        ComponentKind::Union(union) => {
+            let tag = union.tag.as_ref().expect("embedded discriminator tag");
+            assert_eq!(tag.property_name, "type");
+            assert_eq!(tag.style, UnionTagStyle::EmbeddedField);
+            assert_eq!(union.variants.len(), 2);
+            assert!(
+                union
+                    .variants
+                    .iter()
+                    .all(|variant| variant.tag_value.is_none())
+            );
+        }
+        other => panic!("expected ToolCall union, got {other:?}"),
+    }
+}
+
+#[test]
 fn rejects_empty_any_of() {
     let err = parse_invalid(
         r##"
@@ -963,7 +1052,67 @@ components:
 }
 
 #[test]
-fn rejects_discriminator_property_conflict_with_branch_field() {
+fn rejects_discriminator_embedded_property_missing_from_some_branches() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Dog:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - dog
+        name:
+          type: string
+    Cat:
+      type: object
+      properties:
+        name:
+          type: string
+    Pet:
+      anyOf:
+        - $ref: '#/components/schemas/Dog'
+        - $ref: '#/components/schemas/Cat'
+      discriminator:
+        propertyName: kind
+"##,
+    );
+    match err {
+        ValidationError::InvalidDiscriminatorProperty {
+            context,
+            schema,
+            property,
+            expected,
+        } => {
+            assert_eq!(context, "schema `Pet`");
+            assert_eq!(schema, "Cat");
+            assert_eq!(property, "kind");
+            assert_eq!(
+                expected,
+                "present on every branch when any branch contains it"
+            );
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_optional_discriminator_embedded_property() {
     let err = parse_invalid(
         r##"
 openapi: 3.1.0
@@ -984,15 +1133,23 @@ components:
       properties:
         kind:
           type: string
+          enum:
+            - dog
         name:
           type: string
     Cat:
       type: object
+      required:
+        - kind
       properties:
+        kind:
+          type: string
+          enum:
+            - cat
         name:
           type: string
     Pet:
-      anyOf:
+      oneOf:
         - $ref: '#/components/schemas/Dog'
         - $ref: '#/components/schemas/Cat'
       discriminator:
@@ -1000,14 +1157,82 @@ components:
 "##,
     );
     match err {
-        ValidationError::DiscriminatorPropertyConflict {
+        ValidationError::InvalidDiscriminatorProperty {
             context,
             schema,
             property,
+            expected,
         } => {
             assert_eq!(context, "schema `Pet`");
             assert_eq!(schema, "Dog");
             assert_eq!(property, "kind");
+            assert_eq!(expected, "a required non-null singleton string enum");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_discriminator_mapping_that_disagrees_with_embedded_value() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Dog:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - dog
+        name:
+          type: string
+    Cat:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - cat
+        name:
+          type: string
+    Pet:
+      oneOf:
+        - $ref: '#/components/schemas/Dog'
+        - $ref: '#/components/schemas/Cat'
+      discriminator:
+        propertyName: kind
+        mapping:
+          hound: Dog
+          cat: Cat
+"##,
+    );
+    match err {
+        ValidationError::DiscriminatorMappingValueMismatch {
+            context,
+            schema,
+            value,
+            actual,
+        } => {
+            assert_eq!(context, "schema `Pet`");
+            assert_eq!(schema, "Dog");
+            assert_eq!(value, "hound");
+            assert_eq!(actual, "dog");
         }
         other => panic!("unexpected error: {other}"),
     }

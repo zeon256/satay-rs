@@ -137,6 +137,13 @@ pub(crate) struct ValidatedUnion {
 #[derive(Debug, Clone)]
 pub(crate) struct ValidatedUnionTag {
     pub(crate) property_name: String,
+    pub(crate) style: ValidatedUnionTagStyle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ValidatedUnionTagStyle {
+    InternallyTagged,
+    EmbeddedField,
 }
 
 #[derive(Debug, Clone)]

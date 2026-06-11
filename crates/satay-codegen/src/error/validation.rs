@@ -330,6 +330,17 @@ pub enum ValidationError {
         property: String,
     },
 
+    /// A discriminator branch object contains an invalid embedded discriminator property.
+    ///
+    /// Error message: `{context} discriminator branch `{schema}` property `{property}` must be {expected}`
+    #[error("{context} discriminator branch `{schema}` property `{property}` must be {expected}")]
+    InvalidDiscriminatorProperty {
+        context: String,
+        schema: String,
+        property: String,
+        expected: &'static str,
+    },
+
     /// A discriminator mapping entry targets a non-local schema or a schema outside the union branches.
     ///
     /// Error message: `{context}.discriminator.mapping[{value:?}] targets `{target}`, which is not a local union branch schema`
@@ -347,6 +358,19 @@ pub enum ValidationError {
     /// Error message: `{context}.discriminator.mapping maps multiple values to branch schema `{schema}``
     #[error("{context}.discriminator.mapping maps multiple values to branch schema `{schema}`")]
     DuplicateDiscriminatorMapping { context: String, schema: String },
+
+    /// A discriminator mapping value disagrees with a branch's embedded discriminator property value.
+    ///
+    /// Error message: `{context}.discriminator.mapping maps value `{value}` to branch schema `{schema}`, but the branch declares discriminator value `{actual}`
+    #[error(
+        "{context}.discriminator.mapping maps value `{value}` to branch schema `{schema}`, but the branch declares discriminator value `{actual}`"
+    )]
+    DiscriminatorMappingValueMismatch {
+        context: String,
+        schema: String,
+        value: String,
+        actual: String,
+    },
 
     /// Multiple discriminator branches resolve to the same discriminator value after implicit defaults are applied.
     ///

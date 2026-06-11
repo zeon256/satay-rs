@@ -165,6 +165,13 @@ pub(crate) struct Union {
 #[derive(Debug, Clone)]
 pub(crate) struct UnionTag {
     pub(crate) property_name: String,
+    pub(crate) style: UnionTagStyle,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UnionTagStyle {
+    InternallyTagged,
+    EmbeddedField,
 }
 
 #[derive(Debug, Clone)]
