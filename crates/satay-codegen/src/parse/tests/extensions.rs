@@ -207,11 +207,11 @@ components:
         - BD
         - ""
       x-satay:
-        enum-variants:
-          SD: SingleDecker
-          DD: DoubleDecker
-          BD: Bendy
-          "": Unknown
+          enum-variants:
+            SD: SingleDecker
+            DD: DoubleDecker
+            BD: Bendy
+            "": Empty
     Arrival:
       type: object
       required:
@@ -229,7 +229,7 @@ components:
               SD: SingleDecker
               DD: DoubleDecker
               BD: Bendy
-              "": Unknown
+              "": Empty
 "#,
     );
 
@@ -237,14 +237,16 @@ components:
     match &vehicle_type.kind {
         ComponentKind::Enum(enum_) => {
             let variants = &enum_.variants;
-            assert_eq!(variants.len(), 3);
+            assert_eq!(variants.len(), 4);
             assert_eq!(variants[0].wire_name, "SD");
             assert_eq!(variants[0].rust_name, "SingleDecker");
             assert_eq!(variants[1].wire_name, "DD");
             assert_eq!(variants[1].rust_name, "DoubleDecker");
             assert_eq!(variants[2].wire_name, "BD");
             assert_eq!(variants[2].rust_name, "Bendy");
-            assert!(enum_.allow_unknown);
+            assert_eq!(variants[3].wire_name, "");
+            assert_eq!(variants[3].rust_name, "Empty");
+            assert_eq!(enum_.fallback, EnumFallback::None);
         }
         other => panic!("expected VehicleType enum, got {other:?}"),
     }
@@ -253,11 +255,12 @@ components:
     match &arrival_type.kind {
         ComponentKind::Enum(enum_) => {
             let variants = &enum_.variants;
-            assert_eq!(variants.len(), 3);
+            assert_eq!(variants.len(), 4);
             assert_eq!(variants[0].rust_name, "SingleDecker");
             assert_eq!(variants[1].rust_name, "DoubleDecker");
             assert_eq!(variants[2].rust_name, "Bendy");
-            assert!(enum_.allow_unknown);
+            assert_eq!(variants[3].rust_name, "Empty");
+            assert_eq!(enum_.fallback, EnumFallback::None);
         }
         other => panic!("expected ArrivalType enum, got {other:?}"),
     }
@@ -298,6 +301,51 @@ components:
         ValidationError::UnknownSatayEnumVariantValue { context, wire_name } => {
             assert_eq!(context, "schema `VehicleType`");
             assert_eq!(wire_name, "DD");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_x_satay_enum_variants_using_reserved_fallback_names() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /arrival:
+    get:
+      operationId: getArrival
+      responses:
+        '200':
+          description: Arrival
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehicleType'
+components:
+  schemas:
+    VehicleType:
+      type: string
+      enum:
+        - SD
+      x-satay:
+        enum-variants:
+          SD: Other
+"#,
+    );
+
+    match err {
+        ValidationError::ReservedSatayEnumVariantName {
+            context,
+            wire_name,
+            rust_name,
+        } => {
+            assert_eq!(context, "schema `VehicleType`");
+            assert_eq!(wire_name, "SD");
+            assert_eq!(rust_name, "Other");
         }
         other => panic!("unexpected error: {other}"),
     }

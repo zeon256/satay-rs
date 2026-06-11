@@ -1,6 +1,6 @@
 use quote::quote;
 
-use crate::model::{Enum, EnumVariant};
+use crate::model::{Enum, EnumFallback, EnumVariant};
 
 use super::super::{doc_attrs, ident, lit_str};
 
@@ -10,38 +10,43 @@ pub(super) fn render_enum(name: &str, description: Option<&str>, enum_: &Enum) -
     let variant_defs = enum_
         .variants
         .iter()
-        .map(render_enum_variant)
+        .map(|variant| render_enum_variant(variant, enum_.fallback == EnumFallback::None))
         .collect::<Vec<_>>();
-    let unknown_variant = enum_.allow_unknown.then(|| {
-        quote!(
-            #[default]
-            #[cfg_attr(feature = "serde", serde(other))]
-            Unknown
-        )
-    });
-    let derive_default = enum_.allow_unknown.then(|| quote!(, Default));
+    let fallback_variant = match enum_.fallback {
+        EnumFallback::None => None,
+        EnumFallback::OtherString => Some(quote!(Other(String))),
+    };
+    let serde_derive = match enum_.fallback {
+        EnumFallback::None => Some(quote!(
+            #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+        )),
+        EnumFallback::OtherString => None,
+    };
     let as_str_arms = enum_
         .variants
         .iter()
         .map(render_enum_as_str_arm)
         .collect::<Vec<_>>();
-    let unknown_as_str_arm = enum_.allow_unknown.then(|| quote!(Self::Unknown => "",));
+    let fallback_as_str_arm = match enum_.fallback {
+        EnumFallback::None => None,
+        EnumFallback::OtherString => Some(quote!(Self::Other(value) => value.as_str(),)),
+    };
 
     let enum_item = syn::parse_quote!(
         #(#docs)*
-        #[derive(Debug, Clone, PartialEq, Eq #derive_default)]
-        #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        #serde_derive
         pub enum #name {
             #(#variant_defs,)*
-            #unknown_variant
+            #fallback_variant
         }
     );
     let inherent_impl = syn::parse_quote!(
         impl #name {
-            pub const fn as_str(&self) -> &'static str {
+            pub fn as_str(&self) -> &str {
                 match self {
                     #(#as_str_arms)*
-                    #unknown_as_str_arm
+                    #fallback_as_str_arm
                 }
             }
         }
@@ -61,12 +66,17 @@ pub(super) fn render_enum(name: &str, description: Option<&str>, enum_: &Enum) -
         }
     );
 
-    vec![enum_item, inherent_impl, as_ref_impl, display_impl]
+    let mut items = vec![enum_item, inherent_impl, as_ref_impl, display_impl];
+    if enum_.fallback == EnumFallback::OtherString {
+        items.push(render_open_enum_serialize_impl(&name));
+        items.push(render_open_enum_deserialize_impl(&name, enum_));
+    }
+    items
 }
 
-fn render_enum_variant(variant: &EnumVariant) -> syn::Variant {
+fn render_enum_variant(variant: &EnumVariant, use_serde_attrs: bool) -> syn::Variant {
     let name = ident(&variant.rust_name);
-    if variant.rust_name == variant.wire_name {
+    if !use_serde_attrs || variant.rust_name == variant.wire_name {
         syn::parse_quote!(#name)
     } else {
         let wire_name = lit_str(&variant.wire_name);
@@ -78,4 +88,48 @@ fn render_enum_as_str_arm(variant: &EnumVariant) -> syn::Arm {
     let name = ident(&variant.rust_name);
     let wire_name = lit_str(&variant.wire_name);
     syn::parse_quote!(Self::#name => #wire_name,)
+}
+
+fn render_open_enum_serialize_impl(name: &syn::Ident) -> syn::Item {
+    syn::parse_quote!(
+        #[cfg(feature = "serde")]
+        impl serde::Serialize for #name {
+            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            where
+                S: serde::Serializer,
+            {
+                serializer.serialize_str(self.as_str())
+            }
+        }
+    )
+}
+
+fn render_open_enum_deserialize_impl(name: &syn::Ident, enum_: &Enum) -> syn::Item {
+    let deserialize_arms = enum_
+        .variants
+        .iter()
+        .map(render_enum_deserialize_arm)
+        .collect::<Vec<_>>();
+
+    syn::parse_quote!(
+        #[cfg(feature = "serde")]
+        impl<'de> serde::Deserialize<'de> for #name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let value = <String as serde::Deserialize>::deserialize(deserializer)?;
+                Ok(match value.as_str() {
+                    #(#deserialize_arms)*
+                    _ => Self::Other(value),
+                })
+            }
+        }
+    )
+}
+
+fn render_enum_deserialize_arm(variant: &EnumVariant) -> syn::Arm {
+    let name = ident(&variant.rust_name);
+    let wire_name = lit_str(&variant.wire_name);
+    syn::parse_quote!(#wire_name => Self::#name,)
 }

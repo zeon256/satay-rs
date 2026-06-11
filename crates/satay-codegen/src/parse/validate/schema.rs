@@ -23,7 +23,7 @@ use super::{
 };
 use crate::error::ValidationError;
 use crate::ident::{type_ident, unique_ident, variant_ident};
-use crate::model::{Enum, EnumVariant, ParseAs, TypeRef};
+use crate::model::{Enum, EnumFallback, EnumVariant, ParseAs, TypeRef};
 
 pub(super) fn validate_components(
     document: &ResolvedDocument<'_>,
@@ -160,6 +160,7 @@ fn validate_component_schema(
                     kind: ValidatedTypeKind::Enum(validated_enum(
                         schema,
                         &validated_satay.enum_variants,
+                        EnumFallback::None,
                         &context,
                     )?),
                     nullable,
@@ -238,6 +239,10 @@ fn validate_union_type_schema(
     schema: &OasObjectSchema,
     context: &str,
 ) -> Result<ValidatedType, ValidationError> {
+    if let Some(open_enum) = validate_open_string_enum_any_of(schema, context)? {
+        return Ok(open_enum);
+    }
+
     let union = if let Some(discriminator) = schema.discriminator.as_ref() {
         validate_discriminator_union(document, schema, discriminator, context)?
     } else if !schema.one_of.is_empty() && schema.any_of.is_empty() {
@@ -253,6 +258,129 @@ fn validate_union_type_schema(
         description: optional_description(&schema.description),
         treat_error_as_none: false,
     })
+}
+
+fn validate_open_string_enum_any_of(
+    schema: &OasObjectSchema,
+    context: &str,
+) -> Result<Option<ValidatedType>, ValidationError> {
+    if schema.discriminator.is_some() || !schema.one_of.is_empty() || schema.any_of.len() != 2 {
+        return Ok(None);
+    }
+
+    reject_any_of_sibling_keywords(schema, context)?;
+
+    let mut has_open_string = false;
+    let mut enum_branch = None;
+
+    for branch in &schema.any_of {
+        if open_string_any_of_branch_is_unconstrained_string(branch, context)? {
+            has_open_string = true;
+            continue;
+        }
+
+        if let Some(ty) = validate_open_string_enum_any_of_branch(branch, context)? {
+            enum_branch = Some(ty);
+            continue;
+        }
+
+        return Ok(None);
+    }
+
+    let Some(enum_branch) = enum_branch else {
+        return Ok(None);
+    };
+    if !has_open_string {
+        return Ok(None);
+    }
+
+    Ok(Some(ValidatedType {
+        description: optional_description(&schema.description),
+        ..enum_branch
+    }))
+}
+
+fn open_string_any_of_branch_is_unconstrained_string(
+    branch: &OasSchema,
+    context: &str,
+) -> Result<bool, ValidationError> {
+    let Some(schema) = open_string_any_of_object_branch(branch, context)? else {
+        return Ok(false);
+    };
+    let (schema_type, nullable) = schema_type_and_nullable(schema, context)?;
+
+    Ok(!nullable
+        && schema_type == Some(OasSchemaType::String)
+        && schema.enum_values.is_empty()
+        && schema.const_value.is_none()
+        && schema.format.is_none()
+        && schema.items.is_none()
+        && schema.prefix_items.is_empty()
+        && schema.properties.is_empty()
+        && schema.additional_properties.is_none()
+        && schema.multiple_of.is_none()
+        && schema.maximum.is_none()
+        && schema.exclusive_maximum.is_none()
+        && schema.minimum.is_none()
+        && schema.exclusive_minimum.is_none()
+        && schema.max_length.is_none()
+        && schema.min_length.is_none()
+        && schema.pattern.is_none()
+        && schema.max_items.is_none()
+        && schema.min_items.is_none()
+        && schema.unique_items.is_none()
+        && schema.max_properties.is_none()
+        && schema.min_properties.is_none()
+        && schema.required.is_empty()
+        && schema.all_of.is_empty()
+        && schema.any_of.is_empty()
+        && schema.one_of.is_empty()
+        && schema.discriminator.is_none()
+        && unsupported_union_extension(schema).is_none())
+}
+
+fn validate_open_string_enum_any_of_branch(
+    branch: &OasSchema,
+    context: &str,
+) -> Result<Option<ValidatedType>, ValidationError> {
+    let Some(schema) = open_string_any_of_object_branch(branch, context)? else {
+        return Ok(None);
+    };
+    let (schema_type, nullable) = schema_type_and_nullable(schema, context)?;
+    if nullable || schema_type != Some(OasSchemaType::String) || schema.enum_values.is_empty() {
+        return Ok(None);
+    }
+
+    validate_enum_shape(schema, schema_type, context)?;
+    let explicit_variants = validate_type_enum_satay(schema, context)?;
+    let enum_ = validated_enum(
+        schema,
+        &explicit_variants,
+        EnumFallback::OtherString,
+        context,
+    )?;
+
+    Ok(Some(ValidatedType {
+        kind: ValidatedTypeKind::Enum(enum_),
+        nullable: false,
+        validation: None,
+        description: optional_description(&schema.description),
+        treat_error_as_none: false,
+    }))
+}
+
+fn open_string_any_of_object_branch<'a>(
+    branch: &'a OasSchema,
+    context: &str,
+) -> Result<Option<&'a OasObjectSchema>, ValidationError> {
+    if schema_ref(branch, context)?.is_some() {
+        return Ok(None);
+    }
+
+    match object_schema(branch, context) {
+        Ok(schema) => Ok(Some(schema)),
+        Err(_) => Ok(None),
+    }
 }
 
 fn validate_plain_any_of_union(
@@ -358,7 +486,7 @@ fn validate_inline_union_enum_branch(
     let (schema_type, nullable) = schema_type_and_nullable(schema, context)
         .map_err(|_| keyword.branch_error(context, index))?;
 
-    if nullable || schema_type != Some(OasSchemaType::String) || schema.enum_values.len() != 1 {
+    if nullable || schema_type != Some(OasSchemaType::String) || schema.enum_values.is_empty() {
         return Err(keyword.branch_error(context, index));
     }
 
@@ -366,11 +494,8 @@ fn validate_inline_union_enum_branch(
         .map_err(|_| keyword.branch_error(context, index))?;
     let explicit_variants = validate_type_enum_satay(schema, context)
         .map_err(|_| keyword.branch_error(context, index))?;
-    let enum_ = validated_enum(schema, &explicit_variants, context)
+    let enum_ = validated_enum(schema, &explicit_variants, EnumFallback::None, context)
         .map_err(|_| keyword.branch_error(context, index))?;
-    if enum_.variants.len() != 1 {
-        return Err(keyword.branch_error(context, index));
-    }
 
     Ok(ValidatedType {
         kind: ValidatedTypeKind::Enum(enum_),
@@ -385,10 +510,14 @@ fn inline_union_enum_variant_name(ty: &ValidatedType) -> Option<String> {
     let ValidatedTypeKind::Enum(enum_) = &ty.kind else {
         return None;
     };
-    enum_
-        .variants
-        .first()
-        .map(|variant| variant.rust_name.clone())
+    if enum_.variants.len() == 1 {
+        enum_
+            .variants
+            .first()
+            .map(|variant| variant.rust_name.clone())
+    } else {
+        Some("Enum".to_owned())
+    }
 }
 
 fn validate_discriminator_union(
@@ -1286,7 +1415,12 @@ fn validate_object_type_schema(
         validate_enum_shape(schema, schema_type, context)?;
         let explicit_variants = validate_type_enum_satay(schema, context)?;
         return Ok(ValidatedType {
-            kind: ValidatedTypeKind::Enum(validated_enum(schema, &explicit_variants, context)?),
+            kind: ValidatedTypeKind::Enum(validated_enum(
+                schema,
+                &explicit_variants,
+                EnumFallback::None,
+                context,
+            )?),
             nullable,
             validation: None,
             description,
@@ -1510,14 +1644,13 @@ fn validate_enum_shape(
 fn validated_enum(
     schema: &OasObjectSchema,
     explicit_variants: &BTreeMap<String, String>,
+    fallback: EnumFallback,
     context: &str,
 ) -> Result<Enum, ValidationError> {
-    let mut used = BTreeSet::from(["Unknown".to_owned()]);
+    let mut used = BTreeSet::from(["Other".to_owned(), "Unknown".to_owned()]);
 
     for rust_name in explicit_variants.values() {
-        if rust_name != "Unknown" {
-            used.insert(rust_name.clone());
-        }
+        used.insert(rust_name.clone());
     }
 
     let mut variants = Vec::with_capacity(schema.enum_values.len());
@@ -1529,9 +1662,6 @@ fn validated_enum(
             });
         };
         let rust_name = if let Some(rust_name) = explicit_variants.get(wire_name) {
-            if rust_name == "Unknown" {
-                continue;
-            }
             rust_name.clone()
         } else {
             unique_ident(variant_ident(wire_name), &mut used)
@@ -1542,10 +1672,5 @@ fn validated_enum(
         });
     }
 
-    let allow_unknown = variants.is_empty() || schema.enum_values.len() != 1;
-
-    Ok(Enum {
-        variants,
-        allow_unknown,
-    })
+    Ok(Enum { variants, fallback })
 }

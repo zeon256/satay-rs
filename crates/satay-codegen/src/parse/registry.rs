@@ -150,7 +150,7 @@ fn stable_suffix(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{EnumVariant, IntegerType};
+    use crate::model::{EnumFallback, EnumVariant, IntegerType};
 
     #[test]
     fn stable_suffix_is_deterministic() {
@@ -216,7 +216,7 @@ mod tests {
                     wire_name: "active".to_owned(),
                     rust_name: "Active".to_owned(),
                 }],
-                allow_unknown: true,
+                fallback: EnumFallback::None,
             },
         );
         let second =
@@ -257,7 +257,7 @@ mod tests {
                     wire_name: "open".to_owned(),
                     rust_name: "Open".to_owned(),
                 }],
-                allow_unknown: true,
+                fallback: EnumFallback::None,
             },
         );
         let inline_range = registry.inline_range_ref(

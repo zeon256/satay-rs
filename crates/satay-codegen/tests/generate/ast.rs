@@ -243,11 +243,6 @@ pub fn assert_doc(attrs: &[syn::Attribute], expected: &str) {
     );
 }
 
-pub fn has_attr(attrs: &[syn::Attribute], path: &str) -> bool {
-    let path = norm_str(path);
-    attrs.iter().any(|attr| norm(attr.path()) == path)
-}
-
 pub fn has_cfg_feature(attrs: &[syn::Attribute], feature: &str) -> bool {
     let expected = norm_str(&format!(r#"#[cfg(feature = "{feature}")]"#));
     attrs.iter().any(|attr| norm(attr) == expected)

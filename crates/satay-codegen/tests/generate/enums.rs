@@ -11,25 +11,13 @@ fn inline_enum_generates_proper_enum_types() {
     let item = find_struct(&types_rs, "Item");
     assert_field(item, "category", "ItemCategory");
     assert_field(item, "condition", "ItemCondition");
-    assert!(!contains_tokens(&types_rs, r#"rename = """#));
 
     let category = find_enum(&types_rs, "ItemCategory");
-    assert_eq!(
-        variant_names(category),
-        ["Electronics", "Clothing", "Food", "Unknown"]
-    );
-    let unknown = variant(category, "Unknown");
-    assert!(has_attr(&unknown.attrs, "default"));
-    assert_attr_contains(&unknown.attrs, "cfg_attr", "serde(other)");
+    assert_eq!(variant_names(category), ["Electronics", "Clothing", "Food"]);
 
     let condition = find_enum(&types_rs, "ItemCondition");
-    assert_eq!(
-        variant_names(condition),
-        ["New", "Used", "Refurbished", "Unknown"]
-    );
-    let unknown = variant(condition, "Unknown");
-    assert!(has_attr(&unknown.attrs, "default"));
-    assert_attr_contains(&unknown.attrs, "cfg_attr", "serde(other)");
+    assert_eq!(variant_names(condition), ["New", "Used", "Refurbished"]);
+    assert!(!contains_tokens(&types_rs, "serde ( other )"));
 }
 
 #[test]
@@ -72,7 +60,7 @@ components:
               SD: SingleDecker
               DD: DoubleDecker
               BD: Bendy
-              "": Unknown
+              "": Empty
 "#,
     )
     .expect("generate enum variants fixture");
@@ -81,7 +69,7 @@ components:
     let timing = find_enum(&types_rs, "BusArrivalTimingType");
     assert_eq!(
         variant_names(timing),
-        ["SingleDecker", "DoubleDecker", "Bendy", "Unknown"]
+        ["SingleDecker", "DoubleDecker", "Bendy", "Empty"]
     );
     assert_attr_contains(
         &variant(timing, "SingleDecker").attrs,
@@ -99,15 +87,83 @@ components:
         r#"serde(rename = "BD")"#,
     );
     assert_attr_contains(
-        &variant(timing, "Unknown").attrs,
+        &variant(timing, "Empty").attrs,
         "cfg_attr",
-        "serde(other)",
+        r#"serde(rename = "")"#,
     );
-    assert!(!contains_tokens(&types_rs, r#"rename = """#));
+    assert!(!contains_tokens(&types_rs, "serde ( other )"));
 }
 
 #[test]
-fn generated_inline_enum_compiles_and_handles_unknown() {
+fn any_of_string_and_enum_generates_open_string_enum() {
+    let files = satay_codegen::generate(
+        r#"
+openapi: 3.1.0
+info:
+  title: Audio API
+  version: 1.0.0
+paths:
+  /transcription:
+    get:
+      operationId: getTranscription
+      responses:
+        '200':
+          description: Transcription
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AudioTranscription'
+components:
+  schemas:
+    AudioTranscription:
+      type: object
+      properties:
+        model:
+          description: The model to use for transcription.
+          anyOf:
+            - type: string
+            - type: string
+              enum:
+                - whisper-1
+                - gpt-4o-mini-transcribe
+                - gpt-4o-mini-transcribe-2025-12-15
+                - gpt-4o-transcribe
+                - gpt-4o-transcribe-diarize
+                - gpt-realtime-whisper
+"#,
+    )
+    .expect("generate open string enum fixture");
+
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    let transcription = find_struct(&types_rs, "AudioTranscription");
+    assert_field(transcription, "model", "Option<AudioTranscriptionModel>");
+
+    let model = find_enum(&types_rs, "AudioTranscriptionModel");
+    assert_eq!(
+        variant_names(model),
+        [
+            "Whisper1",
+            "Gpt4oMiniTranscribe",
+            "Gpt4oMiniTranscribe20251215",
+            "Gpt4oTranscribe",
+            "Gpt4oTranscribeDiarize",
+            "GptRealtimeWhisper",
+            "Other"
+        ]
+    );
+    assert_eq!(norm(&variant(model, "Other").fields), norm_str("(String)"));
+    assert!(contains_tokens(
+        &types_rs,
+        "impl serde::Serialize for AudioTranscriptionModel"
+    ));
+    assert!(contains_tokens(
+        &types_rs,
+        "impl < 'de > serde::Deserialize < 'de > for AudioTranscriptionModel"
+    ));
+}
+
+#[test]
+fn generated_inline_enum_compiles_and_rejects_unknown() {
     let files = satay_codegen::generate(INLINE_ENUM).expect("generate inline-enum fixture");
 
     let temp = tempfile::tempdir().expect("create temp crate");
@@ -146,31 +202,130 @@ mod tests {
     }
 
     #[test]
-    fn unknown_enum_variant_maps_to_unknown() {
-        let json = br#"{"id":"2","name":"Gadget","category":"unknown_category","condition":"","notes":null}"#.to_vec();
+    fn unknown_closed_enum_variant_is_rejected() {
+        let json = br#"{"id":"2","name":"Gadget","category":"unknown_category","condition":"new","notes":null}"#.to_vec();
         let response = satay_runtime::ResponseParts {
             status: http::StatusCode::OK,
             headers: http::HeaderMap::new(),
             body: json,
         };
-        let decoded = decode_get_item_response(response).expect("decoded response");
-        match decoded {
-            GetItemResponse::Ok(item) => {
-                assert_eq!(item.category, ItemCategory::Unknown);
-                assert_eq!(item.condition, ItemCondition::Unknown);
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn default_variant_is_unknown() {
-        assert_eq!(ItemCategory::default(), ItemCategory::Unknown);
-        assert_eq!(ItemCondition::default(), ItemCondition::Unknown);
+        assert!(decode_get_item_response(response).is_err());
     }
 }
 "##;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(crate_dir, "test", &[], "inline-enum generated crate tests");
+}
+
+#[test]
+fn generated_open_string_enum_preserves_unknown_values() {
+    let files = satay_codegen::generate(
+        r#"
+openapi: 3.1.0
+info:
+  title: Audio API
+  version: 1.0.0
+paths:
+  /transcription:
+    get:
+      operationId: getTranscription
+      responses:
+        '200':
+          description: Transcription
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AudioTranscription'
+components:
+  schemas:
+    AudioTranscription:
+      type: object
+      properties:
+        model:
+          anyOf:
+            - type: string
+            - type: string
+              enum:
+                - whisper-1
+                - gpt-4o-mini-transcribe
+                - gpt-4o-transcribe
+"#,
+    )
+    .expect("generate open string enum runtime fixture");
+
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+
+    let runtime_path = runtime_path_toml();
+
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::*;
+
+    #[test]
+    fn known_open_enum_value_deserializes_to_known_variant() {
+        let response = satay_runtime::ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: br#"{"model":"gpt-4o-transcribe"}"#.to_vec(),
+        };
+
+        let decoded = decode_get_transcription_response(response).expect("decoded response");
+        match decoded {
+            GetTranscriptionResponse::Ok(value) => {
+                assert_eq!(
+                    value.model,
+                    Some(AudioTranscriptionModel::Gpt4oTranscribe)
+                );
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_open_enum_value_deserializes_to_other() {
+        let response = satay_runtime::ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: br#"{"model":"gpt-custom-transcribe"}"#.to_vec(),
+        };
+
+        let decoded = decode_get_transcription_response(response).expect("decoded response");
+        match decoded {
+            GetTranscriptionResponse::Ok(value) => {
+                assert_eq!(
+                    value.model,
+                    Some(AudioTranscriptionModel::Other(
+                        "gpt-custom-transcribe".to_owned(),
+                    ))
+                );
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn other_open_enum_value_serializes_as_string() {
+        let value = AudioTranscriptionModel::Other("gpt-custom-transcribe".to_owned());
+        assert_eq!(value.as_str(), "gpt-custom-transcribe");
+
+        let encoded = serde_json::to_value(value).expect("serialized model");
+        assert_eq!(encoded, serde_json::json!("gpt-custom-transcribe"));
+    }
+}
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    run_temp_cargo(
+        crate_dir,
+        "test",
+        &[],
+        "open string enum generated crate tests",
+    );
 }

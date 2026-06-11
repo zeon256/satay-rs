@@ -81,6 +81,18 @@ pub enum ValidationError {
     #[error("{context}.x-satay.enum-variants[{wire_name:?}] must be a string")]
     InvalidSatayEnumVariantName { context: String, wire_name: String },
 
+    /// An `x-satay.enum-variants` entry uses a name reserved for generated fallback variants.
+    ///
+    /// Error message: `{context}.x-satay.enum-variants[{wire_name:?}] uses reserved fallback variant `{rust_name}``
+    #[error(
+        "{context}.x-satay.enum-variants[{wire_name:?}] uses reserved fallback variant `{rust_name}`"
+    )]
+    ReservedSatayEnumVariantName {
+        context: String,
+        wire_name: String,
+        rust_name: String,
+    },
+
     /// Two `x-satay.enum-variants` entries produce the same Rust variant name.
     ///
     /// Error message: `{context}.x-satay.enum-variants maps multiple values to `{rust_name}``

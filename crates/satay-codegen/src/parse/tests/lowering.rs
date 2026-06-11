@@ -35,7 +35,7 @@ fn lowers_inline_constrained_enum_and_range_schemas_to_ir() {
             let variants = &enum_.variants;
             assert_eq!(variants[0].rust_name, "Open");
             assert_eq!(variants[1].rust_name, "Closed");
-            assert!(enum_.allow_unknown);
+            assert_eq!(enum_.fallback, EnumFallback::None);
         }
         other => panic!("expected SearchState enum, got {other:?}"),
     }
@@ -193,7 +193,7 @@ components:
             assert_eq!(variants[0].rust_name, "Active");
             assert_eq!(variants[1].wire_name, "suspended");
             assert_eq!(variants[1].rust_name, "Suspended");
-            assert!(enum_.allow_unknown);
+            assert_eq!(enum_.fallback, EnumFallback::None);
         }
         other => panic!("expected UserStatus enum, got {other:?}"),
     }
