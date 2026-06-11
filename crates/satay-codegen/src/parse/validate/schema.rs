@@ -19,7 +19,8 @@ use super::satay::{
 };
 use super::{
     ValidatedComponent, ValidatedComponentKind, ValidatedField, ValidatedType, ValidatedTypeKind,
-    ValidatedUnion, ValidatedUnionTag, ValidatedUnionVariant, ValidatedUnionVariantKind,
+    ValidatedUnion, ValidatedUnionTag, ValidatedUnionTagStyle, ValidatedUnionVariant,
+    ValidatedUnionVariantKind,
 };
 use crate::error::ValidationError;
 use crate::ident::{type_ident, unique_ident, variant_ident};
@@ -651,45 +652,96 @@ fn validate_discriminator_union(
 
     let (keyword, branches) = discriminator_union_branches(schema, context)?;
     let branch_refs = validate_discriminator_branch_refs(branches, keyword, context)?;
-    let tag_values = validate_discriminator_mapping(discriminator, &branch_refs, context)?;
+    let branches = validate_discriminator_branches(
+        document,
+        branch_refs,
+        &discriminator.property_name,
+        context,
+        stack,
+    )?;
 
-    let mut used = BTreeSet::new();
-    let mut variants = Vec::with_capacity(branch_refs.len());
-
-    for branch in branch_refs {
-        validate_discriminator_branch_object(
-            document,
+    let has_embedded_tag = branches.iter().any(|branch| branch.tag_value.is_some());
+    let all_have_embedded_tag = branches.iter().all(|branch| branch.tag_value.is_some());
+    if has_embedded_tag && !all_have_embedded_tag {
+        let branch = branches
+            .iter()
+            .find(|branch| branch.tag_value.is_none())
+            .expect("mixed embedded discriminator branch set has a missing branch");
+        return Err(invalid_discriminator_property(
+            context,
             &branch.schema_name,
             &discriminator.property_name,
-            context,
-            stack,
-        )?;
-        let tag_value = tag_values
-            .get(&branch.schema_name)
-            .expect("validated discriminator mappings cover every branch")
-            .clone();
+            "present on every branch when any branch contains it",
+        ));
+    }
+
+    if all_have_embedded_tag {
+        validate_embedded_discriminator_mapping(discriminator, &branches, context)?;
+        return Ok(discriminator_union_from_branches(
+            branches,
+            &discriminator.property_name,
+            ValidatedUnionTagStyle::EmbeddedField,
+            BTreeMap::new(),
+        ));
+    }
+
+    let tag_values = validate_discriminator_mapping(discriminator, &branches, context)?;
+    Ok(discriminator_union_from_branches(
+        branches,
+        &discriminator.property_name,
+        ValidatedUnionTagStyle::InternallyTagged,
+        tag_values,
+    ))
+}
+
+fn discriminator_union_from_branches(
+    branches: Vec<DiscriminatorBranch>,
+    property_name: &str,
+    style: ValidatedUnionTagStyle,
+    tag_values: BTreeMap<String, String>,
+) -> ValidatedUnion {
+    let use_variant_tags = style == ValidatedUnionTagStyle::InternallyTagged;
+
+    let mut used = BTreeSet::new();
+    let mut variants = Vec::with_capacity(branches.len());
+
+    for branch in branches {
+        let tag_value = use_variant_tags.then(|| {
+            tag_values
+                .get(&branch.schema_name)
+                .expect("validated discriminator mappings cover every branch")
+                .clone()
+        });
         variants.push(ValidatedUnionVariant {
             rust_name: unique_ident(branch.type_name.clone(), &mut used),
             kind: ValidatedUnionVariantKind::Reference {
                 type_name: branch.type_name,
                 schema_name: branch.schema_name,
             },
-            tag_value: Some(tag_value),
+            tag_value,
         });
     }
 
-    Ok(ValidatedUnion {
+    ValidatedUnion {
         variants,
         tag: Some(ValidatedUnionTag {
-            property_name: discriminator.property_name.clone(),
+            property_name: property_name.to_owned(),
+            style,
         }),
-    })
+    }
 }
 
 #[derive(Debug)]
 struct DiscriminatorBranchRef {
     type_name: String,
     schema_name: String,
+}
+
+#[derive(Debug)]
+struct DiscriminatorBranch {
+    type_name: String,
+    schema_name: String,
+    tag_value: Option<String>,
 }
 
 fn discriminator_union_branches<'a>(
@@ -744,7 +796,7 @@ fn validate_discriminator_branch_refs(
 
 fn validate_discriminator_mapping(
     discriminator: &OasDiscriminator,
-    branches: &[DiscriminatorBranchRef],
+    branches: &[DiscriminatorBranch],
     context: &str,
 ) -> Result<BTreeMap<String, String>, ValidationError> {
     let branch_names = branches
@@ -794,6 +846,75 @@ fn validate_discriminator_mapping(
     Ok(by_schema)
 }
 
+fn validate_embedded_discriminator_mapping(
+    discriminator: &OasDiscriminator,
+    branches: &[DiscriminatorBranch],
+    context: &str,
+) -> Result<(), ValidationError> {
+    let mut values = BTreeSet::new();
+    for branch in branches {
+        let value = branch
+            .tag_value
+            .as_ref()
+            .expect("embedded discriminator branches have tag values");
+        if !values.insert(value.clone()) {
+            return Err(ValidationError::DuplicateDiscriminatorValue {
+                context: context.to_owned(),
+                value: value.clone(),
+            });
+        }
+    }
+
+    let Some(mapping) = discriminator.mapping.as_ref() else {
+        return Ok(());
+    };
+
+    let branch_names = branches
+        .iter()
+        .map(|branch| branch.schema_name.clone())
+        .collect::<BTreeSet<_>>();
+    let branches_by_schema = branches
+        .iter()
+        .map(|branch| (branch.schema_name.clone(), branch))
+        .collect::<BTreeMap<_, _>>();
+    let mut mapped_schemas = BTreeSet::new();
+
+    for (value, target) in mapping {
+        let Some(schema_name) = discriminator_mapping_schema_name(target, &branch_names) else {
+            return Err(ValidationError::InvalidDiscriminatorMapping {
+                context: context.to_owned(),
+                value: value.clone(),
+                target: target.clone(),
+            });
+        };
+
+        if !mapped_schemas.insert(schema_name.clone()) {
+            return Err(ValidationError::DuplicateDiscriminatorMapping {
+                context: context.to_owned(),
+                schema: schema_name,
+            });
+        }
+
+        let branch = branches_by_schema
+            .get(&schema_name)
+            .expect("mapping schema names are limited to branches");
+        let actual = branch
+            .tag_value
+            .as_ref()
+            .expect("embedded discriminator branches have tag values");
+        if actual != value {
+            return Err(ValidationError::DiscriminatorMappingValueMismatch {
+                context: context.to_owned(),
+                schema: schema_name,
+                value: value.clone(),
+                actual: actual.clone(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
 fn discriminator_mapping_schema_name(
     target: &str,
     branch_names: &BTreeSet<String>,
@@ -809,24 +930,89 @@ fn discriminator_mapping_schema_name(
     branch_names.contains(&schema_name).then_some(schema_name)
 }
 
-fn validate_discriminator_branch_object(
+fn validate_discriminator_branches(
     document: &ResolvedDocument<'_>,
-    schema_name: &str,
+    branch_refs: Vec<DiscriminatorBranchRef>,
     property_name: &str,
     context: &str,
     stack: &mut Vec<String>,
-) -> Result<(), ValidationError> {
-    let fields = discriminator_branch_fields(document, schema_name, context, stack)?;
+) -> Result<Vec<DiscriminatorBranch>, ValidationError> {
+    branch_refs
+        .into_iter()
+        .map(|branch| {
+            let fields =
+                discriminator_branch_fields(document, &branch.schema_name, context, stack)?;
+            let tag_value =
+                embedded_discriminator_value(&fields, &branch.schema_name, property_name, context)?;
 
-    if fields.iter().any(|field| field.wire_name == property_name) {
-        return Err(ValidationError::DiscriminatorPropertyConflict {
-            context: context.to_owned(),
-            schema: schema_name.to_owned(),
-            property: property_name.to_owned(),
-        });
+            Ok(DiscriminatorBranch {
+                type_name: branch.type_name,
+                schema_name: branch.schema_name,
+                tag_value,
+            })
+        })
+        .collect()
+}
+
+fn embedded_discriminator_value(
+    fields: &[ValidatedField],
+    schema_name: &str,
+    property_name: &str,
+    context: &str,
+) -> Result<Option<String>, ValidationError> {
+    let Some(field) = fields.iter().find(|field| field.wire_name == property_name) else {
+        return Ok(None);
+    };
+
+    if !field.required
+        || field.treat_error_as_none
+        || field.ty.treat_error_as_none
+        || field.ty.nullable
+    {
+        return Err(invalid_discriminator_property(
+            context,
+            schema_name,
+            property_name,
+            "a required non-null singleton string enum",
+        ));
     }
 
-    Ok(())
+    let ValidatedTypeKind::Enum(enum_) = &field.ty.kind else {
+        return Err(invalid_discriminator_property(
+            context,
+            schema_name,
+            property_name,
+            "a required non-null singleton string enum",
+        ));
+    };
+
+    if enum_.fallback != EnumFallback::None || enum_.variants.len() != 1 {
+        return Err(invalid_discriminator_property(
+            context,
+            schema_name,
+            property_name,
+            "a required non-null singleton string enum",
+        ));
+    }
+
+    Ok(enum_
+        .variants
+        .first()
+        .map(|variant| variant.wire_name.clone()))
+}
+
+fn invalid_discriminator_property(
+    context: &str,
+    schema_name: &str,
+    property_name: &str,
+    expected: &'static str,
+) -> ValidationError {
+    ValidationError::InvalidDiscriminatorProperty {
+        context: context.to_owned(),
+        schema: schema_name.to_owned(),
+        property: property_name.to_owned(),
+        expected,
+    }
 }
 
 fn discriminator_branch_fields(

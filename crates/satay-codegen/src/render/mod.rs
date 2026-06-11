@@ -120,7 +120,11 @@ fn render_top_mod(api: &Api) -> syn::File {
 }
 
 pub fn ident(value: &str) -> Ident {
-    Ident::new(value, Span::call_site())
+    if let Some(raw) = value.strip_prefix("r#") {
+        Ident::new_raw(raw, Span::call_site())
+    } else {
+        Ident::new(value, Span::call_site())
+    }
 }
 
 pub fn lit_str(value: &str) -> LitStr {
