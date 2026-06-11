@@ -1647,7 +1647,20 @@ fn validated_enum(
     fallback: EnumFallback,
     context: &str,
 ) -> Result<Enum, ValidationError> {
-    let mut used = BTreeSet::from(["Other".to_owned()]);
+    let mut used = BTreeSet::new();
+
+    if fallback == EnumFallback::OtherString {
+        used.insert("Other".to_owned());
+        for (wire_name, rust_name) in explicit_variants {
+            if rust_name == "Other" {
+                return Err(ValidationError::ReservedSatayEnumVariantName {
+                    context: context.to_owned(),
+                    wire_name: wire_name.clone(),
+                    rust_name: rust_name.clone(),
+                });
+            }
+        }
+    }
 
     for rust_name in explicit_variants.values() {
         used.insert(rust_name.clone());
