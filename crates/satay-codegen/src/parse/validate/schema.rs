@@ -537,7 +537,7 @@ fn validate_plain_any_of_union(
             &mut used,
             stack,
         )? {
-            PlainUnionBranch::Variant(variant) => variants.push(variant),
+            PlainUnionBranch::Variant(variant) => variants.push(*variant),
             PlainUnionBranch::Null => {
                 if nullable {
                     return Err(PlainUnionKeyword::AnyOf.duplicate_null_error(context, index));
@@ -588,7 +588,7 @@ fn validate_plain_one_of_union(
             &mut used,
             stack,
         )? {
-            PlainUnionBranch::Variant(variant) => variants.push(variant),
+            PlainUnionBranch::Variant(variant) => variants.push(*variant),
             PlainUnionBranch::Null => {
                 if nullable {
                     return Err(PlainUnionKeyword::OneOf.duplicate_null_error(context, index));
@@ -617,7 +617,7 @@ struct ValidatedPlainUnion {
 }
 
 enum PlainUnionBranch {
-    Variant(ValidatedUnionVariant),
+    Variant(Box<ValidatedUnionVariant>),
     Null,
 }
 
@@ -633,14 +633,14 @@ fn validate_plain_union_branch(
     if let Some(reference) = schema_ref(branch, context)? {
         let schema_name = local_ref_name(reference, "schemas")?;
         let type_name = schema_ref_type_name(reference)?;
-        return Ok(PlainUnionBranch::Variant(ValidatedUnionVariant {
+        return Ok(PlainUnionBranch::Variant(Box::new(ValidatedUnionVariant {
             rust_name: unique_ident(type_name.clone(), used),
             kind: ValidatedUnionVariantKind::Reference {
                 type_name,
                 schema_name,
             },
             tag_value: None,
-        }));
+        })));
     }
 
     let schema =
@@ -651,11 +651,11 @@ fn validate_plain_union_branch(
 
     let (ty, rust_name) =
         validate_inline_plain_union_branch(document, schema, context, index, keyword, stack)?;
-    Ok(PlainUnionBranch::Variant(ValidatedUnionVariant {
+    Ok(PlainUnionBranch::Variant(Box::new(ValidatedUnionVariant {
         rust_name: unique_ident(rust_name, used),
         kind: ValidatedUnionVariantKind::Inline(ty),
         tag_value: None,
-    }))
+    })))
 }
 
 fn validate_inline_plain_union_branch(
