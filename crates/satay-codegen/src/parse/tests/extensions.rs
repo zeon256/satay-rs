@@ -267,6 +267,49 @@ components:
 }
 
 #[test]
+fn parses_x_satay_enum_variants_using_other_for_closed_enum() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /arrival:
+    get:
+      operationId: getArrival
+      responses:
+        '200':
+          description: Arrival
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VehicleType'
+components:
+  schemas:
+    VehicleType:
+      type: string
+      enum:
+        - SD
+      x-satay:
+        enum-variants:
+          SD: Other
+"#,
+    );
+
+    let vehicle_type = component(&api, "VehicleType");
+    match &vehicle_type.kind {
+        ComponentKind::Enum(enum_) => {
+            assert_eq!(enum_.variants.len(), 1);
+            assert_eq!(enum_.variants[0].wire_name, "SD");
+            assert_eq!(enum_.variants[0].rust_name, "Other");
+            assert_eq!(enum_.fallback, EnumFallback::None);
+        }
+        other => panic!("expected VehicleType enum, got {other:?}"),
+    }
+}
+
+#[test]
 fn rejects_x_satay_enum_variants_for_values_outside_enum() {
     let err = parse_invalid(
         r#"
@@ -328,12 +371,14 @@ paths:
 components:
   schemas:
     VehicleType:
-      type: string
-      enum:
-        - SD
-      x-satay:
-        enum-variants:
-          SD: Other
+      anyOf:
+        - type: string
+        - type: string
+          enum:
+            - SD
+          x-satay:
+            enum-variants:
+              SD: Other
 "#,
     );
 

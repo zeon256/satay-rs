@@ -95,6 +95,41 @@ components:
 }
 
 #[test]
+fn closed_enum_can_generate_other_variant_for_other_wire_value() {
+    let files = satay_codegen::generate(
+        r#"
+openapi: 3.1.0
+info:
+  title: Reason API
+  version: 1.0.0
+paths:
+  /reason:
+    get:
+      operationId: getReason
+      responses:
+        '200':
+          description: Reason
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reason'
+components:
+  schemas:
+    Reason:
+      type: string
+      enum:
+        - content_filter
+        - other
+"#,
+    )
+    .expect("generate closed enum with other fixture");
+
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    let reason = find_enum(&types_rs, "Reason");
+    assert_eq!(variant_names(reason), ["ContentFilter", "Other"]);
+}
+
+#[test]
 fn any_of_string_and_enum_generates_open_string_enum() {
     let files = satay_codegen::generate(
         r#"
@@ -160,6 +195,50 @@ components:
         &types_rs,
         "impl < 'de > serde::Deserialize < 'de > for AudioTranscriptionModel"
     ));
+}
+
+#[test]
+fn open_string_enum_mangles_other_known_value_and_keeps_fallback() {
+    let files = satay_codegen::generate(
+        r#"
+openapi: 3.1.0
+info:
+  title: Event API
+  version: 1.0.0
+paths:
+  /event:
+    get:
+      operationId: getEvent
+      responses:
+        '200':
+          description: Event
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Event'
+components:
+  schemas:
+    Event:
+      type: object
+      properties:
+        reason:
+          anyOf:
+            - type: string
+            - type: string
+              enum:
+                - content_filter
+                - other
+"#,
+    )
+    .expect("generate open string enum with other fixture");
+
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    let event = find_struct(&types_rs, "Event");
+    assert_field(event, "reason", "Option<EventReason>");
+
+    let reason = find_enum(&types_rs, "EventReason");
+    assert_eq!(variant_names(reason), ["ContentFilter", "Other_2", "Other"]);
+    assert_eq!(norm(&variant(reason, "Other").fields), norm_str("(String)"));
 }
 
 #[test]

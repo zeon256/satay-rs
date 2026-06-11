@@ -46,13 +46,6 @@ pub(super) fn parse_satay_enum_variants(
             });
         };
         let rust_name = variant_ident(rust_name);
-        if rust_name == "Other" {
-            return Err(ValidationError::ReservedSatayEnumVariantName {
-                context: context.to_owned(),
-                wire_name: wire_name.clone(),
-                rust_name,
-            });
-        }
         if !explicit_names.insert(rust_name.clone()) {
             return Err(ValidationError::DuplicateSatayEnumVariantName {
                 context: context.to_owned(),
