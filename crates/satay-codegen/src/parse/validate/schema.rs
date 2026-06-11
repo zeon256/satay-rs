@@ -55,6 +55,23 @@ pub(super) fn validate_type_schema(
     context: &str,
     allow_treat_error_as_none: bool,
 ) -> Result<ValidatedType, ValidationError> {
+    let mut stack = vec![];
+    validate_type_schema_with_stack(
+        document,
+        schema,
+        context,
+        allow_treat_error_as_none,
+        &mut stack,
+    )
+}
+
+fn validate_type_schema_with_stack(
+    document: &ResolvedDocument<'_>,
+    schema: &OasSchema,
+    context: &str,
+    allow_treat_error_as_none: bool,
+    stack: &mut Vec<String>,
+) -> Result<ValidatedType, ValidationError> {
     if let Some(reference) = schema_ref(schema, context)? {
         let description = match schema_description(schema) {
             Some(description) => Some(description),
@@ -73,7 +90,7 @@ pub(super) fn validate_type_schema(
     if !schema.all_of.is_empty() {
         return Ok(ValidatedType {
             kind: ValidatedTypeKind::InlineStruct(validate_inline_all_of_struct_properties(
-                document, schema, context,
+                document, schema, context, stack,
             )?),
             nullable: false,
             validation: None,
@@ -90,6 +107,7 @@ pub(super) fn validate_type_schema(
         nullable,
         context,
         allow_treat_error_as_none,
+        stack,
     )
 }
 
@@ -227,6 +245,7 @@ fn validate_component_schema(
                             document,
                             schema_name,
                             schema,
+                            stack,
                         )?)
                     }
                     Some(
@@ -242,6 +261,7 @@ fn validate_component_schema(
                         nullable,
                         &context,
                         false,
+                        stack,
                     )?),
                     Some(kind) => {
                         return Err(ValidationError::UnsupportedComponentType {
@@ -823,6 +843,8 @@ fn discriminator_branch_fields(
             .map_err(|err| map_discriminator_branch_error(err, context, schema_name));
     }
 
+    let mut stack = vec![];
+
     let (schema_type, nullable) = schema_type_and_nullable(schema, context)
         .map_err(|_| discriminator_branch_not_object(context, schema_name))?;
     if nullable {
@@ -831,7 +853,7 @@ fn discriminator_branch_fields(
 
     match schema_type {
         Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => {
-            validate_struct_properties(document, schema_name, schema)
+            validate_struct_properties(document, schema_name, schema, &mut stack)
         }
         _ => Err(discriminator_branch_not_object(context, schema_name)),
     }
@@ -878,11 +900,11 @@ fn validate_inline_all_of_struct_properties(
     document: &ResolvedDocument<'_>,
     schema: &OasObjectSchema,
     context: &str,
+    stack: &mut Vec<String>,
 ) -> Result<Vec<ValidatedField>, ValidationError> {
     reject_all_of_sibling_keywords(schema, context)?;
 
-    let mut stack = vec![];
-    let mut collector = AllOfFieldCollector::new(document, &mut stack);
+    let mut collector = AllOfFieldCollector::new(document, stack);
     collector.collect_with_context(context, schema, context)
 }
 
@@ -1037,7 +1059,8 @@ impl<'a, 'doc> AllOfFieldCollector<'a, 'doc> {
             });
         }
 
-        let branch_fields = validate_struct_properties(self.document, schema_name, schema)?;
+        let branch_fields =
+            validate_struct_properties(self.document, schema_name, schema, self.stack)?;
         self.extend_fields(context, branch_fields)
     }
 
@@ -1520,6 +1543,7 @@ fn validate_object_type_schema(
     nullable: bool,
     context: &str,
     allow_treat_error_as_none: bool,
+    stack: &mut Vec<String>,
 ) -> Result<ValidatedType, ValidationError> {
     let description = optional_description(&schema.description);
     let validated_satay =
@@ -1552,7 +1576,14 @@ fn validate_object_type_schema(
         });
     }
 
-    let kind = validate_inline_type_kind(document, schema, schema_type, context, &validated_satay)?;
+    let kind = validate_inline_type_kind(
+        document,
+        schema,
+        schema_type,
+        context,
+        &validated_satay,
+        stack,
+    )?;
     let validation = validation_base_type(&kind)
         .map(|base| parse_validation(schema, &base, context))
         .transpose()?
@@ -1581,6 +1612,7 @@ fn validate_inline_type_kind(
     schema_type: Option<OasSchemaType>,
     context: &str,
     satay: &ValidatedSataySchema,
+    stack: &mut Vec<String>,
 ) -> Result<ValidatedTypeKind, ValidationError> {
     match schema_type {
         Some(OasSchemaType::String) => validate_string_type(schema),
@@ -1605,12 +1637,15 @@ fn validate_inline_type_kind(
                     .ok_or_else(|| ValidationError::MissingArrayItems {
                         context: context.to_owned(),
                     })?;
-            Ok(ValidatedTypeKind::Array(Box::new(validate_type_schema(
-                document,
-                items,
-                &format!("{context} items"),
-                false,
-            )?)))
+            Ok(ValidatedTypeKind::Array(Box::new(
+                validate_type_schema_with_stack(
+                    document,
+                    items,
+                    &format!("{context} items"),
+                    false,
+                    stack,
+                )?,
+            )))
         }
         Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => {
             Err(ValidationError::InlineObjectSchema {
@@ -1673,6 +1708,7 @@ fn validate_struct_properties(
     document: &ResolvedDocument<'_>,
     schema_name: &str,
     schema: &OasObjectSchema,
+    stack: &mut Vec<String>,
 ) -> Result<Vec<ValidatedField>, ValidationError> {
     let context = format!("schema `{schema_name}`");
     reject_keyword(schema.min_properties.is_some(), "minProperties", &context)?;
@@ -1683,7 +1719,13 @@ fn validate_struct_properties(
 
     for (wire_name, property_schema) in &schema.properties {
         let property_context = format!("property `{schema_name}.{wire_name}`");
-        let ty = validate_type_schema(document, property_schema, &property_context, true)?;
+        let ty = validate_type_schema_with_stack(
+            document,
+            property_schema,
+            &property_context,
+            true,
+            stack,
+        )?;
         fields.push(ValidatedField {
             wire_name: wire_name.clone(),
             description: ty.description.clone(),

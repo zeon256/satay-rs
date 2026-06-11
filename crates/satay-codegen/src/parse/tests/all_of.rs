@@ -403,6 +403,80 @@ components:
 }
 
 #[test]
+fn rejects_self_recursive_inline_all_of_property() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Node:
+      type: object
+      properties:
+        child:
+          allOf:
+            - $ref: '#/components/schemas/Node'
+"##,
+    );
+    match err {
+        ValidationError::RecursiveAllOf { context, schema } => {
+            assert_eq!(context, "schema `Node`");
+            assert_eq!(schema, "Node");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_mutually_recursive_inline_all_of_properties() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    A:
+      type: object
+      properties:
+        child:
+          allOf:
+            - $ref: '#/components/schemas/B'
+    B:
+      type: object
+      properties:
+        parent:
+          allOf:
+            - $ref: '#/components/schemas/A'
+"##,
+    );
+    match err {
+        ValidationError::RecursiveAllOf { context, schema } => {
+            assert!(context == "schema `A`" || context == "schema `B`");
+            assert!(schema == "A" || schema == "B");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
 fn rejects_all_of_in_parameter_schemas() {
     let err = parse_invalid(
         r##"
