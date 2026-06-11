@@ -520,6 +520,10 @@ components:
 
     let function_tool_call = find_struct(&types_rs, "FunctionToolCall");
     assert_field(function_tool_call, "r#type", "FunctionToolCallType");
+    assert!(!contains_tokens(
+        field(function_tool_call, "r#type"),
+        r#"serde(rename = "type")"#
+    ));
 }
 
 #[test]

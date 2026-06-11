@@ -53,7 +53,11 @@ fn field_attrs(field: &Field, serde: bool) -> Vec<syn::Attribute> {
     }
 
     let mut serde_attrs = vec![];
-    if field.rust_name != field.wire_name {
+    let serde_default_name = field
+        .rust_name
+        .strip_prefix("r#")
+        .unwrap_or(&field.rust_name);
+    if serde_default_name != field.wire_name {
         let wire_name = lit_str(&field.wire_name);
         serde_attrs.push(quote::quote!(rename = #wire_name));
     }
