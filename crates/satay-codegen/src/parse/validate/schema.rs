@@ -309,33 +309,71 @@ fn open_string_any_of_branch_is_unconstrained_string(
     };
     let (schema_type, nullable) = schema_type_and_nullable(schema, context)?;
 
+    let OasObjectSchema {
+        all_of,
+        any_of,
+        one_of,
+        items,
+        prefix_items,
+        properties,
+        additional_properties,
+        schema_type: _,
+        enum_values,
+        const_value,
+        multiple_of,
+        maximum,
+        exclusive_maximum,
+        minimum,
+        exclusive_minimum,
+        max_length,
+        min_length,
+        pattern,
+        max_items,
+        min_items,
+        unique_items,
+        max_properties,
+        min_properties,
+        required,
+        format,
+        title: _,
+        description: _,
+        default: _,
+        deprecated: _,
+        read_only: _,
+        write_only: _,
+        examples: _,
+        discriminator,
+        example: _,
+        extensions: _,
+    } = schema;
+
     Ok(!nullable
         && schema_type == Some(OasSchemaType::String)
-        && schema.enum_values.is_empty()
-        && schema.const_value.is_none()
-        && schema.format.is_none()
-        && schema.items.is_none()
-        && schema.prefix_items.is_empty()
-        && schema.properties.is_empty()
-        && schema.additional_properties.is_none()
-        && schema.multiple_of.is_none()
-        && schema.maximum.is_none()
-        && schema.exclusive_maximum.is_none()
-        && schema.minimum.is_none()
-        && schema.exclusive_minimum.is_none()
-        && schema.max_length.is_none()
-        && schema.min_length.is_none()
-        && schema.pattern.is_none()
-        && schema.max_items.is_none()
-        && schema.min_items.is_none()
-        && schema.unique_items.is_none()
-        && schema.max_properties.is_none()
-        && schema.min_properties.is_none()
-        && schema.required.is_empty()
-        && schema.all_of.is_empty()
-        && schema.any_of.is_empty()
-        && schema.one_of.is_empty()
-        && schema.discriminator.is_none()
+        && enum_values.is_empty()
+        && const_value.is_none()
+        && format.is_none()
+        && items.is_none()
+        && prefix_items.is_empty()
+        && properties.is_empty()
+        && additional_properties.is_none()
+        && multiple_of.is_none()
+        && maximum.is_none()
+        && exclusive_maximum.is_none()
+        && minimum.is_none()
+        && exclusive_minimum.is_none()
+        && max_length.is_none()
+        && min_length.is_none()
+        && pattern.is_none()
+        && max_items.is_none()
+        && min_items.is_none()
+        && unique_items.is_none()
+        && max_properties.is_none()
+        && min_properties.is_none()
+        && required.is_empty()
+        && all_of.is_empty()
+        && any_of.is_empty()
+        && one_of.is_empty()
+        && discriminator.is_none()
         && unsupported_union_extension(schema).is_none())
 }
 

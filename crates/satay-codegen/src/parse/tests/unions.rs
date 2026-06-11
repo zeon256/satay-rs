@@ -454,6 +454,91 @@ components:
 }
 
 #[test]
+fn parses_any_of_open_string_enum_with_annotation_only_string_branch() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /model:
+    get:
+      operationId: getModel
+      responses:
+        '200':
+          description: Model
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Model'
+components:
+  schemas:
+    Model:
+      anyOf:
+        - type: string
+          title: Model identifier
+          description: A future model identifier.
+          deprecated: false
+          example: future-model
+        - type: string
+          enum:
+            - known-model
+"#,
+    );
+
+    let model = component(&api, "Model");
+    match &model.kind {
+        ComponentKind::Enum(enum_) => {
+            assert_eq!(enum_.variants.len(), 1);
+            assert_eq!(enum_.variants[0].wire_name, "known-model");
+            assert_eq!(enum_.fallback, EnumFallback::OtherString);
+        }
+        other => panic!("expected Model enum, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_any_of_open_string_enum_when_string_branch_has_validation_keywords() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /model:
+    get:
+      operationId: getModel
+      responses:
+        '200':
+          description: Model
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Broken'
+components:
+  schemas:
+    Broken:
+      anyOf:
+        - type: string
+          minLength: 1
+        - type: string
+          enum:
+            - known-model
+"##,
+    );
+
+    match err {
+        ValidationError::UnsupportedAnyOfBranch { context, index } => {
+            assert_eq!(context, "schema `Broken`");
+            assert_eq!(index, 0);
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
 fn parses_union_schemas_with_vendor_metadata_extensions() {
     let api = parse_valid(
         r#"
