@@ -14,6 +14,12 @@ fn inline_enum_generates_proper_enum_types() {
 
     let category = find_enum(&types_rs, "ItemCategory");
     assert_eq!(variant_names(category), ["Electronics", "Clothing", "Food"]);
+    let category_as_str = find_method(&types_rs, "ItemCategory", "as_str");
+    assert!(is_pub(&category_as_str.vis));
+    assert_eq!(
+        norm(&category_as_str.sig),
+        norm_str("const fn as_str(&self) -> &'static str")
+    );
 
     let condition = find_enum(&types_rs, "ItemCondition");
     assert_eq!(variant_names(condition), ["New", "Used", "Refurbished"]);
@@ -186,6 +192,12 @@ components:
             "Other"
         ]
     );
+    let model_as_str = find_method(&types_rs, "AudioTranscriptionModel", "as_str");
+    assert!(is_pub(&model_as_str.vis));
+    assert_eq!(
+        norm(&model_as_str.sig),
+        norm_str("fn as_str(&self) -> &str")
+    );
     assert_eq!(norm(&variant(model, "Other").fields), norm_str("(String)"));
     assert!(contains_tokens(
         &types_rs,
@@ -259,6 +271,8 @@ fn generated_inline_enum_compiles_and_rejects_unknown() {
 mod tests {
     use super::generated::*;
 
+    const CATEGORY: &str = ItemCategory::Electronics.as_str();
+
     #[test]
     fn known_enum_variants_deserialize() {
         let json = br#"{"id":"1","name":"Widget","category":"electronics","condition":"new","notes":"test"}"#.to_vec();
@@ -272,6 +286,7 @@ mod tests {
             GetItemResponse::Ok(item) => {
                 assert_eq!(item.id, "1");
                 assert_eq!(item.name, "Widget");
+                assert_eq!(CATEGORY, "electronics");
                 assert_eq!(item.category, ItemCategory::Electronics);
                 assert_eq!(item.condition, ItemCondition::New);
                 assert_eq!(item.notes, Some("test".to_owned()));

@@ -27,10 +27,6 @@ pub(super) fn render_enum(name: &str, description: Option<&str>, enum_: &Enum) -
         .iter()
         .map(render_enum_as_str_arm)
         .collect::<Vec<_>>();
-    let fallback_as_str_arm = match enum_.fallback {
-        EnumFallback::None => None,
-        EnumFallback::OtherString => Some(quote!(Self::Other(value) => value.as_str(),)),
-    };
 
     let enum_item = syn::parse_quote!(
         #(#docs)*
@@ -41,16 +37,27 @@ pub(super) fn render_enum(name: &str, description: Option<&str>, enum_: &Enum) -
             #fallback_variant
         }
     );
-    let inherent_impl = syn::parse_quote!(
-        impl #name {
-            pub fn as_str(&self) -> &str {
-                match self {
-                    #(#as_str_arms)*
-                    #fallback_as_str_arm
+    let inherent_impl = match enum_.fallback {
+        EnumFallback::None => syn::parse_quote!(
+            impl #name {
+                pub const fn as_str(&self) -> &'static str {
+                    match self {
+                        #(#as_str_arms)*
+                    }
                 }
             }
-        }
-    );
+        ),
+        EnumFallback::OtherString => syn::parse_quote!(
+            impl #name {
+                pub fn as_str(&self) -> &str {
+                    match self {
+                        #(#as_str_arms)*
+                        Self::Other(value) => value.as_str(),
+                    }
+                }
+            }
+        ),
+    };
     let as_ref_impl = syn::parse_quote!(
         impl AsRef<str> for #name {
             fn as_ref(&self) -> &str {
