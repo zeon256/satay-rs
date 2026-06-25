@@ -7,8 +7,10 @@ on:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
       - "**/build.rs"
+      - "examples/**/*.yaml"
       - "tests/**"
       - ".github/actions/setup-rust/**"
+      - ".github/workflows/qc.yml"
 
 permissions:
   contents: read
@@ -43,7 +45,17 @@ jobs:
       - name: Setup Rust
         uses: ./.github/actions/setup-rust
       - name: Clippy
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings -D clippy::pedantic -D clippy::perf
+
+  check:
+    name: Compile Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+      - name: Compile Check
+        run: cargo check --workspace --all-targets --all-features
 
   dylint:
     name: Dylint

@@ -47,7 +47,7 @@ async fn handle_connection(stream: TcpStream) -> Result<(), Error> {
             wire_request.method, wire_request.uri
         );
 
-        let wire_response = route_request(wire_request);
+        let wire_response = route_request(&wire_request);
         let message = serde_json::to_string(&wire_response)?;
         socket.send(Message::Text(message.into())).await?;
     }
@@ -55,7 +55,7 @@ async fn handle_connection(stream: TcpStream) -> Result<(), Error> {
     Ok(())
 }
 
-fn route_request(request: WireRequest) -> WireResponse {
+fn route_request(request: &WireRequest) -> WireResponse {
     if request.method == "GET" && request.uri.contains("/BusArrival") {
         WireResponse {
             id: request.id,

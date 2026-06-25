@@ -24,7 +24,7 @@ enum CliCommand {
     Generate(GenerateCommand),
 }
 
-/// Generate Rust client code from an OpenAPI document.
+/// Generate Rust client code from an `OpenAPI` document.
 #[derive(Debug, FromArgs)]
 #[argh(subcommand, name = "generate")]
 struct GenerateCommand {

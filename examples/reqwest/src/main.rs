@@ -19,7 +19,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     match response {
         GetBusArrivalResponse::Ok(arrival) => {
-            println!("{:?}", arrival);
+            println!("{arrival:?}");
         }
         GetBusArrivalResponse::UnexpectedStatus(status, body) => {
             eprintln!(

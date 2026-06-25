@@ -14,6 +14,12 @@ pub enum Error {
 }
 
 pub trait ReqwestActionExt: satay_runtime::Action + Sized + Send {
+    /// Sends this action using the supplied async `reqwest` client.
+    ///
+    /// # Errors
+    ///
+    /// The returned future resolves to an error if request construction, transport, body reading,
+    /// or response decoding fails.
     fn send_with(
         self,
         client: &reqwest::Client,
@@ -39,6 +45,11 @@ impl<T: satay_runtime::Action + Send> ReqwestActionExt for T {}
 
 #[cfg(feature = "blocking")]
 pub trait ReqwestBlockingActionExt: satay_runtime::Action + Sized {
+    /// Sends this action using the supplied blocking `reqwest` client.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if request construction, transport, body reading, or response decoding fails.
     fn send_with(self, client: &blocking::Client) -> Result<Self::Response, Error> {
         let http_req = self.request()?;
         let reqwest_req: blocking::Request = http_req.try_into()?;
