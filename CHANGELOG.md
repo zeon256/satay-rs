@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.4.0...satay-codegen-v0.4.1) - 2026-06-25
+
+### Other
+
+- adhere to a more strict set of clippy lints
+
 ## [0.4.0](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.3.0...satay-codegen-v0.4.0) - 2026-06-11
 
 ### Added
