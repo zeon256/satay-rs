@@ -1,3 +1,9 @@
+#![allow(
+    clippy::match_wildcard_for_single_variants,
+    clippy::needless_raw_string_hashes,
+    clippy::too_many_lines
+)]
+
 use crate::error::ValidationError;
 use crate::model::{
     Api, ApiKeyLocation, Component, ComponentKind, EnumFallback, Field, HttpMethod, IntegerLimit,

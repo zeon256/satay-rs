@@ -402,11 +402,11 @@ fn validate_operation_refs(
 fn validate_content_schema_refs(
     document: &ResolvedDocument<'_>,
     content: &OasMap<String, OasMediaType>,
-    context: &str,
+    location: &str,
 ) -> Result<(), ValidationError> {
     for (media_type, media) in content {
         if let Some(schema) = media.schema.as_ref() {
-            validate_schema_refs(document, schema, &format!("{context}.{media_type}.schema"))?;
+            validate_schema_refs(document, schema, &format!("{location}.{media_type}.schema"))?;
         }
     }
 

@@ -85,10 +85,26 @@ pub enum ParseNaiveDateTimeError {
 pub trait Action {
     type Response;
 
+    /// Builds the HTTP request for this action.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if request construction or required input validation fails.
     fn request(self) -> Result<http::Request<Vec<u8>>, Error>;
+
+    /// Decodes the HTTP response body into this action's response type.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the response is invalid or cannot be decoded.
     fn decode<B: AsRef<[u8]>>(response: ResponseParts<B>) -> Result<Self::Response, Error>;
 }
 
+/// Converts request parts into an HTTP request.
+///
+/// # Errors
+///
+/// Returns an error if the method, URI, or body cannot be converted into an HTTP request.
 #[instrument(skip_all, fields(method = %method, uri = %uri))]
 pub fn into_request<B>(
     RequestParts {
@@ -107,13 +123,18 @@ pub fn into_request<B>(
     Ok(request)
 }
 
+/// Converts request parts with an empty body into an HTTP request.
+///
+/// # Errors
+///
+/// Returns an error if the method or URI cannot be converted into an HTTP request.
 #[instrument(skip_all, fields(method = %method, uri = %uri))]
 pub fn into_empty_request(
     RequestParts {
         method,
         uri,
         headers,
-        body: _,
+        body: (),
     }: RequestParts<()>,
 ) -> Result<http::Request<Vec<u8>>, Error> {
     debug!("building empty HTTP request");
@@ -125,6 +146,11 @@ pub fn into_empty_request(
     Ok(request)
 }
 
+/// Converts serializable request parts into a JSON HTTP request.
+///
+/// # Errors
+///
+/// Returns an error if JSON serialization fails or the HTTP request cannot be built.
 #[cfg(feature = "json")]
 #[instrument(skip_all, fields(method = %method, uri = %uri))]
 pub fn into_json_request<T>(
@@ -154,6 +180,11 @@ where
     Ok(request)
 }
 
+/// Converts optional serializable request parts into a JSON HTTP request.
+///
+/// # Errors
+///
+/// Returns an error if JSON serialization fails or the HTTP request cannot be built.
 #[cfg(feature = "json")]
 #[instrument(skip_all, fields(method = %method, uri = %uri))]
 pub fn into_optional_json_request<T>(
@@ -183,6 +214,11 @@ where
     }
 }
 
+/// Deserializes a JSON response body from bytes.
+///
+/// # Errors
+///
+/// Returns an error if the body is not valid JSON for `T`.
 #[cfg(feature = "json")]
 #[instrument(skip_all)]
 pub fn from_json_slice<T>(body: &[u8]) -> Result<T, Error>
@@ -209,14 +245,17 @@ pub fn append_query_pair(out: &mut String, first: &mut bool, key: &str, value: &
     append_percent_encoded(out, value.as_bytes());
 }
 
+#[must_use]
 pub fn format_offset_datetime(value: &OffsetDateTime) -> String {
     value.format(&Rfc3339).unwrap_or_else(|_| value.to_string())
 }
 
+#[must_use]
 pub fn format_unix_time(value: &OffsetDateTime) -> String {
     value.unix_timestamp().to_string()
 }
 
+#[must_use]
 pub fn format_date(value: &Date) -> String {
     format!(
         "{:04}-{:02}-{:02}",
@@ -226,6 +265,11 @@ pub fn format_date(value: &Date) -> String {
     )
 }
 
+/// Parses a date in `YYYY-MM-DD` format.
+///
+/// # Errors
+///
+/// Returns an error if the value is not in `YYYY-MM-DD` format or is not a valid calendar date.
 pub fn parse_date(value: &str) -> Result<Date, ParseDateError> {
     let value = value.trim().as_bytes();
     if value.len() != 10 || value[4] != b'-' || value[7] != b'-' {
@@ -271,6 +315,7 @@ fn parse_date_u8(bytes: &[u8]) -> Result<u8, ParseDateError> {
     u8::try_from(value).map_err(|_| ParseDateError::InvalidFormat)
 }
 
+#[must_use]
 pub fn format_naive_datetime(value: &PrimitiveDateTime) -> String {
     format!(
         "{}T{:02}:{:02}:{:02}",
@@ -281,6 +326,11 @@ pub fn format_naive_datetime(value: &PrimitiveDateTime) -> String {
     )
 }
 
+/// Parses a datetime in `YYYY-MM-DDTHH:mm:ss` format.
+///
+/// # Errors
+///
+/// Returns an error if the value is not in the expected format or has invalid date/time fields.
 pub fn parse_naive_datetime(value: &str) -> Result<PrimitiveDateTime, ParseNaiveDateTimeError> {
     let value = value.trim();
     let bytes = value.as_bytes();
@@ -314,6 +364,11 @@ pub fn parse_naive_datetime(value: &str) -> Result<PrimitiveDateTime, ParseNaive
     Ok(PrimitiveDateTime::new(date, time))
 }
 
+/// Parses a time in `HHMM` format.
+///
+/// # Errors
+///
+/// Returns an error if the value is not four ASCII digits or is outside the valid time range.
 pub fn parse_time(value: &str) -> Result<Time, ParseTimeError> {
     let value = value.trim();
     let bytes = value.as_bytes();
@@ -326,14 +381,21 @@ pub fn parse_time(value: &str) -> Result<Time, ParseTimeError> {
     Time::from_hms(hour, minute, 0).map_err(|_| ParseTimeError::ComponentRange)
 }
 
+#[must_use]
 pub fn format_time(value: &Time) -> String {
     format!("{:02}{:02}", value.hour(), value.minute())
 }
 
+#[must_use]
 pub fn format_bool(value: &bool) -> &'static str {
     if *value { "1" } else { "0" }
 }
 
+/// Parses an inclusive range string into optional minimum and maximum bounds.
+///
+/// # Errors
+///
+/// Returns an error if the range has too many separators or either bound cannot be parsed as `T`.
 pub fn parse_range<T>(value: &str) -> Result<(Option<T>, Option<T>), ParseRangeError>
 where
     T: FromStr,
@@ -357,6 +419,7 @@ where
     Ok((parse_range_min(min)?, parse_range_max(max)?))
 }
 
+#[must_use]
 pub fn format_range<T>(min: &Option<T>, max: &Option<T>) -> String
 where
     T: fmt::Display,
@@ -411,16 +474,13 @@ where
 }
 
 #[cfg(feature = "serde")]
+#[allow(clippy::missing_errors_doc)]
 pub mod serde_string {
     use std::fmt;
     use std::str::FromStr;
 
     use serde::Deserialize;
     use serde::de::Error as DeError;
-    use time::format_description::well_known::Rfc3339;
-
-    use crate::{Date, OffsetDateTime, PrimitiveDateTime, Time};
-
     macro_rules! string_from_str_module {
         ($module:ident, $ty:ty) => {
             pub mod $module {
@@ -446,7 +506,7 @@ pub mod serde_string {
                     where
                         S: serde::Serializer,
                     {
-                        super::super::serialize_option_display(value, serializer)
+                        super::super::serialize_option_display(value.as_ref(), serializer)
                     }
 
                     pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<$ty>, D::Error>
@@ -492,7 +552,7 @@ pub mod serde_string {
                     where
                         S: serde::Serializer,
                     {
-                        super::super::serialize_option_display(value, serializer)
+                        super::super::serialize_option_display(value.as_ref(), serializer)
                     }
 
                     pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<$ty>, D::Error>
@@ -644,7 +704,7 @@ pub mod serde_string {
         use serde::Deserialize;
         use serde::de::Error as DeError;
 
-        use super::*;
+        use crate::Date;
 
         pub fn serialize<S>(value: &Date, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -665,7 +725,7 @@ pub mod serde_string {
             use serde::Deserialize;
             use serde::de::Error as DeError;
 
-            use super::*;
+            use crate::Date;
 
             pub fn serialize<S>(value: &Option<Date>, serializer: S) -> Result<S::Ok, S::Error>
             where
@@ -693,7 +753,7 @@ pub mod serde_string {
         use serde::Deserialize;
         use serde::de::Error as DeError;
 
-        use super::*;
+        use crate::PrimitiveDateTime;
 
         pub fn serialize<S>(value: &PrimitiveDateTime, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -714,7 +774,7 @@ pub mod serde_string {
             use serde::Deserialize;
             use serde::de::Error as DeError;
 
-            use super::*;
+            use crate::PrimitiveDateTime;
 
             pub fn serialize<S>(
                 value: &Option<PrimitiveDateTime>,
@@ -748,7 +808,8 @@ pub mod serde_string {
         use serde::de::Error as DeError;
         use serde::ser::Error as SerError;
 
-        use super::*;
+        use crate::OffsetDateTime;
+        use time::format_description::well_known::Rfc3339;
 
         pub fn serialize<S>(value: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -770,7 +831,8 @@ pub mod serde_string {
             use serde::Deserialize;
             use serde::de::Error as DeError;
 
-            use super::*;
+            use crate::OffsetDateTime;
+            use time::format_description::well_known::Rfc3339;
 
             pub fn serialize<S>(
                 value: &Option<OffsetDateTime>,
@@ -801,7 +863,7 @@ pub mod serde_string {
         use serde::Deserialize;
         use serde::de::Error as DeError;
 
-        use super::*;
+        use crate::OffsetDateTime;
 
         pub fn serialize<S>(value: &OffsetDateTime, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -823,7 +885,7 @@ pub mod serde_string {
             use serde::Deserialize;
             use serde::de::Error as DeError;
 
-            use super::*;
+            use crate::OffsetDateTime;
 
             pub fn serialize<S>(
                 value: &Option<OffsetDateTime>,
@@ -857,7 +919,7 @@ pub mod serde_string {
         use serde::Deserialize;
         use serde::de::Error as DeError;
 
-        use super::*;
+        use crate::Time;
 
         pub fn serialize<S>(value: &Time, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -878,7 +940,7 @@ pub mod serde_string {
             use serde::Deserialize;
             use serde::de::Error as DeError;
 
-            use super::*;
+            use crate::Time;
 
             pub fn serialize<S>(value: &Option<Time>, serializer: S) -> Result<S::Ok, S::Error>
             where
@@ -915,7 +977,7 @@ pub mod serde_string {
         serializer.serialize_str(&value.to_string())
     }
 
-    fn serialize_option_display<T, S>(value: &Option<T>, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize_option_display<T, S>(value: Option<&T>, serializer: S) -> Result<S::Ok, S::Error>
     where
         T: fmt::Display,
         S: serde::Serializer,
@@ -960,6 +1022,7 @@ pub mod serde_string {
 }
 
 #[cfg(feature = "serde")]
+#[allow(clippy::missing_errors_doc)]
 pub mod serde_integer {
     pub mod as_unix_time {
         use serde::Deserialize;
@@ -1060,6 +1123,11 @@ pub mod treat_error_as_none {
     use serde::de::DeserializeOwned;
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+    /// Serializes an optional value, omitting `None`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if serializing the inner value fails.
     pub fn serialize<S, T>(value: &Option<T>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -1071,6 +1139,11 @@ pub mod treat_error_as_none {
         }
     }
 
+    /// Deserializes an optional value, treating invalid inner values as `None`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the input cannot be read as JSON.
     pub fn deserialize<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
     where
         D: Deserializer<'de>,
@@ -1084,6 +1157,11 @@ pub mod treat_error_as_none {
     }
 }
 
+/// Inserts a header into a header map.
+///
+/// # Errors
+///
+/// Returns an error if the header name or value is invalid.
 pub fn insert_header(
     headers: &mut http::HeaderMap,
     name: &'static str,
@@ -1096,6 +1174,7 @@ pub fn insert_header(
     Ok(())
 }
 
+#[must_use]
 pub fn has_json_content_type(headers: &http::HeaderMap) -> bool {
     headers
         .get(CONTENT_TYPE)
@@ -1356,7 +1435,7 @@ mod tests {
         let encoded = serde_json::to_value(Value { at, maybe_at: None }).unwrap();
         assert_eq!(
             encoded,
-            serde_json::json!({ "at": 1719892800, "maybe_at": null })
+            serde_json::json!({ "at": 1_719_892_800, "maybe_at": null })
         );
 
         let decoded = serde_json::from_value::<Value>(encoded).unwrap();

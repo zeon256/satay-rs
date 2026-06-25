@@ -14,6 +14,11 @@ pub enum Error {
 }
 
 pub trait UreqActionExt: satay_runtime::Action + Sized {
+    /// Sends this action using the supplied `ureq` agent.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if request construction, transport, body reading, or response decoding fails.
     fn send_with(self, agent: &ureq::Agent) -> Result<Self::Response, Error> {
         let http_req = self.request()?;
         let res = agent.run(http_req).map_err(|e| Error::from(Box::new(e)))?;
