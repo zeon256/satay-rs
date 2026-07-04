@@ -61,6 +61,12 @@ pub enum ValidationError {
     #[error("{context} contains a non-string enum value; only string enums are supported")]
     NonStringEnumValue { context: String },
 
+    /// A schema declares a `const` value that is not one of its `enum` values.
+    ///
+    /// Error message: `{context} declares a `const` value that is not in its `enum``
+    #[error("{context} declares a `const` value that is not in its `enum`")]
+    ConstNotInEnum { context: String },
+
     /// An `x-satay.enum-variants` value is not an object.
     ///
     /// Error message: `{context}.x-satay.enum-variants must be an object`
