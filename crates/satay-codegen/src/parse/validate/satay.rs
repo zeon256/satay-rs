@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use oas3::spec::{ObjectSchema as OasObjectSchema, SchemaType as OasSchemaType};
+use serde_json::Value as JsonValue;
 
 use super::super::helpers::satay_object;
 use super::super::reference::schema_type_wire;
@@ -28,10 +29,11 @@ pub(crate) struct ValidatedSataySchema {
 
 pub(super) fn validate_component_enum_satay(
     schema: &OasObjectSchema,
+    enum_values: &[JsonValue],
     context: &str,
 ) -> Result<ValidatedSataySchema, ValidationError> {
     Ok(ValidatedSataySchema {
-        enum_variants: validate_enum_variants(schema, context)?,
+        enum_variants: validate_enum_variants(schema, enum_values, context)?,
         ..ValidatedSataySchema::default()
     })
 }
@@ -89,28 +91,30 @@ pub(super) fn validate_type_satay(
 
 pub(super) fn validate_type_enum_satay(
     schema: &OasObjectSchema,
+    enum_values: &[JsonValue],
     context: &str,
 ) -> Result<BTreeMap<String, String>, ValidationError> {
-    validate_enum_variants(schema, context)
+    validate_enum_variants(schema, enum_values, context)
 }
 
 fn validate_enum_variants(
     schema: &OasObjectSchema,
+    enum_values: &[JsonValue],
     context: &str,
 ) -> Result<BTreeMap<String, String>, ValidationError> {
-    if schema.enum_values.is_empty() {
+    if enum_values.is_empty() {
         return Ok(BTreeMap::new());
     }
 
-    let mut enum_values = BTreeSet::new();
-    for value in &schema.enum_values {
+    let mut wire_names = BTreeSet::new();
+    for value in enum_values {
         let Some(value) = value.as_str() else {
             return Ok(BTreeMap::new());
         };
-        enum_values.insert(value.to_owned());
+        wire_names.insert(value.to_owned());
     }
 
-    parse_satay_enum_variants(schema, context, &enum_values)
+    parse_satay_enum_variants(schema, context, &wire_names)
 }
 
 fn validate_treat_error_as_none(
@@ -300,7 +304,8 @@ mod tests {
         }));
         schema.enum_values = vec![json!("in-progress"), json!("done")];
 
-        let variants = validate_type_enum_satay(&schema, "Task.status").unwrap();
+        let variants =
+            validate_type_enum_satay(&schema, &schema.enum_values, "Task.status").unwrap();
 
         assert_eq!(
             variants.get("in-progress").map(String::as_str),
@@ -319,7 +324,11 @@ mod tests {
         }));
         schema.enum_values = vec![json!("active")];
 
-        let error = validation_error(validate_type_enum_satay(&schema, "Task.status"));
+        let error = validation_error(validate_type_enum_satay(
+            &schema,
+            &schema.enum_values,
+            "Task.status",
+        ));
 
         assert!(matches!(
             error,

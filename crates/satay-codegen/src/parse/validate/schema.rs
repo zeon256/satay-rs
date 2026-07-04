@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem;
 
@@ -5,6 +6,7 @@ use oas3::spec::{
     Discriminator as OasDiscriminator, ObjectSchema as OasObjectSchema, Schema as OasSchema,
     SchemaType as OasSchemaType, SchemaTypeSet as OasSchemaTypeSet,
 };
+use serde_json::Value as JsonValue;
 
 use super::super::helpers::{optional_description, schema_description};
 use super::super::reference::{
@@ -228,12 +230,14 @@ fn validate_component_schema(
         } else {
             let (schema_type, nullable) = schema_type_and_nullable(schema, &context)?;
 
-            if !schema.enum_values.is_empty() {
-                validate_enum_shape(schema, schema_type, &context)?;
-                let validated_satay = validate_component_enum_satay(schema, &context)?;
+            let enum_values = effective_enum_values(schema, schema_type, &context)?;
+            if !enum_values.is_empty() {
+                validate_enum_shape(&enum_values, schema_type, &context)?;
+                let validated_satay =
+                    validate_component_enum_satay(schema, &enum_values, &context)?;
                 ValidatedComponentKind::Type(ValidatedType {
                     kind: ValidatedTypeKind::Enum(validated_enum(
-                        schema,
+                        &enum_values,
                         &validated_satay.enum_variants,
                         EnumFallback::None,
                         &context,
@@ -479,10 +483,10 @@ fn validate_open_string_enum_any_of_branch(
         return Ok(None);
     }
 
-    validate_enum_shape(schema, schema_type, context)?;
-    let explicit_variants = validate_type_enum_satay(schema, context)?;
+    validate_enum_shape(&schema.enum_values, schema_type, context)?;
+    let explicit_variants = validate_type_enum_satay(schema, &schema.enum_values, context)?;
     let enum_ = validated_enum(
-        schema,
+        &schema.enum_values,
         &explicit_variants,
         EnumFallback::OtherString,
         context,
@@ -704,12 +708,17 @@ fn validate_inline_plain_union_branch(
             return Err(keyword.branch_error(context, index));
         }
 
-        validate_enum_shape(schema, schema_type, context)
+        validate_enum_shape(&schema.enum_values, schema_type, context)
             .map_err(|_| keyword.branch_error(context, index))?;
-        let explicit_variants = validate_type_enum_satay(schema, context)
+        let explicit_variants = validate_type_enum_satay(schema, &schema.enum_values, context)
             .map_err(|_| keyword.branch_error(context, index))?;
-        let enum_ = validated_enum(schema, &explicit_variants, EnumFallback::None, context)
-            .map_err(|_| keyword.branch_error(context, index))?;
+        let enum_ = validated_enum(
+            &schema.enum_values,
+            &explicit_variants,
+            EnumFallback::None,
+            context,
+        )
+        .map_err(|_| keyword.branch_error(context, index))?;
         let ty = ValidatedType {
             kind: ValidatedTypeKind::Enum(enum_),
             nullable,
@@ -1313,7 +1322,7 @@ fn embedded_discriminator_value(
             context,
             schema_name,
             property_name,
-            "a required non-null singleton string enum",
+            "a required non-null singleton string enum or string const",
         ));
     }
 
@@ -1322,7 +1331,7 @@ fn embedded_discriminator_value(
             context,
             schema_name,
             property_name,
-            "a required non-null singleton string enum",
+            "a required non-null singleton string enum or string const",
         ));
     };
 
@@ -1331,7 +1340,7 @@ fn embedded_discriminator_value(
             context,
             schema_name,
             property_name,
-            "a required non-null singleton string enum",
+            "a required non-null singleton string enum or string const",
         ));
     }
 
@@ -2111,12 +2120,13 @@ fn validate_object_type_schema(
         });
     }
 
-    if !schema.enum_values.is_empty() {
-        validate_enum_shape(schema, schema_type, context)?;
-        let explicit_variants = validate_type_enum_satay(schema, context)?;
+    let enum_values = effective_enum_values(schema, schema_type, context)?;
+    if !enum_values.is_empty() {
+        validate_enum_shape(&enum_values, schema_type, context)?;
+        let explicit_variants = validate_type_enum_satay(schema, &enum_values, context)?;
         return Ok(ValidatedType {
             kind: ValidatedTypeKind::Enum(validated_enum(
-                schema,
+                &enum_values,
                 &explicit_variants,
                 EnumFallback::None,
                 context,
@@ -2329,8 +2339,40 @@ fn parse_required_set(schema: &OasObjectSchema) -> BTreeSet<String> {
     schema.required.iter().cloned().collect()
 }
 
+/// Resolves the effective enum values of a schema, treating a string `const`
+/// as a singleton string enum.
+///
+/// A `const` alongside a non-empty `enum` narrows to the `const` value when it
+/// is one of the enum values and errors otherwise. A non-string `const` (or a
+/// `const` under a non-string type) yields an empty slice so the schema keeps
+/// its current non-enum handling.
+fn effective_enum_values<'a>(
+    schema: &'a OasObjectSchema,
+    schema_type: Option<OasSchemaType>,
+    context: &str,
+) -> Result<Cow<'a, [JsonValue]>, ValidationError> {
+    let Some(const_value) = &schema.const_value else {
+        return Ok(Cow::Borrowed(&schema.enum_values));
+    };
+
+    if !schema.enum_values.is_empty() {
+        if schema.enum_values.contains(const_value) {
+            return Ok(Cow::Owned(vec![const_value.clone()]));
+        }
+        return Err(ValidationError::ConstNotInEnum {
+            context: context.to_owned(),
+        });
+    }
+
+    if const_value.is_string() && matches!(schema_type, Some(OasSchemaType::String) | None) {
+        return Ok(Cow::Owned(vec![const_value.clone()]));
+    }
+
+    Ok(Cow::Borrowed(&[]))
+}
+
 fn validate_enum_shape(
-    schema: &OasObjectSchema,
+    enum_values: &[JsonValue],
     schema_type: Option<OasSchemaType>,
     context: &str,
 ) -> Result<(), ValidationError> {
@@ -2343,13 +2385,13 @@ fn validate_enum_shape(
         });
     }
 
-    if schema.enum_values.is_empty() {
+    if enum_values.is_empty() {
         return Err(ValidationError::EmptyEnum {
             context: context.to_owned(),
         });
     }
 
-    for value in &schema.enum_values {
+    for value in enum_values {
         if value.as_str().is_none() {
             return Err(ValidationError::NonStringEnumValue {
                 context: context.to_owned(),
@@ -2361,7 +2403,7 @@ fn validate_enum_shape(
 }
 
 fn validated_enum(
-    schema: &OasObjectSchema,
+    enum_values: &[JsonValue],
     explicit_variants: &BTreeMap<String, String>,
     fallback: EnumFallback,
     context: &str,
@@ -2385,9 +2427,9 @@ fn validated_enum(
         used.insert(rust_name.clone());
     }
 
-    let mut variants = Vec::with_capacity(schema.enum_values.len());
+    let mut variants = Vec::with_capacity(enum_values.len());
 
-    for value in &schema.enum_values {
+    for value in enum_values {
         let Some(wire_name) = value.as_str() else {
             return Err(ValidationError::NonStringEnumValue {
                 context: context.to_owned(),

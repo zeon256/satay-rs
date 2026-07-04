@@ -467,3 +467,52 @@ components:
         other => panic!("expected Window nutype, got {other:?}"),
     }
 }
+
+#[test]
+fn lowers_const_string_property_to_singleton_enum() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    CacheControl:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: ephemeral
+"#,
+    );
+
+    match &component(&api, "CacheControl").kind {
+        ComponentKind::Struct(fields) => {
+            assert_eq!(
+                field(fields, "type").ty,
+                TypeRef::Named("CacheControlType".to_owned())
+            );
+        }
+        other => panic!("expected CacheControl struct, got {other:?}"),
+    }
+
+    match &component(&api, "CacheControlType").kind {
+        ComponentKind::Enum(enum_) => {
+            assert_eq!(enum_.variants.len(), 1);
+            assert_eq!(enum_.variants[0].wire_name, "ephemeral");
+            assert_eq!(enum_.variants[0].rust_name, "Ephemeral");
+            assert_eq!(enum_.fallback, EnumFallback::None);
+        }
+        other => panic!("expected CacheControlType enum, got {other:?}"),
+    }
+}

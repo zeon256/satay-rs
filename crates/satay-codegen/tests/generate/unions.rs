@@ -591,6 +591,80 @@ components:
 }
 
 #[test]
+fn discriminator_with_const_type_field_generates_untagged_union() {
+    let files = satay_codegen::generate(
+        r##"
+openapi: 3.1.0
+info:
+  title: Tool API
+  version: 1.0.0
+paths:
+  /tool:
+    get:
+      operationId: getTool
+      responses:
+        '200':
+          description: Tool call
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolCall'
+components:
+  schemas:
+    FunctionToolCall:
+      type: object
+      required:
+        - id
+        - type
+        - function
+      properties:
+        id:
+          type: string
+        type:
+          const: function
+        function:
+          type: string
+    CustomToolCall:
+      type: object
+      required:
+        - id
+        - type
+        - custom
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          const: custom
+        custom:
+          type: string
+    ToolCall:
+      oneOf:
+        - $ref: '#/components/schemas/FunctionToolCall'
+        - $ref: '#/components/schemas/CustomToolCall'
+      discriminator:
+        propertyName: type
+        mapping:
+          function: '#/components/schemas/FunctionToolCall'
+          custom: CustomToolCall
+"##,
+    )
+    .expect("generate const embedded discriminator fixture");
+
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    let union = find_enum(&types_rs, "ToolCall");
+    assert_attr_contains(&union.attrs, "cfg_attr", "serde(untagged)");
+    assert!(!contains_tokens(&types_rs, r#"serde(tag = "type")"#));
+
+    let function_tool_call = find_struct(&types_rs, "FunctionToolCall");
+    assert_field(function_tool_call, "r#type", "FunctionToolCallType");
+    assert!(!contains_tokens(
+        field(function_tool_call, "r#type"),
+        r#"serde(rename = "type")"#
+    ));
+}
+
+#[test]
 fn generated_any_of_deserializes_with_first_matching_branch() {
     let files = satay_codegen::generate(
         r##"
@@ -1345,5 +1419,128 @@ mod tests {
         "test",
         &[],
         "embedded discriminator generated crate tests",
+    );
+}
+
+#[test]
+fn generated_const_embedded_discriminator_union_round_trips() {
+    let files = satay_codegen::generate(
+        r##"
+openapi: 3.1.0
+info:
+  title: Tool API
+  version: 1.0.0
+paths:
+  /tool:
+    get:
+      operationId: getTool
+      responses:
+        '200':
+          description: Tool call
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ToolCall'
+components:
+  schemas:
+    FunctionToolCall:
+      type: object
+      required:
+        - id
+        - type
+        - function
+      properties:
+        id:
+          type: string
+        type:
+          const: function
+        function:
+          type: string
+    CustomToolCall:
+      type: object
+      required:
+        - id
+        - type
+        - custom
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          const: custom
+        custom:
+          type: string
+    ToolCall:
+      oneOf:
+        - $ref: '#/components/schemas/FunctionToolCall'
+        - $ref: '#/components/schemas/CustomToolCall'
+      discriminator:
+        propertyName: type
+        mapping:
+          function: '#/components/schemas/FunctionToolCall'
+          custom: CustomToolCall
+"##,
+    )
+    .expect("generate const embedded discriminator runtime fixture");
+
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+
+    let runtime_path = runtime_path_toml();
+
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::*;
+
+    #[test]
+    fn const_tag_union_deserializes_response() {
+        let response = satay_runtime::ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: br#"{"id":"call_1","type":"custom","custom":"payload"}"#.to_vec(),
+        };
+
+        let decoded = decode_get_tool_response(response).expect("decoded response");
+        match decoded {
+            GetToolResponse::Ok(ToolCall::CustomToolCall(value)) => {
+                assert_eq!(value.id, "call_1");
+                assert_eq!(value.r#type, CustomToolCallType::Custom);
+                assert_eq!(value.custom, "payload");
+            }
+            other => panic!("unexpected response: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn const_tag_union_serializes_branch_type() {
+        let value = ToolCall::FunctionToolCall(FunctionToolCall {
+            id: "call_2".to_owned(),
+            r#type: FunctionToolCallType::Function,
+            function: "lookup".to_owned(),
+        });
+        let encoded = serde_json::to_value(value).expect("serialized tool call");
+        assert_eq!(
+            encoded,
+            serde_json::json!({
+                "id": "call_2",
+                "type": "function",
+                "function": "lookup"
+            })
+        );
+    }
+}
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    run_temp_cargo(
+        crate_dir,
+        "test",
+        &[],
+        "const embedded discriminator generated crate tests",
     );
 }
