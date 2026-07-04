@@ -202,8 +202,14 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
                 registry,
             ),
             ValidatedTypeKind::AnyOf(union) => {
-                let union = self.parse_union(union, type_name_hint, registry);
-                registry.inline_union_ref(type_name_hint, description.clone(), union)
+                // An untagged union with a single component reference accepts exactly
+                // that component's payloads, so the wrapper enum adds nothing.
+                if let Some(type_name) = single_reference_union_target(union) {
+                    self.component_ref(type_name, registry)
+                } else {
+                    let union = self.parse_union(union, type_name_hint, registry);
+                    registry.inline_union_ref(type_name_hint, description.clone(), union)
+                }
             }
             ValidatedTypeKind::InlineStruct(fields) => {
                 let fields = self.parse_struct_fields(type_name_hint, fields, registry);
@@ -291,6 +297,17 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
             .find(|component| type_ident(&component.schema_name) == rust_name)
             .cloned()
             .unwrap_or_else(|| panic!("component reference {rust_name} validated before lowering"))
+    }
+}
+
+fn single_reference_union_target(union: &ValidatedUnion) -> Option<&str> {
+    if union.tag.is_some() || union.variants.len() != 1 {
+        return None;
+    }
+
+    match &union.variants[0].kind {
+        ValidatedUnionVariantKind::Reference { type_name, .. } => Some(type_name),
+        ValidatedUnionVariantKind::Inline(_) => None,
     }
 }
 

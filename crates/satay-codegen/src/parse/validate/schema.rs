@@ -336,10 +336,16 @@ fn validate_union_type_schema(
         )
     } else if !schema.one_of.is_empty() && schema.any_of.is_empty() {
         let plain = validate_plain_one_of_union(document, schema, context, stack)?;
-        (plain.union, plain.nullable)
+        (
+            hoist_single_inline_union_variant(plain.union),
+            plain.nullable,
+        )
     } else {
         let plain = validate_plain_any_of_union(document, schema, context, stack)?;
-        (plain.union, plain.nullable)
+        (
+            hoist_single_inline_union_variant(plain.union),
+            plain.nullable,
+        )
     };
 
     Ok(ValidatedType {
@@ -349,6 +355,37 @@ fn validate_union_type_schema(
         description: optional_description(&schema.description),
         treat_error_as_none: false,
     })
+}
+
+/// Hoists a nested union out of an untagged wrapper union with no other variants.
+///
+/// A plain union whose only variant is an inline nested union (for example the
+/// nullable wrapper `anyOf: [{oneOf: [...], discriminator}, {type: "null"}]`
+/// after null folding) accepts exactly the payloads of the nested union, so the
+/// wrapper adds nothing but an extra generated type.
+fn hoist_single_inline_union_variant(mut union: ValidatedUnion) -> ValidatedUnion {
+    if union.tag.is_some() || union.variants.len() != 1 {
+        return union;
+    }
+
+    let variant = union
+        .variants
+        .pop()
+        .expect("single-variant union has a variant");
+    match variant.kind {
+        ValidatedUnionVariantKind::Inline(ValidatedType {
+            kind: ValidatedTypeKind::AnyOf(inner),
+            ..
+        }) => inner,
+        kind => {
+            union.variants.push(ValidatedUnionVariant {
+                rust_name: variant.rust_name,
+                kind,
+                tag_value: variant.tag_value,
+            });
+            union
+        }
+    }
 }
 
 fn validate_open_string_enum_any_of(
@@ -679,10 +716,88 @@ fn validate_plain_union_branch(
         return Ok(PlainUnionBranch::Null);
     }
 
+    if let Some(discriminator) = schema.discriminator.as_ref()
+        && !schema.one_of.is_empty()
+        && schema.any_of.is_empty()
+    {
+        return validate_nested_discriminator_union_branch(
+            document,
+            schema,
+            discriminator,
+            context,
+            index,
+            keyword,
+            used,
+            stack,
+        );
+    }
+
     let (ty, rust_name) =
         validate_inline_plain_union_branch(document, schema, context, index, keyword, stack)?;
     Ok(PlainUnionBranch::Variant(Box::new(ValidatedUnionVariant {
         rust_name: unique_ident(rust_name, used),
+        kind: ValidatedUnionVariantKind::Inline(ty),
+        tag_value: None,
+    })))
+}
+
+/// Validates an inline discriminated `oneOf` union nested as a plain union branch.
+///
+/// A single-branch nested union whose tag is embedded in the branch struct accepts
+/// exactly the payloads of the referenced component, so it collapses to a plain
+/// reference variant. Internally tagged unions keep their union wrapper even with
+/// one branch because serde injects the tag at the union level; collapsing them
+/// would drop the tag from the wire format.
+#[allow(clippy::too_many_arguments)]
+fn validate_nested_discriminator_union_branch(
+    document: &ResolvedDocument<'_>,
+    schema: &OasObjectSchema,
+    discriminator: &OasDiscriminator,
+    context: &str,
+    index: usize,
+    keyword: PlainUnionKeyword,
+    used: &mut BTreeSet<String>,
+    stack: &mut Vec<String>,
+) -> Result<PlainUnionBranch, ValidationError> {
+    let branch_context = format!("{context}.{}[{index}]", keyword.wire());
+    let mut union =
+        validate_discriminator_union(document, schema, discriminator, &branch_context, stack)?;
+
+    let embedded_tag = union
+        .tag
+        .as_ref()
+        .is_some_and(|tag| tag.style == ValidatedUnionTagStyle::EmbeddedField);
+    if embedded_tag && union.variants.len() == 1 {
+        let variant = union
+            .variants
+            .pop()
+            .expect("single-variant union has a variant");
+        let ValidatedUnionVariantKind::Reference {
+            type_name,
+            schema_name,
+        } = variant.kind
+        else {
+            unreachable!("discriminator union variants are component references")
+        };
+        return Ok(PlainUnionBranch::Variant(Box::new(ValidatedUnionVariant {
+            rust_name: unique_ident(type_name.clone(), used),
+            kind: ValidatedUnionVariantKind::Reference {
+                type_name,
+                schema_name,
+            },
+            tag_value: None,
+        })));
+    }
+
+    let ty = ValidatedType {
+        kind: ValidatedTypeKind::AnyOf(union),
+        nullable: false,
+        validation: None,
+        description: optional_description(&schema.description),
+        treat_error_as_none: false,
+    };
+    Ok(PlainUnionBranch::Variant(Box::new(ValidatedUnionVariant {
+        rust_name: unique_ident("Union".to_owned(), used),
         kind: ValidatedUnionVariantKind::Inline(ty),
         tag_value: None,
     })))
@@ -2045,17 +2160,16 @@ fn collect_type_union_targets(
 ) {
     match &ty.kind {
         ValidatedTypeKind::AnyOf(union) => {
-            targets.extend(
-                union
-                    .variants
-                    .iter()
-                    .filter_map(|variant| match &variant.kind {
-                        ValidatedUnionVariantKind::Reference { schema_name, .. } => {
-                            Some(schema_name.clone())
-                        }
-                        ValidatedUnionVariantKind::Inline(_) => None,
-                    }),
-            );
+            for variant in &union.variants {
+                match &variant.kind {
+                    ValidatedUnionVariantKind::Reference { schema_name, .. } => {
+                        targets.push(schema_name.clone());
+                    }
+                    ValidatedUnionVariantKind::Inline(ty) => {
+                        collect_type_union_targets(ty, schemas_by_rust_name, targets);
+                    }
+                }
+            }
         }
         ValidatedTypeKind::Array(item) => {
             collect_type_union_targets(item, schemas_by_rust_name, targets);

@@ -2723,3 +2723,483 @@ components:
         other => panic!("expected Holder struct, got {other:?}"),
     }
 }
+
+#[test]
+fn parses_nullable_nested_discriminated_one_of_single_branch() {
+    let api = parse_valid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Tool:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        cache_control:
+          anyOf:
+            - discriminator:
+                propertyName: type
+                mapping:
+                  ephemeral: '#/components/schemas/CacheControlEphemeral'
+              oneOf:
+                - $ref: '#/components/schemas/CacheControlEphemeral'
+            - type: 'null'
+    CacheControlEphemeral:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: ephemeral
+"##,
+    );
+
+    let tool = component(&api, "Tool");
+    match &tool.kind {
+        ComponentKind::Struct(fields) => {
+            let cache_control = field(fields, "cache_control");
+            assert_eq!(
+                cache_control.ty,
+                TypeRef::Option(Box::new(TypeRef::Named("CacheControlEphemeral".to_owned())))
+            );
+            assert!(!cache_control.required);
+        }
+        other => panic!("expected Tool struct, got {other:?}"),
+    }
+
+    assert!(
+        !api.components
+            .iter()
+            .any(|component| component.rust_name == "ToolCacheControl"),
+        "single-reference nested union must not synthesize a wrapper component"
+    );
+}
+
+#[test]
+fn parses_nullable_nested_discriminated_one_of_multi_branch() {
+    let api = parse_valid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Widget:
+      type: object
+      properties:
+        status:
+          anyOf:
+            - discriminator:
+                propertyName: type
+              oneOf:
+                - $ref: '#/components/schemas/StatusOn'
+                - $ref: '#/components/schemas/StatusOff'
+            - type: 'null'
+    StatusOn:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: 'on'
+    StatusOff:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: 'off'
+"##,
+    );
+
+    let widget = component(&api, "Widget");
+    match &widget.kind {
+        ComponentKind::Struct(fields) => {
+            let status = field(fields, "status");
+            assert_eq!(
+                status.ty,
+                TypeRef::Option(Box::new(TypeRef::Named("WidgetStatus".to_owned())))
+            );
+        }
+        other => panic!("expected Widget struct, got {other:?}"),
+    }
+
+    let status = component(&api, "WidgetStatus");
+    match &status.kind {
+        ComponentKind::Union(union) => {
+            let tag = union.tag.as_ref().expect("nested union keeps its tag");
+            assert_eq!(tag.property_name, "type");
+            assert_eq!(tag.style, UnionTagStyle::EmbeddedField);
+            assert_eq!(union.variants.len(), 2);
+            assert_eq!(union.variants[0].rust_name, "StatusOn");
+            assert_eq!(union.variants[0].ty, TypeRef::Named("StatusOn".to_owned()));
+            assert!(union.variants[0].tag_value.is_none());
+            assert_eq!(union.variants[1].rust_name, "StatusOff");
+            assert!(union.variants[1].tag_value.is_none());
+        }
+        other => panic!("expected WidgetStatus union, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_nested_union_beside_string_branch() {
+    let api = parse_valid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Entry:
+      oneOf:
+        - discriminator:
+            propertyName: type
+          oneOf:
+            - $ref: '#/components/schemas/AgentA'
+            - $ref: '#/components/schemas/AgentB'
+        - type: string
+    AgentA:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: a
+    AgentB:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: b
+"##,
+    );
+
+    let entry = component(&api, "Entry");
+    match &entry.kind {
+        ComponentKind::Union(union) => {
+            assert!(union.tag.is_none());
+            assert_eq!(union.variants.len(), 2);
+            assert_eq!(union.variants[0].rust_name, "Union");
+            assert_eq!(
+                union.variants[0].ty,
+                TypeRef::Named("EntryUnion".to_owned())
+            );
+            assert_eq!(union.variants[1].rust_name, "String");
+            assert_eq!(union.variants[1].ty, TypeRef::String);
+        }
+        other => panic!("expected Entry union, got {other:?}"),
+    }
+
+    let nested = component(&api, "EntryUnion");
+    match &nested.kind {
+        ComponentKind::Union(union) => {
+            let tag = union.tag.as_ref().expect("nested union keeps its tag");
+            assert_eq!(tag.style, UnionTagStyle::EmbeddedField);
+            assert_eq!(union.variants.len(), 2);
+        }
+        other => panic!("expected EntryUnion union, got {other:?}"),
+    }
+}
+
+#[test]
+fn does_not_collapse_internally_tagged_single_branch_nested_union() {
+    let api = parse_valid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Holder:
+      type: object
+      properties:
+        item:
+          anyOf:
+            - discriminator:
+                propertyName: type
+              oneOf:
+                - $ref: '#/components/schemas/Plain'
+            - type: 'null'
+    Plain:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+"##,
+    );
+
+    let holder = component(&api, "Holder");
+    match &holder.kind {
+        ComponentKind::Struct(fields) => {
+            let item = field(fields, "item");
+            assert_eq!(
+                item.ty,
+                TypeRef::Option(Box::new(TypeRef::Named("HolderItem".to_owned())))
+            );
+        }
+        other => panic!("expected Holder struct, got {other:?}"),
+    }
+
+    let item = component(&api, "HolderItem");
+    match &item.kind {
+        ComponentKind::Union(union) => {
+            let tag = union
+                .tag
+                .as_ref()
+                .expect("internally tagged union keeps its tag");
+            assert_eq!(tag.property_name, "type");
+            assert_eq!(tag.style, UnionTagStyle::InternallyTagged);
+            assert_eq!(union.variants.len(), 1);
+            assert_eq!(union.variants[0].rust_name, "Plain");
+            assert_eq!(
+                union.variants[0].tag_value.as_deref(),
+                Some("Plain"),
+                "internally tagged single-branch union keeps its wire tag"
+            );
+        }
+        other => panic!("expected HolderItem union, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_nested_plain_one_of_branch() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    A:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    Wrapper:
+      type: object
+      properties:
+        value:
+          anyOf:
+            - oneOf:
+                - $ref: '#/components/schemas/A'
+            - type: 'null'
+"##,
+    );
+    match err {
+        ValidationError::UnsupportedAnyOfBranch { context, index } => {
+            assert_eq!(context, "property `Wrapper.value`");
+            assert_eq!(index, 0);
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_nested_discriminated_any_of_branch() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    A:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: a
+    Wrapper:
+      type: object
+      properties:
+        value:
+          anyOf:
+            - discriminator:
+                propertyName: type
+              anyOf:
+                - $ref: '#/components/schemas/A'
+            - type: 'null'
+"##,
+    );
+    match err {
+        ValidationError::UnsupportedAnyOfBranch { context, index } => {
+            assert_eq!(context, "property `Wrapper.value`");
+            assert_eq!(index, 0);
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_invalid_mapping_inside_nested_union() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Tool:
+      type: object
+      properties:
+        cache_control:
+          anyOf:
+            - discriminator:
+                propertyName: type
+                mapping:
+                  permanent: '#/components/schemas/CacheControlEphemeral'
+              oneOf:
+                - $ref: '#/components/schemas/CacheControlEphemeral'
+            - type: 'null'
+    CacheControlEphemeral:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: ephemeral
+"##,
+    );
+    match err {
+        ValidationError::DiscriminatorMappingValueMismatch {
+            context,
+            schema,
+            value,
+            actual,
+        } => {
+            assert_eq!(context, "property `Tool.cache_control`.anyOf[0]");
+            assert_eq!(schema, "CacheControlEphemeral");
+            assert_eq!(value, "permanent");
+            assert_eq!(actual, "ephemeral");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_recursive_nested_union_reference() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Wrapper:
+      anyOf:
+        - discriminator:
+            propertyName: type
+          oneOf:
+            - $ref: '#/components/schemas/BranchA'
+            - $ref: '#/components/schemas/BranchB'
+        - type: string
+    BranchA:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: a
+        wrapper:
+          $ref: '#/components/schemas/Wrapper'
+    BranchB:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: b
+"##,
+    );
+    match err {
+        ValidationError::RecursiveAnyOf { context, schema } => {
+            assert!(context == "schema `Wrapper`" || context == "schema `BranchA`");
+            assert!(schema == "Wrapper" || schema == "BranchA");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}

@@ -1544,3 +1544,184 @@ mod tests {
         "const embedded discriminator generated crate tests",
     );
 }
+
+#[test]
+fn nested_discriminated_one_of_generates_option_of_ref() {
+    let files = satay_codegen::generate(
+        r##"
+openapi: 3.1.0
+info:
+  title: Tool API
+  version: 1.0.0
+paths:
+  /tool:
+    get:
+      operationId: getTool
+      responses:
+        '200':
+          description: Tool
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tool'
+components:
+  schemas:
+    Tool:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        cache_control:
+          anyOf:
+            - discriminator:
+                propertyName: type
+                mapping:
+                  ephemeral: '#/components/schemas/CacheControlEphemeral'
+              oneOf:
+                - $ref: '#/components/schemas/CacheControlEphemeral'
+            - type: 'null'
+    CacheControlEphemeral:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: ephemeral
+"##,
+    )
+    .expect("generate nested discriminated oneOf fixture");
+
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    let tool = find_struct(&types_rs, "Tool");
+    assert_field(tool, "cache_control", "Option<CacheControlEphemeral>");
+    assert!(
+        !has_enum(&types_rs, "ToolCacheControl"),
+        "single-reference nested union must not generate a wrapper enum"
+    );
+}
+
+#[test]
+fn generated_nested_multi_branch_union_round_trips() {
+    let files = satay_codegen::generate(
+        r##"
+openapi: 3.1.0
+info:
+  title: Widget API
+  version: 1.0.0
+paths:
+  /widget:
+    get:
+      operationId: getWidget
+      responses:
+        '200':
+          description: Widget
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Widget'
+components:
+  schemas:
+    Widget:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+        status:
+          anyOf:
+            - discriminator:
+                propertyName: type
+              oneOf:
+                - $ref: '#/components/schemas/StatusOn'
+                - $ref: '#/components/schemas/StatusOff'
+            - type: 'null'
+    StatusOn:
+      type: object
+      required:
+        - type
+        - since
+      properties:
+        type:
+          type: string
+          const: 'on'
+        since:
+          type: string
+    StatusOff:
+      type: object
+      required:
+        - type
+      properties:
+        type:
+          type: string
+          const: 'off'
+"##,
+    )
+    .expect("generate nested multi-branch union runtime fixture");
+
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+
+    let runtime_path = runtime_path_toml();
+
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::*;
+
+    #[test]
+    fn nested_union_deserializes_by_embedded_tag() {
+        let widget: Widget =
+            serde_json::from_str(r#"{"id":"w1","status":{"type":"on","since":"today"}}"#)
+                .expect("deserialized widget");
+        match widget.status {
+            Some(WidgetStatus::StatusOn(status)) => {
+                assert_eq!(status.r#type, StatusOnType::On);
+                assert_eq!(status.since, "today");
+            }
+            other => panic!("unexpected status: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nested_union_serializes_embedded_tag() {
+        let widget = Widget {
+            id: "w2".to_owned(),
+            status: Some(WidgetStatus::StatusOff(StatusOff {
+                r#type: StatusOffType::Off,
+            })),
+        };
+        let encoded = serde_json::to_value(widget).expect("serialized widget");
+        assert_eq!(
+            encoded,
+            serde_json::json!({
+                "id": "w2",
+                "status": {"type": "off"}
+            })
+        );
+    }
+
+    #[test]
+    fn nested_union_null_round_trips() {
+        let widget: Widget = serde_json::from_str(r#"{"id":"w3","status":null}"#)
+            .expect("deserialized widget with null status");
+        assert!(widget.status.is_none());
+    }
+}
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    run_temp_cargo(
+        crate_dir,
+        "test",
+        &[],
+        "nested multi-branch union generated crate tests",
+    );
+}
