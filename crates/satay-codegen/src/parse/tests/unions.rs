@@ -2570,3 +2570,156 @@ components:
         other => panic!("unexpected error: {other}"),
     }
 }
+
+#[test]
+fn rejects_recursive_discriminator_branch() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    C2:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+        u:
+          oneOf:
+            - $ref: '#/components/schemas/C2'
+            - $ref: '#/components/schemas/C3'
+          discriminator:
+            propertyName: kind
+    C3:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+"##,
+    );
+    match err {
+        ValidationError::RecursiveDiscriminatorBranch { context, schema } => {
+            assert_eq!(context, "schema `C2`");
+            assert_eq!(schema, "C2");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_mutually_recursive_discriminator_branches() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    A:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+        u:
+          oneOf:
+            - $ref: '#/components/schemas/B'
+          discriminator:
+            propertyName: kind
+    B:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+        u:
+          oneOf:
+            - $ref: '#/components/schemas/A'
+          discriminator:
+            propertyName: kind
+"##,
+    );
+    match err {
+        ValidationError::RecursiveDiscriminatorBranch { context, schema } => {
+            assert!(context == "schema `A`" || context == "schema `B`");
+            assert!(schema == "A" || schema == "B");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn accepts_repeated_discriminator_branch_across_unions() {
+    let api = parse_valid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Leaf:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    Holder:
+      type: object
+      required:
+        - first
+        - second
+      properties:
+        first:
+          oneOf:
+            - $ref: '#/components/schemas/Leaf'
+          discriminator:
+            propertyName: kind
+        second:
+          oneOf:
+            - $ref: '#/components/schemas/Leaf'
+          discriminator:
+            propertyName: kind
+"##,
+    );
+
+    let holder = component(&api, "Holder");
+    match &holder.kind {
+        ComponentKind::Struct(fields) => {
+            assert!(fields.iter().any(|field| field.wire_name == "first"));
+            assert!(fields.iter().any(|field| field.wire_name == "second"));
+        }
+        other => panic!("expected Holder struct, got {other:?}"),
+    }
+}
