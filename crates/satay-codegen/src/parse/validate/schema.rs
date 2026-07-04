@@ -1392,10 +1392,31 @@ fn discriminator_branch_fields(
 
     match schema_type {
         Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => {
-            validate_struct_properties(document, schema_name, schema, stack)
+            push_discriminator_branch_schema(schema_name, stack)?;
+            let fields = validate_struct_properties(document, schema_name, schema, stack);
+            stack.pop();
+            fields
         }
         _ => Err(discriminator_branch_not_object(context, schema_name)),
     }
+}
+
+/// Guards against discriminator branch components whose own properties recurse
+/// back into the same branch component (issue #45); `allOf`-shaped branches are
+/// guarded separately by [`push_all_of_schema`].
+fn push_discriminator_branch_schema(
+    schema_name: &str,
+    stack: &mut Vec<String>,
+) -> Result<(), ValidationError> {
+    if let Some(index) = stack.iter().position(|visited| visited == schema_name) {
+        return Err(ValidationError::RecursiveDiscriminatorBranch {
+            context: format!("schema `{}`", stack[index]),
+            schema: schema_name.to_owned(),
+        });
+    }
+
+    stack.push(schema_name.to_owned());
+    Ok(())
 }
 
 fn map_discriminator_branch_error(

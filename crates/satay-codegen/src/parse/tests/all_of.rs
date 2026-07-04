@@ -520,9 +520,9 @@ components:
 "##,
     );
     match err {
-        ValidationError::RecursiveAllOf { context, schema } => {
-            assert_eq!(context, "schema `C`");
-            assert_eq!(schema, "C");
+        ValidationError::RecursiveDiscriminatorBranch { context, schema } => {
+            assert_eq!(context, "schema `C2`");
+            assert_eq!(schema, "C2");
         }
         other => panic!("unexpected error: {other}"),
     }

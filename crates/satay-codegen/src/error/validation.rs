@@ -259,6 +259,12 @@ pub enum ValidationError {
     #[error("{context} forms a recursive `allOf` cycle through schema `{schema}`")]
     RecursiveAllOf { context: String, schema: String },
 
+    /// A discriminator union branch component recursively contains its own union.
+    ///
+    /// Error message: `{context} forms a recursive discriminator cycle through branch schema `{schema}``
+    #[error("{context} forms a recursive discriminator cycle through branch schema `{schema}`")]
+    RecursiveDiscriminatorBranch { context: String, schema: String },
+
     /// An `anyOf` schema combines a supported union with another schema keyword.
     ///
     /// Error message: `{context} uses `anyOf` with `{keyword}`; only annotation siblings are supported`
