@@ -862,11 +862,11 @@ components:
     let first = component(&api, "ChoiceEnum");
     match &first.kind {
         ComponentKind::Enum(enum_) => {
-            let wire: Vec<_> = enum_
+            let wire = enum_
                 .variants
                 .iter()
                 .map(|variant| variant.wire_name.as_str())
-                .collect();
+                .collect::<Vec<_>>();
             assert_eq!(wire, ["a", "b"]);
             assert_eq!(enum_.fallback, EnumFallback::None);
         }
@@ -3624,6 +3624,310 @@ components:
         ValidationError::RecursiveAnyOf { context, schema } => {
             assert!(context == "schema `Wrapper`" || context == "schema `BranchA`");
             assert!(schema == "Wrapper" || schema == "BranchA");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn unwraps_annotation_only_all_of_ref_wrapper_union_branch() {
+    let api = parse_valid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Params:
+      oneOf:
+        - title: Auto params
+          description: Annotated reference branch.
+          allOf:
+            - $ref: '#/components/schemas/AutoParams'
+          x-stainless-skip:
+            - go
+            - cli
+        - $ref: '#/components/schemas/ManualParams'
+    AutoParams:
+      type: object
+      required:
+        - budget
+      properties:
+        budget:
+          type: integer
+    ManualParams:
+      type: object
+      required:
+        - level
+      properties:
+        level:
+          type: string
+"##,
+    );
+
+    match &component(&api, "Params").kind {
+        ComponentKind::Union(union) => {
+            assert!(union.tag.is_none());
+            assert_eq!(union.variants.len(), 2);
+            assert_eq!(union.variants[0].rust_name, "AutoParams");
+            assert_eq!(
+                union.variants[0].ty,
+                TypeRef::Named("AutoParams".to_owned())
+            );
+            assert_eq!(union.variants[1].rust_name, "ManualParams");
+            assert_eq!(
+                union.variants[1].ty,
+                TypeRef::Named("ManualParams".to_owned())
+            );
+        }
+        other => panic!("expected Params union, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_all_of_union_branch_with_multiple_refs() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    A:
+      type: object
+      properties:
+        id:
+          type: string
+    B:
+      type: object
+      properties:
+        name:
+          type: string
+    Broken:
+      oneOf:
+        - allOf:
+            - $ref: '#/components/schemas/A'
+            - $ref: '#/components/schemas/B'
+"##,
+    );
+    match err {
+        ValidationError::UnsupportedOneOfBranch { context, index } => {
+            assert_eq!(context, "schema `Broken`");
+            assert_eq!(index, 0);
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_all_of_ref_wrapper_union_branch_with_required_sibling() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    A:
+      type: object
+      properties:
+        id:
+          type: string
+    Broken:
+      anyOf:
+        - description: Annotated reference branch.
+          allOf:
+            - $ref: '#/components/schemas/A'
+          required:
+            - id
+"##,
+    );
+    match err {
+        ValidationError::UnsupportedAnyOfBranch { context, index } => {
+            assert_eq!(context, "schema `Broken`");
+            assert_eq!(index, 0);
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_all_of_ref_wrapper_union_branch_with_satay_extension() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    A:
+      type: object
+      properties:
+        id:
+          type: string
+    Broken:
+      oneOf:
+        - allOf:
+            - $ref: '#/components/schemas/A'
+          x-satay:
+            parse-as: u32
+"##,
+    );
+    match err {
+        ValidationError::UnsupportedOneOfBranch { context, index } => {
+            assert_eq!(context, "schema `Broken`");
+            assert_eq!(index, 0);
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_all_of_union_branch_with_inline_object_entry() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Broken:
+      oneOf:
+        - allOf:
+            - type: object
+              properties:
+                id:
+                  type: string
+"##,
+    );
+    match err {
+        ValidationError::UnsupportedOneOfBranch { context, index } => {
+            assert_eq!(context, "schema `Broken`");
+            assert_eq!(index, 0);
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_wrapped_ref_union_branch_duplicating_direct_ref_branch() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    A:
+      type: object
+      properties:
+        id:
+          type: string
+    Broken:
+      oneOf:
+        - $ref: '#/components/schemas/A'
+        - description: Annotated duplicate of the first branch.
+          allOf:
+            - $ref: '#/components/schemas/A'
+"##,
+    );
+    match err {
+        ValidationError::ShadowedUnionBranch {
+            context,
+            keyword,
+            index,
+            shadowed_by,
+        } => {
+            assert_eq!(context, "schema `Broken`");
+            assert_eq!(keyword, "oneOf");
+            assert_eq!(index, 1);
+            assert_eq!(shadowed_by, 0);
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_recursive_any_of_through_wrapped_ref_branch() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Wrapper:
+      anyOf:
+        - title: Annotated target reference.
+          allOf:
+            - $ref: '#/components/schemas/Target'
+        - type: string
+    Target:
+      anyOf:
+        - $ref: '#/components/schemas/Wrapper'
+        - type: integer
+"##,
+    );
+    match err {
+        ValidationError::RecursiveAnyOf { context, schema } => {
+            assert!(context == "schema `Wrapper`" || context == "schema `Target`");
+            assert!(schema == "Wrapper" || schema == "Target");
         }
         other => panic!("unexpected error: {other}"),
     }

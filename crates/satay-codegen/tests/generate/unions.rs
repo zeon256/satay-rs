@@ -1725,3 +1725,111 @@ mod tests {
         "nested multi-branch union generated crate tests",
     );
 }
+
+#[test]
+fn generated_all_of_ref_wrapper_unwraps_round_trip() {
+    let files = satay_codegen::generate(
+        r##"
+openapi: 3.1.0
+info:
+  title: Wrapper API
+  version: 1.0.0
+paths:
+  /profile:
+    get:
+      operationId: getProfile
+      responses:
+        '200':
+          description: Profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+components:
+  schemas:
+    Params:
+      oneOf:
+        - title: Auto params
+          description: Annotated reference branch.
+          allOf:
+            - $ref: '#/components/schemas/AutoParams'
+          x-stainless-skip:
+            - go
+        - $ref: '#/components/schemas/ManualParams'
+    AutoParams:
+      type: object
+      required:
+        - budget
+      properties:
+        budget:
+          type: integer
+    ManualParams:
+      type: object
+      required:
+        - level
+      properties:
+        level:
+          type: string
+    Relationship:
+      type: string
+      enum:
+        - friend
+        - family
+    Profile:
+      type: object
+      required:
+        - relationship
+      properties:
+        relationship:
+          description: How they are related.
+          allOf:
+            - $ref: '#/components/schemas/Relationship'
+"##,
+    )
+    .expect("generate allOf ref wrapper fixture");
+
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+
+    let runtime_path = runtime_path_toml();
+
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::*;
+
+    #[test]
+    fn wrapped_union_branch_round_trips() {
+        let params: Params =
+            serde_json::from_str(r#"{"budget":5}"#).expect("deserialized params");
+        match &params {
+            Params::AutoParams(auto) => assert_eq!(auto.budget, 5),
+            other => panic!("unexpected params: {other:?}"),
+        }
+        let encoded = serde_json::to_value(&params).expect("serialized params");
+        assert_eq!(encoded, serde_json::json!({"budget": 5}));
+    }
+
+    #[test]
+    fn wrapped_enum_property_round_trips() {
+        let profile: Profile = serde_json::from_str(r#"{"relationship":"friend"}"#)
+            .expect("deserialized profile");
+        assert_eq!(profile.relationship, Relationship::Friend);
+        let encoded = serde_json::to_value(&profile).expect("serialized profile");
+        assert_eq!(encoded, serde_json::json!({"relationship": "friend"}));
+    }
+}
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    run_temp_cargo(
+        crate_dir,
+        "test",
+        &[],
+        "allOf ref wrapper generated crate tests",
+    );
+}
