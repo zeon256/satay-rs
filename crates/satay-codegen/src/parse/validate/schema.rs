@@ -410,42 +410,94 @@ fn validate_open_string_enum_any_of(
     schema: &OasObjectSchema,
     context: &str,
 ) -> Result<Option<ValidatedType>, ValidationError> {
-    if schema.discriminator.is_some() || !schema.one_of.is_empty() || schema.any_of.len() != 2 {
+    if schema.discriminator.is_some() || !schema.one_of.is_empty() || schema.any_of.len() < 2 {
         return Ok(None);
     }
 
     reject_any_of_sibling_keywords(schema, context)?;
 
     let mut has_open_string = false;
-    let mut enum_branch = None;
+    let mut merged_values = vec![];
+    let mut merged_explicit = BTreeMap::new();
+    let mut explicit_rust_names = BTreeSet::new();
+    let mut seen = BTreeSet::new();
+    let mut branch_description = None;
+    let mut duplicate_value = None;
+    let mut duplicate_rust_name = None;
 
     for branch in &schema.any_of {
         if open_string_any_of_branch_is_unconstrained_string(branch, context)? {
+            if has_open_string {
+                return Ok(None);
+            }
             has_open_string = true;
             continue;
         }
 
-        if let Some(ty) = validate_open_string_enum_any_of_branch(branch, context)? {
-            enum_branch = Some(ty);
-            continue;
+        let Some(contribution) = validate_open_string_enum_any_of_branch(branch, context)? else {
+            return Ok(None);
+        };
+
+        for value in contribution.values.iter() {
+            let wire_name = value
+                .as_str()
+                .expect("open string enum branch values are strings");
+            if !seen.insert(wire_name.to_owned()) {
+                if duplicate_value.is_none() {
+                    duplicate_value = Some(wire_name.to_owned());
+                }
+                continue;
+            }
+            merged_values.push(value.clone());
         }
-
-        return Ok(None);
+        for (wire_name, rust_name) in contribution.explicit_variants {
+            if merged_explicit.contains_key(&wire_name) {
+                // The colliding wire value is already recorded in
+                // `duplicate_value`; keep the first branch's mapping.
+                continue;
+            }
+            if !explicit_rust_names.insert(rust_name.clone()) && duplicate_rust_name.is_none() {
+                duplicate_rust_name = Some(rust_name.clone());
+            }
+            merged_explicit.insert(wire_name, rust_name);
+        }
+        if branch_description.is_none() {
+            branch_description = contribution.description;
+        }
     }
 
-    let Some(enum_branch) = enum_branch else {
-        return Ok(None);
-    };
-    if !has_open_string {
+    // Merge conflicts are reported only once the shape is confirmed to be an
+    // open string enum; otherwise the schema falls through to plain-union
+    // validation, where these branches are legal.
+    if !has_open_string || merged_values.is_empty() {
         return Ok(None);
     }
+    if let Some(value) = duplicate_value {
+        return Err(ValidationError::DuplicateOpenStringEnumValue {
+            context: context.to_owned(),
+            value,
+        });
+    }
+    if let Some(rust_name) = duplicate_rust_name {
+        return Err(ValidationError::DuplicateSatayEnumVariantName {
+            context: context.to_owned(),
+            rust_name,
+        });
+    }
 
-    let description =
-        optional_description(&schema.description).or_else(|| enum_branch.description.clone());
+    let enum_ = validated_enum(
+        &merged_values,
+        &merged_explicit,
+        EnumFallback::OtherString,
+        context,
+    )?;
 
     Ok(Some(ValidatedType {
-        description,
-        ..enum_branch
+        kind: ValidatedTypeKind::Enum(enum_),
+        nullable: false,
+        validation: None,
+        description: optional_description(&schema.description).or(branch_description),
+        treat_error_as_none: false,
     }))
 }
 
@@ -529,10 +581,17 @@ fn open_string_any_of_branch_is_unconstrained_string(
         && unsupported_union_extension(schema).is_none())
 }
 
-fn validate_open_string_enum_any_of_branch(
-    branch: &OasSchema,
+/// One enum/const branch's contribution to a merged open string enum.
+struct OpenStringEnumBranch<'a> {
+    values: Cow<'a, [JsonValue]>,
+    explicit_variants: BTreeMap<String, String>,
+    description: Option<String>,
+}
+
+fn validate_open_string_enum_any_of_branch<'a>(
+    branch: &'a OasSchema,
     context: &str,
-) -> Result<Option<ValidatedType>, ValidationError> {
+) -> Result<Option<OpenStringEnumBranch<'a>>, ValidationError> {
     let Some(schema) = open_string_any_of_object_branch(branch, context)? else {
         return Ok(None);
     };
@@ -540,25 +599,25 @@ fn validate_open_string_enum_any_of_branch(
         return Ok(None);
     }
     let (schema_type, nullable) = schema_type_and_nullable(schema, context)?;
-    if nullable || schema_type != Some(OasSchemaType::String) || schema.enum_values.is_empty() {
+    if nullable {
+        return Ok(None);
+    }
+    if !schema.enum_values.is_empty() && schema_type != Some(OasSchemaType::String) {
         return Ok(None);
     }
 
-    validate_enum_shape(&schema.enum_values, schema_type, context)?;
-    let explicit_variants = validate_type_enum_satay(schema, &schema.enum_values, context)?;
-    let enum_ = validated_enum(
-        &schema.enum_values,
-        &explicit_variants,
-        EnumFallback::OtherString,
-        context,
-    )?;
+    let values = effective_enum_values(schema, schema_type, context)?;
+    if values.is_empty() {
+        return Ok(None);
+    }
 
-    Ok(Some(ValidatedType {
-        kind: ValidatedTypeKind::Enum(enum_),
-        nullable: false,
-        validation: None,
+    validate_enum_shape(&values, schema_type, context)?;
+    let explicit_variants = validate_type_enum_satay(schema, &values, context)?;
+
+    Ok(Some(OpenStringEnumBranch {
+        values,
+        explicit_variants,
         description: optional_description(&schema.description),
-        treat_error_as_none: false,
     }))
 }
 
@@ -842,17 +901,18 @@ fn validate_inline_plain_union_branch(
         return Err(keyword.branch_error(context, index));
     }
 
-    if !schema.enum_values.is_empty() {
-        if schema_type != Some(OasSchemaType::String) {
+    let enum_values = effective_enum_values(schema, schema_type, context)?;
+    if !enum_values.is_empty() {
+        if !schema.enum_values.is_empty() && schema_type != Some(OasSchemaType::String) {
             return Err(keyword.branch_error(context, index));
         }
 
-        validate_enum_shape(&schema.enum_values, schema_type, context)
+        validate_enum_shape(&enum_values, schema_type, context)
             .map_err(|_| keyword.branch_error(context, index))?;
-        let explicit_variants = validate_type_enum_satay(schema, &schema.enum_values, context)
+        let explicit_variants = validate_type_enum_satay(schema, &enum_values, context)
             .map_err(|_| keyword.branch_error(context, index))?;
         let enum_ = validated_enum(
-            &schema.enum_values,
+            &enum_values,
             &explicit_variants,
             EnumFallback::None,
             context,

@@ -85,12 +85,10 @@ fn operation_contains_map(operation: &Operation) -> bool {
             .request_body
             .as_ref()
             .is_some_and(|body| body.ty.contains_map())
-        || operation.responses.iter().any(|response| {
-            response
-                .body
-                .as_ref()
-                .is_some_and(super::super::model::TypeRef::contains_map)
-        })
+        || operation
+            .responses
+            .iter()
+            .any(|response| response.body.as_ref().is_some_and(TypeRef::contains_map))
 }
 
 fn build_parts_types_use(api: &Api, operation: &Operation) -> Option<syn::ItemUse> {

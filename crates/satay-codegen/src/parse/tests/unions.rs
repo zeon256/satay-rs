@@ -678,6 +678,433 @@ components:
 }
 
 #[test]
+fn parses_any_of_open_string_enum_with_bare_const_branches() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /model:
+    get:
+      operationId: getModel
+      responses:
+        '200':
+          description: Model
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Model'
+components:
+  schemas:
+    Model:
+      description: The model that will complete your prompt.
+      anyOf:
+        - type: string
+        - const: claude-sonnet-5
+          description: Our best model.
+          x-stainless-nominal: false
+        - const: claude-opus-4-1
+          deprecated: true
+"#,
+    );
+
+    let model = component(&api, "Model");
+    assert_eq!(
+        model.description.as_deref(),
+        Some("The model that will complete your prompt.")
+    );
+    match &model.kind {
+        ComponentKind::Enum(enum_) => {
+            let variants = &enum_.variants;
+            assert_eq!(variants.len(), 2);
+            assert_eq!(variants[0].wire_name, "claude-sonnet-5");
+            assert_eq!(variants[0].rust_name, "ClaudeSonnet5");
+            assert_eq!(variants[1].wire_name, "claude-opus-4-1");
+            assert_eq!(variants[1].rust_name, "ClaudeOpus41");
+            assert_eq!(enum_.fallback, EnumFallback::OtherString);
+        }
+        other => panic!("expected Model enum, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_any_of_open_string_enum_mixing_enum_and_const_branches() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /model:
+    get:
+      operationId: getModel
+      responses:
+        '200':
+          description: Model
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Model'
+components:
+  schemas:
+    Model:
+      anyOf:
+        - type: string
+        - type: string
+          enum:
+            - a
+            - b
+        - type: string
+          const: c
+"#,
+    );
+
+    let model = component(&api, "Model");
+    match &model.kind {
+        ComponentKind::Enum(enum_) => {
+            let variants = &enum_.variants;
+            assert_eq!(variants.len(), 3);
+            assert_eq!(variants[0].wire_name, "a");
+            assert_eq!(variants[0].rust_name, "A");
+            assert_eq!(variants[1].wire_name, "b");
+            assert_eq!(variants[1].rust_name, "B");
+            assert_eq!(variants[2].wire_name, "c");
+            assert_eq!(variants[2].rust_name, "C");
+            assert_eq!(enum_.fallback, EnumFallback::OtherString);
+        }
+        other => panic!("expected Model enum, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_duplicate_open_string_enum_value_across_branches() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Model:
+      anyOf:
+        - type: string
+        - type: string
+          enum:
+            - all
+        - const: all
+"##,
+    );
+    match err {
+        ValidationError::DuplicateOpenStringEnumValue { context, value } => {
+            assert_eq!(context, "schema `Model`");
+            assert_eq!(value, "all");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn parses_plain_union_with_overlapping_inline_enum_branches() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /choice:
+    get:
+      operationId: getChoice
+      responses:
+        '200':
+          description: Choice
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Choice'
+components:
+  schemas:
+    Choice:
+      anyOf:
+        - type: string
+          enum:
+            - a
+            - b
+        - type: string
+          enum:
+            - b
+            - c
+"#,
+    );
+
+    let choice = component(&api, "Choice");
+    match &choice.kind {
+        ComponentKind::Union(union) => {
+            assert!(union.tag.is_none());
+            assert_eq!(union.variants.len(), 2);
+            assert_eq!(union.variants[0].rust_name, "Enum");
+            assert_eq!(union.variants[1].rust_name, "Enum_2");
+        }
+        other => panic!("expected Choice union, got {other:?}"),
+    }
+
+    let first = component(&api, "ChoiceEnum");
+    match &first.kind {
+        ComponentKind::Enum(enum_) => {
+            let wire: Vec<_> = enum_
+                .variants
+                .iter()
+                .map(|variant| variant.wire_name.as_str())
+                .collect();
+            assert_eq!(wire, ["a", "b"]);
+            assert_eq!(enum_.fallback, EnumFallback::None);
+        }
+        other => panic!("expected ChoiceEnum enum, got {other:?}"),
+    }
+
+    let second = component(&api, "ChoiceEnum2");
+    match &second.kind {
+        ComponentKind::Enum(enum_) => {
+            let wire: Vec<_> = enum_
+                .variants
+                .iter()
+                .map(|variant| variant.wire_name.as_str())
+                .collect();
+            assert_eq!(wire, ["b", "c"]);
+            assert_eq!(enum_.fallback, EnumFallback::None);
+        }
+        other => panic!("expected ChoiceEnum2 enum, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_duplicate_explicit_variant_name_across_open_enum_branches() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Model:
+      anyOf:
+        - type: string
+        - type: string
+          enum:
+            - a
+          x-satay:
+            enum-variants:
+              a: Value
+        - type: string
+          enum:
+            - b
+          x-satay:
+            enum-variants:
+              b: Value
+"##,
+    );
+    match err {
+        ValidationError::DuplicateSatayEnumVariantName { context, rust_name } => {
+            assert_eq!(context, "schema `Model`");
+            assert_eq!(rust_name, "Value");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_non_string_const_branch_in_any_of() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Broken:
+      anyOf:
+        - type: string
+        - const: 5
+"##,
+    );
+    match err {
+        ValidationError::UnsupportedAnyOfBranch { context, index } => {
+            assert_eq!(context, "schema `Broken`");
+            assert_eq!(index, 1);
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn parses_plain_union_with_const_string_branch() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /widget:
+    get:
+      operationId: getWidget
+      responses:
+        '200':
+          description: Widget
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Wrapper'
+components:
+  schemas:
+    Widget:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    Wrapper:
+      type: object
+      properties:
+        keep:
+          anyOf:
+            - $ref: '#/components/schemas/Widget'
+            - type: string
+              const: all
+"#,
+    );
+
+    let wrapper = component(&api, "Wrapper");
+    match &wrapper.kind {
+        ComponentKind::Struct(fields) => {
+            let keep = field(fields, "keep");
+            assert_eq!(keep.ty, TypeRef::Named("WrapperKeep".to_owned()));
+        }
+        other => panic!("expected Wrapper struct, got {other:?}"),
+    }
+
+    let keep = component(&api, "WrapperKeep");
+    match &keep.kind {
+        ComponentKind::Union(union) => {
+            assert!(union.tag.is_none());
+            assert_eq!(union.variants.len(), 2);
+            assert_eq!(union.variants[0].rust_name, "Widget");
+            assert_eq!(union.variants[0].ty, TypeRef::Named("Widget".to_owned()));
+            assert_eq!(union.variants[1].rust_name, "All");
+            assert_eq!(
+                union.variants[1].ty,
+                TypeRef::Named("WrapperKeepAll".to_owned())
+            );
+        }
+        other => panic!("expected WrapperKeep union, got {other:?}"),
+    }
+
+    let all = component(&api, "WrapperKeepAll");
+    match &all.kind {
+        ComponentKind::Enum(enum_) => {
+            assert_eq!(enum_.variants.len(), 1);
+            assert_eq!(enum_.variants[0].wire_name, "all");
+            assert_eq!(enum_.variants[0].rust_name, "All");
+            assert_eq!(enum_.fallback, EnumFallback::None);
+        }
+        other => panic!("expected WrapperKeepAll enum, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_plain_union_with_bare_const_branch() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /widget:
+    get:
+      operationId: getWidget
+      responses:
+        '200':
+          description: Widget
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Wrapper'
+components:
+  schemas:
+    Widget:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    Wrapper:
+      type: object
+      properties:
+        keep:
+          anyOf:
+            - $ref: '#/components/schemas/Widget'
+            - const: all
+"#,
+    );
+
+    let keep = component(&api, "WrapperKeep");
+    match &keep.kind {
+        ComponentKind::Union(union) => {
+            assert!(union.tag.is_none());
+            assert_eq!(union.variants.len(), 2);
+            assert_eq!(union.variants[0].rust_name, "Widget");
+            assert_eq!(union.variants[1].rust_name, "All");
+            assert_eq!(
+                union.variants[1].ty,
+                TypeRef::Named("WrapperKeepAll".to_owned())
+            );
+        }
+        other => panic!("expected WrapperKeep union, got {other:?}"),
+    }
+
+    let all = component(&api, "WrapperKeepAll");
+    match &all.kind {
+        ComponentKind::Enum(enum_) => {
+            assert_eq!(enum_.variants.len(), 1);
+            assert_eq!(enum_.variants[0].wire_name, "all");
+            assert_eq!(enum_.variants[0].rust_name, "All");
+            assert_eq!(enum_.fallback, EnumFallback::None);
+        }
+        other => panic!("expected WrapperKeepAll enum, got {other:?}"),
+    }
+}
+
+#[test]
 fn parses_constrained_string_branch_as_plain_union_not_open_enum() {
     let api = parse_valid(
         r#"
