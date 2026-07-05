@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.7.0...satay-codegen-v0.8.1) - 2026-07-05
+
+### Added
+
+- *(codegen)* support bare const string branches in anyOf as open string enums
+
 ## [0.8.0](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.7.0...satay-codegen-v0.8.0) - 2026-07-05
 
 ### Added
