@@ -7,6 +7,16 @@ use crate::model::{Api, ApiKeyLocation, ApiKeySecurityScheme, Field, Operation, 
 
 pub(super) fn render_api_file(api: &Api) -> syn::File {
     let mut items = vec![];
+    let has_map_input = api.operations.iter().any(|operation| {
+        super::input_fields(operation)
+            .iter()
+            .any(|field| field.ty.contains_map())
+    });
+    if has_map_input {
+        items.push(Item::Use(parse_quote!(
+            use std::collections::BTreeMap;
+        )));
+    }
     if let Some(operation_use) = build_api_operation_use(api) {
         items.push(Item::Use(operation_use));
     }
@@ -313,6 +323,7 @@ fn collect_type_refs(ty: &TypeRef, names: &mut Vec<Ident>) {
             names.push(super::ident(rust_name));
         }
         TypeRef::Array(inner) => collect_type_refs(inner, names),
+        TypeRef::Map(inner) => collect_type_refs(inner, names),
         TypeRef::Option(inner) => collect_type_refs(inner, names),
         TypeRef::Range(range_type) => {
             names.push(super::ident(&range_type.rust_name));
@@ -323,6 +334,7 @@ fn collect_type_refs(ty: &TypeRef, names: &mut Vec<Ident>) {
         | TypeRef::Integer(_)
         | TypeRef::F32
         | TypeRef::F64
-        | TypeRef::Bool => {}
+        | TypeRef::Bool
+        | TypeRef::JsonValue => {}
     }
 }

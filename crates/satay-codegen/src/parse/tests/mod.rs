@@ -74,5 +74,6 @@ mod constraints;
 mod errors;
 mod extensions;
 mod lowering;
+mod maps;
 mod naming;
 mod unions;

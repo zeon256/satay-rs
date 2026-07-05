@@ -273,6 +273,9 @@ fn value_expr(base: syn::Expr, ty: &TypeRef, base_kind: ValueBase) -> syn::Expr 
             parse_quote!(&#base.to_string())
         }
         TypeRef::Array(_) | TypeRef::Option(_) => unreachable!("arrays are handled by caller"),
+        TypeRef::Map(_) | TypeRef::JsonValue => {
+            unreachable!("map and JSON value parameters are rejected during validation")
+        }
     }
 }
 
@@ -289,6 +292,9 @@ fn constrained_value_expr(base: syn::Expr, inner: &TypeRef, base_kind: ValueBase
         }
         TypeRef::Array(_) | TypeRef::Constrained { .. } | TypeRef::Option(_) => {
             unreachable!("arrays are handled by caller")
+        }
+        TypeRef::Map(_) | TypeRef::JsonValue => {
+            unreachable!("map and JSON value parameters are rejected during validation")
         }
     }
 }

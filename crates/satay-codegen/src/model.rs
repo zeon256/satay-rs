@@ -191,6 +191,10 @@ pub(crate) enum TypeRef {
     F64,
     Bool,
     Array(Box<TypeRef>),
+    /// A JSON object with arbitrary keys, rendered as `BTreeMap<String, V>`.
+    Map(Box<TypeRef>),
+    /// Any JSON value, rendered as `satay_runtime::JsonValue`.
+    JsonValue,
     Range(RangeTypeRef),
     Named(String),
     Constrained {
@@ -304,6 +308,26 @@ impl TypeRef {
         match self {
             Self::Option(inner) => inner.non_option(),
             other => other,
+        }
+    }
+
+    /// True when the rendered type spells out `BTreeMap`, so the generated
+    /// file needs a `use std::collections::BTreeMap;` import.
+    pub(crate) fn contains_map(&self) -> bool {
+        match self {
+            Self::Map(_) => true,
+            Self::Array(inner) | Self::Option(inner) => inner.contains_map(),
+            Self::Constrained { inner, .. } => inner.contains_map(),
+            Self::String
+            | Self::ParsedString(_)
+            | Self::ParsedInteger(_)
+            | Self::Integer(_)
+            | Self::F32
+            | Self::F64
+            | Self::Bool
+            | Self::JsonValue
+            | Self::Range(_)
+            | Self::Named(_) => false,
         }
     }
 }

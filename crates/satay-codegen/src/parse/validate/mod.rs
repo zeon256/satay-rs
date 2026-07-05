@@ -70,9 +70,36 @@ impl ValidatedType {
     pub(crate) fn contains_any_of(&self) -> bool {
         match &self.kind {
             ValidatedTypeKind::AnyOf(_) => true,
-            ValidatedTypeKind::Array(item) => item.contains_any_of(),
+            ValidatedTypeKind::Array(item) | ValidatedTypeKind::Map(item) => item.contains_any_of(),
             ValidatedTypeKind::InlineStruct(fields) => {
                 fields.iter().any(|field| field.ty.contains_any_of())
+            }
+            ValidatedTypeKind::Named(_)
+            | ValidatedTypeKind::String
+            | ValidatedTypeKind::ParsedString(_)
+            | ValidatedTypeKind::ParsedInteger(_)
+            | ValidatedTypeKind::Integer(_)
+            | ValidatedTypeKind::F32
+            | ValidatedTypeKind::F64
+            | ValidatedTypeKind::Bool
+            | ValidatedTypeKind::JsonValue
+            | ValidatedTypeKind::Enum(_)
+            | ValidatedTypeKind::Range(_) => false,
+        }
+    }
+
+    pub(crate) fn contains_map_or_json_value(&self) -> bool {
+        match &self.kind {
+            ValidatedTypeKind::Map(_) | ValidatedTypeKind::JsonValue => true,
+            ValidatedTypeKind::Array(item) => item.contains_map_or_json_value(),
+            ValidatedTypeKind::InlineStruct(fields) => fields
+                .iter()
+                .any(|field| field.ty.contains_map_or_json_value()),
+            ValidatedTypeKind::AnyOf(union) => {
+                union.variants.iter().any(|variant| match &variant.kind {
+                    ValidatedUnionVariantKind::Reference { .. } => false,
+                    ValidatedUnionVariantKind::Inline(ty) => ty.contains_map_or_json_value(),
+                })
             }
             ValidatedTypeKind::Named(_)
             | ValidatedTypeKind::String
@@ -90,7 +117,9 @@ impl ValidatedType {
     pub(crate) fn contains_inline_struct(&self) -> bool {
         match &self.kind {
             ValidatedTypeKind::InlineStruct(_) => true,
-            ValidatedTypeKind::Array(item) => item.contains_inline_struct(),
+            ValidatedTypeKind::Array(item) | ValidatedTypeKind::Map(item) => {
+                item.contains_inline_struct()
+            }
             ValidatedTypeKind::AnyOf(union) => {
                 union.variants.iter().any(|variant| match &variant.kind {
                     ValidatedUnionVariantKind::Reference { .. } => false,
@@ -105,6 +134,7 @@ impl ValidatedType {
             | ValidatedTypeKind::F32
             | ValidatedTypeKind::F64
             | ValidatedTypeKind::Bool
+            | ValidatedTypeKind::JsonValue
             | ValidatedTypeKind::Enum(_)
             | ValidatedTypeKind::Range(_) => false,
         }
@@ -122,6 +152,10 @@ pub(crate) enum ValidatedTypeKind {
     F64,
     Bool,
     Array(Box<ValidatedType>),
+    /// A JSON object with arbitrary keys and a uniform value schema.
+    Map(Box<ValidatedType>),
+    /// Any JSON value (an empty JSON schema accepts everything).
+    JsonValue,
     Enum(Enum),
     AnyOf(ValidatedUnion),
     InlineStruct(Vec<ValidatedField>),

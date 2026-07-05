@@ -10,6 +10,7 @@ mod behavior;
 mod common;
 mod enums;
 mod integers;
+mod maps;
 mod parse_as;
 mod rejections;
 mod structure;

@@ -195,6 +195,12 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
             ValidatedTypeKind::Array(item) => TypeRef::Array(Box::new(
                 self.parse_type_ref_with_hint(item, &format!("{type_name_hint} item"), registry),
             )),
+            ValidatedTypeKind::Map(value) => TypeRef::Map(Box::new(self.parse_type_ref_with_hint(
+                value,
+                &format!("{type_name_hint} value"),
+                registry,
+            ))),
+            ValidatedTypeKind::JsonValue => TypeRef::JsonValue,
             ValidatedTypeKind::Enum(variants) => parse_inline_enum_ref(
                 variants.clone(),
                 type_name_hint,

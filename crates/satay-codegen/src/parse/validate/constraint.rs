@@ -18,6 +18,8 @@ pub(super) fn parse_validation(
         | TypeRef::ParsedInteger(_)
         | TypeRef::Range(_)
         | TypeRef::Bool
+        | TypeRef::Map(_)
+        | TypeRef::JsonValue
         | TypeRef::Named(_)
         | TypeRef::Constrained { .. }
         | TypeRef::Option(_) => Ok(None),

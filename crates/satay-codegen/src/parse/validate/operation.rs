@@ -217,6 +217,12 @@ fn validate_parameter(
         });
     }
 
+    if ty.contains_map_or_json_value() {
+        return Err(ValidationError::MapParameterUnsupported {
+            wire_name: wire_name.clone(),
+        });
+    }
+
     if location == ParameterLocation::Path && ty.is_array() {
         return Err(ValidationError::ArrayPathParameterUnsupported {
             wire_name: wire_name.clone(),

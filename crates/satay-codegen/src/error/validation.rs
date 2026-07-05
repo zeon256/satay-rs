@@ -194,8 +194,10 @@ pub enum ValidationError {
 
     /// An object schema has no properties (i.e. acts as a map/dictionary), which is unsupported.
     ///
-    /// Error message: `{context} is an object without properties; map/object schemas are not supported yet`
-    #[error("{context} is an object without properties; map/object schemas are not supported yet")]
+    /// Error message: `{context} is an object with neither `properties` nor a supported `additionalProperties` schema`
+    #[error(
+        "{context} is an object with neither `properties` nor a supported `additionalProperties` schema"
+    )]
     UnsupportedMapObjectSchema { context: String },
 
     /// A schema uses an unsupported type.
@@ -579,6 +581,12 @@ pub enum ValidationError {
     /// Error message: `parameter `{wire_name}` uses `anyOf`; anyOf parameters are not supported yet`
     #[error("parameter `{wire_name}` uses `anyOf`; anyOf parameters are not supported yet")]
     AnyOfParameterUnsupported { wire_name: String },
+
+    /// A parameter is a map or arbitrary JSON value, which has no URI/header encoding.
+    ///
+    /// Error message: `parameter `{wire_name}` is a map or JSON value; map parameters are not supported`
+    #[error("parameter `{wire_name}` is a map or JSON value; map parameters are not supported")]
+    MapParameterUnsupported { wire_name: String },
 
     /// A path parameter is an array, which is not supported.
     ///
