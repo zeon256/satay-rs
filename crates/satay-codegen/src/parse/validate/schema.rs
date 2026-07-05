@@ -3,8 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::mem;
 
 use oas3::spec::{
-    Discriminator as OasDiscriminator, ObjectSchema as OasObjectSchema, Schema as OasSchema,
-    SchemaType as OasSchemaType, SchemaTypeSet as OasSchemaTypeSet,
+    BooleanSchema as OasBooleanSchema, Discriminator as OasDiscriminator,
+    ObjectSchema as OasObjectSchema, Schema as OasSchema, SchemaType as OasSchemaType,
+    SchemaTypeSet as OasSchemaTypeSet,
 };
 use serde_json::Value as JsonValue;
 
@@ -325,31 +326,46 @@ fn validate_union_type_schema(
     context: &str,
     stack: &mut Vec<String>,
 ) -> Result<ValidatedType, ValidationError> {
+    // An empty JSON schema (`{}`, and the indistinguishable `anyOf: []` /
+    // `allOf: []`) accepts every JSON value.
+    if schema.any_of.is_empty()
+        && schema.discriminator.is_none()
+        && schema_is_empty_any_of_shape(schema)
+    {
+        return Ok(ValidatedType {
+            kind: ValidatedTypeKind::JsonValue,
+            nullable: false,
+            validation: None,
+            description: optional_description(&schema.description),
+            treat_error_as_none: false,
+        });
+    }
+
     if let Some(open_enum) = validate_open_string_enum_any_of(schema, context)? {
         return Ok(open_enum);
     }
 
-    let (union, nullable) = if let Some(discriminator) = schema.discriminator.as_ref() {
+    let (kind, nullable) = if let Some(discriminator) = schema.discriminator.as_ref() {
         (
-            validate_discriminator_union(document, schema, discriminator, context, stack)?,
+            ValidatedTypeKind::AnyOf(validate_discriminator_union(
+                document,
+                schema,
+                discriminator,
+                context,
+                stack,
+            )?),
             false,
         )
     } else if !schema.one_of.is_empty() && schema.any_of.is_empty() {
         let plain = validate_plain_one_of_union(document, schema, context, stack)?;
-        (
-            hoist_single_inline_union_variant(plain.union),
-            plain.nullable,
-        )
+        (hoist_single_inline_union_kind(plain.union), plain.nullable)
     } else {
         let plain = validate_plain_any_of_union(document, schema, context, stack)?;
-        (
-            hoist_single_inline_union_variant(plain.union),
-            plain.nullable,
-        )
+        (hoist_single_inline_union_kind(plain.union), plain.nullable)
     };
 
     Ok(ValidatedType {
-        kind: ValidatedTypeKind::AnyOf(union),
+        kind,
         nullable,
         validation: None,
         description: optional_description(&schema.description),
@@ -357,15 +373,17 @@ fn validate_union_type_schema(
     })
 }
 
-/// Hoists a nested union out of an untagged wrapper union with no other variants.
+/// Hoists a nested union or map out of an untagged wrapper union with no other
+/// variants.
 ///
-/// A plain union whose only variant is an inline nested union (for example the
-/// nullable wrapper `anyOf: [{oneOf: [...], discriminator}, {type: "null"}]`
-/// after null folding) accepts exactly the payloads of the nested union, so the
-/// wrapper adds nothing but an extra generated type.
-fn hoist_single_inline_union_variant(mut union: ValidatedUnion) -> ValidatedUnion {
+/// A plain union whose only variant is an inline nested union or map (for
+/// example the nullable wrappers `anyOf: [{oneOf: [...], discriminator}, null]`
+/// and `anyOf: [{type: object, additionalProperties: ...}, null]` after null
+/// folding) accepts exactly the payloads of that variant, so the wrapper adds
+/// nothing but an extra generated type.
+fn hoist_single_inline_union_kind(mut union: ValidatedUnion) -> ValidatedTypeKind {
     if union.tag.is_some() || union.variants.len() != 1 {
-        return union;
+        return ValidatedTypeKind::AnyOf(union);
     }
 
     let variant = union
@@ -374,16 +392,16 @@ fn hoist_single_inline_union_variant(mut union: ValidatedUnion) -> ValidatedUnio
         .expect("single-variant union has a variant");
     match variant.kind {
         ValidatedUnionVariantKind::Inline(ValidatedType {
-            kind: ValidatedTypeKind::AnyOf(inner),
+            kind: kind @ (ValidatedTypeKind::AnyOf(_) | ValidatedTypeKind::Map(_)),
             ..
-        }) => inner,
+        }) => kind,
         kind => {
             union.variants.push(ValidatedUnionVariant {
                 rust_name: variant.rust_name,
                 kind,
                 tag_value: variant.tag_value,
             });
-            union
+            ValidatedTypeKind::AnyOf(union)
         }
     }
 }
@@ -438,6 +456,9 @@ fn open_string_any_of_branch_is_unconstrained_string(
     let Some(schema) = open_string_any_of_object_branch(branch, context)? else {
         return Ok(false);
     };
+    if inline_union_null_branch(schema) {
+        return Ok(false);
+    }
     let (schema_type, nullable) = schema_type_and_nullable(schema, context)?;
 
     let OasObjectSchema {
@@ -515,6 +536,9 @@ fn validate_open_string_enum_any_of_branch(
     let Some(schema) = open_string_any_of_object_branch(branch, context)? else {
         return Ok(None);
     };
+    if inline_union_null_branch(schema) {
+        return Ok(None);
+    }
     let (schema_type, nullable) = schema_type_and_nullable(schema, context)?;
     if nullable || schema_type != Some(OasSchemaType::String) || schema.enum_values.is_empty() {
         return Ok(None);
@@ -849,6 +873,24 @@ fn validate_inline_plain_union_branch(
     let Some(schema_type) = schema_type else {
         return Err(keyword.branch_error(context, index));
     };
+
+    if schema_type == OasSchemaType::Object {
+        if !is_map_object_schema(schema) {
+            return Err(keyword.branch_error(context, index));
+        }
+
+        let ty = validate_object_type_schema(
+            document,
+            schema,
+            Some(schema_type),
+            false,
+            context,
+            false,
+            stack,
+        )?;
+        return Ok((ty, "Map".to_owned()));
+    }
+
     let Some(rust_name) = inline_primitive_union_variant_name(schema_type) else {
         return Err(keyword.branch_error(context, index));
     };
@@ -865,6 +907,17 @@ fn validate_inline_plain_union_branch(
     .map_err(|_| keyword.branch_error(context, index))?;
 
     Ok((ty, rust_name.to_owned()))
+}
+
+/// True when an object schema has no declared properties and a usable
+/// `additionalProperties` schema, i.e. it describes a homogeneous map.
+fn is_map_object_schema(schema: &OasObjectSchema) -> bool {
+    schema.properties.is_empty()
+        && match schema.additional_properties.as_ref() {
+            Some(OasSchema::Boolean(OasBooleanSchema(allowed))) => *allowed,
+            Some(OasSchema::Object(_)) => true,
+            None => false,
+        }
 }
 
 fn reject_shadowed_plain_union_branch(
@@ -2171,7 +2224,7 @@ fn collect_type_union_targets(
                 }
             }
         }
-        ValidatedTypeKind::Array(item) => {
+        ValidatedTypeKind::Array(item) | ValidatedTypeKind::Map(item) => {
             collect_type_union_targets(item, schemas_by_rust_name, targets);
         }
         ValidatedTypeKind::InlineStruct(fields) => {
@@ -2193,6 +2246,7 @@ fn collect_type_union_targets(
         | ValidatedTypeKind::F32
         | ValidatedTypeKind::F64
         | ValidatedTypeKind::Bool
+        | ValidatedTypeKind::JsonValue
         | ValidatedTypeKind::Enum(_)
         | ValidatedTypeKind::Range(_) => {}
     }
@@ -2349,9 +2403,37 @@ fn validate_inline_type_kind(
                 context: context.to_owned(),
             })
         }
-        Some(OasSchemaType::Object) => Err(ValidationError::UnsupportedMapObjectSchema {
-            context: context.to_owned(),
-        }),
+        Some(OasSchemaType::Object) => match schema.additional_properties.as_ref() {
+            Some(OasSchema::Boolean(OasBooleanSchema(true))) => {
+                reject_keyword(schema.min_properties.is_some(), "minProperties", context)?;
+                reject_keyword(schema.max_properties.is_some(), "maxProperties", context)?;
+                Ok(ValidatedTypeKind::Map(Box::new(ValidatedType {
+                    kind: ValidatedTypeKind::JsonValue,
+                    nullable: false,
+                    validation: None,
+                    description: None,
+                    treat_error_as_none: false,
+                })))
+            }
+            Some(value @ OasSchema::Object(_)) => {
+                reject_keyword(schema.min_properties.is_some(), "minProperties", context)?;
+                reject_keyword(schema.max_properties.is_some(), "maxProperties", context)?;
+                Ok(ValidatedTypeKind::Map(Box::new(
+                    validate_type_schema_with_stack(
+                        document,
+                        value,
+                        &format!("{context} additionalProperties"),
+                        false,
+                        stack,
+                    )?,
+                )))
+            }
+            Some(OasSchema::Boolean(OasBooleanSchema(false))) | None => {
+                Err(ValidationError::UnsupportedMapObjectSchema {
+                    context: context.to_owned(),
+                })
+            }
+        },
         Some(kind) => Err(ValidationError::UnsupportedSchemaType {
             context: context.to_owned(),
             kind: schema_type_wire(kind).to_owned(),
@@ -2394,6 +2476,8 @@ fn validation_base_type(kind: &ValidatedTypeKind) -> Option<TypeRef> {
         ValidatedTypeKind::Named(_)
         | ValidatedTypeKind::ParsedString(_)
         | ValidatedTypeKind::ParsedInteger(_)
+        | ValidatedTypeKind::Map(_)
+        | ValidatedTypeKind::JsonValue
         | ValidatedTypeKind::Enum(_)
         | ValidatedTypeKind::AnyOf(_)
         | ValidatedTypeKind::InlineStruct(_)

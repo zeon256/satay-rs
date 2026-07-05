@@ -17,6 +17,16 @@ pub(super) fn render_types_file(api: &Api) -> syn::File {
         .components
         .iter()
         .any(|component| matches!(component.kind, ComponentKind::Range(_)));
+    let has_map = api.components.iter().any(component_contains_map)
+        || api
+            .constrained_types
+            .iter()
+            .any(|constrained| constrained.inner.contains_map());
+    if has_map {
+        items.push(syn::parse_quote!(
+            use std::collections::BTreeMap;
+        ));
+    }
     if has_range {
         items.push(syn::parse_quote!(
             use std::{convert, fmt};
@@ -39,6 +49,19 @@ pub(super) fn render_types_file(api: &Api) -> syn::File {
         shebang: None,
         attrs: vec![],
         items,
+    }
+}
+
+fn component_contains_map(component: &Component) -> bool {
+    match &component.kind {
+        ComponentKind::Struct(fields) => fields.iter().any(|field| field.ty.contains_map()),
+        ComponentKind::Union(union) => union
+            .variants
+            .iter()
+            .any(|variant| variant.ty.contains_map()),
+        ComponentKind::Alias(ty) => ty.contains_map(),
+        ComponentKind::Nutype(constrained) => constrained.inner.contains_map(),
+        ComponentKind::Enum(_) | ComponentKind::Range(_) => false,
     }
 }
 

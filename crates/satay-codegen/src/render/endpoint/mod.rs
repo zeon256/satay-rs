@@ -32,6 +32,11 @@ pub(super) fn render_endpoint_mod(_operation: &Operation) -> syn::File {
 
 pub(super) fn render_endpoint_parts_file(api: &Api, operation: &Operation) -> syn::File {
     let mut items = vec![];
+    if operation_contains_map(operation) {
+        items.push(Item::Use(parse_quote!(
+            use std::collections::BTreeMap;
+        )));
+    }
     if let Some(use_types) = build_parts_types_use(api, operation) {
         items.push(Item::Use(use_types));
     }
@@ -69,6 +74,23 @@ pub(super) fn render_endpoint_json_file(api: &Api, operation: &Operation) -> syn
         attrs: vec![],
         items,
     }
+}
+
+fn operation_contains_map(operation: &Operation) -> bool {
+    operation
+        .parameters
+        .iter()
+        .any(|param| param.ty.contains_map())
+        || operation
+            .request_body
+            .as_ref()
+            .is_some_and(|body| body.ty.contains_map())
+        || operation.responses.iter().any(|response| {
+            response
+                .body
+                .as_ref()
+                .is_some_and(super::super::model::TypeRef::contains_map)
+        })
 }
 
 fn build_parts_types_use(api: &Api, operation: &Operation) -> Option<syn::ItemUse> {
@@ -133,6 +155,7 @@ fn collect_type_refs(ty: &TypeRef, names: &mut Vec<Ident>) {
             names.push(super::ident(rust_name));
         }
         TypeRef::Array(inner) => collect_type_refs(inner, names),
+        TypeRef::Map(inner) => collect_type_refs(inner, names),
         TypeRef::Option(inner) => collect_type_refs(inner, names),
         TypeRef::Range(range_type) => {
             names.push(super::ident(&range_type.rust_name));
@@ -143,6 +166,7 @@ fn collect_type_refs(ty: &TypeRef, names: &mut Vec<Ident>) {
         | TypeRef::Integer(_)
         | TypeRef::F32
         | TypeRef::F64
-        | TypeRef::Bool => {}
+        | TypeRef::Bool
+        | TypeRef::JsonValue => {}
     }
 }

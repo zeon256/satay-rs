@@ -172,6 +172,11 @@ pub fn rust_type(ty: &TypeRef) -> syn::Type {
             let item = rust_type(item);
             parse_quote!(Vec<#item>)
         }
+        TypeRef::Map(value) => {
+            let value = rust_type(value);
+            parse_quote!(BTreeMap<String, #value>)
+        }
+        TypeRef::JsonValue => parse_quote!(satay_runtime::JsonValue),
         TypeRef::Range(range_type) => {
             let name = ident(&range_type.rust_name);
             parse_quote!(#name)

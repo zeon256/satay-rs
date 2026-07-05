@@ -1110,8 +1110,8 @@ components:
 }
 
 #[test]
-fn rejects_empty_any_of() {
-    let err = parse_invalid(
+fn parses_empty_any_of_as_json_value() {
+    let api = parse_valid(
         r##"
 openapi: 3.1.0
 info:
@@ -1130,11 +1130,9 @@ components:
       anyOf: []
 "##,
     );
-    match err {
-        ValidationError::EmptyAnyOf { context } => {
-            assert_eq!(context, "schema `Broken`");
-        }
-        other => panic!("unexpected error: {other}"),
+    match &component(&api, "Broken").kind {
+        ComponentKind::Alias(alias) => assert_eq!(*alias, TypeRef::JsonValue),
+        other => panic!("expected Broken alias, got {other:?}"),
     }
 }
 

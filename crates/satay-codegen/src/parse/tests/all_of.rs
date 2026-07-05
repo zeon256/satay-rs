@@ -731,8 +731,8 @@ components:
 }
 
 #[test]
-fn rejects_empty_all_of() {
-    let err = parse_invalid(
+fn parses_empty_all_of_as_json_value() {
+    let api = parse_valid(
         r##"
 openapi: 3.1.0
 info:
@@ -751,10 +751,8 @@ components:
       allOf: []
 "##,
     );
-    match err {
-        ValidationError::EmptyAnyOf { context } => {
-            assert_eq!(context, "schema `Empty`");
-        }
-        other => panic!("unexpected error: {other}"),
+    match &component(&api, "Empty").kind {
+        ComponentKind::Alias(alias) => assert_eq!(*alias, TypeRef::JsonValue),
+        other => panic!("expected Empty alias, got {other:?}"),
     }
 }
