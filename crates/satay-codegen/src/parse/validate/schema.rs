@@ -94,6 +94,16 @@ fn validate_type_schema_with_stack(
     }
     reject_one_of(schema, context)?;
     if !schema.all_of.is_empty() {
+        if let Some(reference) = annotation_only_all_of_ref_wrapper(schema)
+            && all_of_ref_wrapper_unwraps(document, reference)?
+        {
+            let mut ty = ValidatedType::named(schema_ref_type_name(reference)?);
+            ty.description = match optional_description(&schema.description) {
+                Some(description) => Some(description),
+                None => referenced_schema_description(document, reference)?,
+            };
+            return Ok(ty);
+        }
         return Ok(ValidatedType {
             kind: ValidatedTypeKind::InlineStruct(validate_inline_all_of_struct_properties(
                 document, schema, context, stack,
@@ -581,6 +591,82 @@ fn open_string_any_of_branch_is_unconstrained_string(
         && unsupported_union_extension(schema).is_none())
 }
 
+/// Returns the single local `$ref` when a schema is an annotation-only `allOf`
+/// wrapper: exactly one `$ref` branch with only annotation siblings. This is a
+/// common OpenAPI idiom for attaching `title`/`description` to a reference.
+fn annotation_only_all_of_ref_wrapper(schema: &OasObjectSchema) -> Option<&str> {
+    let OasObjectSchema {
+        all_of,
+        any_of,
+        one_of,
+        items,
+        prefix_items,
+        properties,
+        additional_properties,
+        schema_type,
+        enum_values,
+        const_value,
+        multiple_of,
+        maximum,
+        exclusive_maximum,
+        minimum,
+        exclusive_minimum,
+        max_length,
+        min_length,
+        pattern,
+        max_items,
+        min_items,
+        unique_items,
+        max_properties,
+        min_properties,
+        required,
+        format,
+        title: _,
+        description: _,
+        default: _,
+        deprecated: _,
+        read_only: _,
+        write_only: _,
+        examples: _,
+        discriminator,
+        example: _,
+        extensions: _,
+    } = schema;
+
+    if all_of.len() != 1 {
+        return None;
+    }
+    let reference = schema_ref(&all_of[0], "").ok().flatten()?;
+
+    (any_of.is_empty()
+        && one_of.is_empty()
+        && discriminator.is_none()
+        && schema_type.is_none()
+        && enum_values.is_empty()
+        && const_value.is_none()
+        && items.is_none()
+        && prefix_items.is_empty()
+        && properties.is_empty()
+        && additional_properties.is_none()
+        && required.is_empty()
+        && format.is_none()
+        && multiple_of.is_none()
+        && maximum.is_none()
+        && exclusive_maximum.is_none()
+        && minimum.is_none()
+        && exclusive_minimum.is_none()
+        && max_length.is_none()
+        && min_length.is_none()
+        && pattern.is_none()
+        && max_items.is_none()
+        && min_items.is_none()
+        && unique_items.is_none()
+        && max_properties.is_none()
+        && min_properties.is_none()
+        && unsupported_union_extension(schema).is_none())
+    .then_some(reference)
+}
+
 /// One enum/const branch's contribution to a merged open string enum.
 struct OpenStringEnumBranch<'a> {
     values: Cow<'a, [JsonValue]>,
@@ -799,6 +885,19 @@ fn validate_plain_union_branch(
         return Ok(PlainUnionBranch::Null);
     }
 
+    if let Some(reference) = annotation_only_all_of_ref_wrapper(schema) {
+        let schema_name = local_ref_name(reference, "schemas")?;
+        let type_name = schema_ref_type_name(reference)?;
+        return Ok(PlainUnionBranch::Variant(Box::new(ValidatedUnionVariant {
+            rust_name: unique_ident(type_name.clone(), used),
+            kind: ValidatedUnionVariantKind::Reference {
+                type_name,
+                schema_name,
+            },
+            tag_value: None,
+        })));
+    }
+
     if let Some(discriminator) = schema.discriminator.as_ref()
         && !schema.one_of.is_empty()
         && schema.any_of.is_empty()
@@ -1010,6 +1109,23 @@ fn plain_union_branch_shadows(
     previous: &ValidatedUnionVariant,
     current: &ValidatedUnionVariant,
 ) -> bool {
+    if let (
+        ValidatedUnionVariantKind::Reference {
+            schema_name: previous_schema,
+            ..
+        },
+        ValidatedUnionVariantKind::Reference {
+            schema_name: current_schema,
+            ..
+        },
+    ) = (&previous.kind, &current.kind)
+    {
+        // A repeated reference to the same component — direct or unwrapped from
+        // an annotation-only `allOf` wrapper — accepts exactly the payloads of
+        // the earlier branch, so the later branch can never deserialize.
+        return previous_schema == current_schema;
+    }
+
     let (ValidatedUnionVariantKind::Inline(previous), ValidatedUnionVariantKind::Inline(current)) =
         (&previous.kind, &current.kind)
     else {
@@ -1895,6 +2011,31 @@ fn component_schema<'a>(
         .ok_or_else(|| ValidationError::MissingJsonPointerToken {
             token: schema_name.to_owned(),
         })
+}
+
+/// True when an annotation-only `allOf` wrapper in type position should unwrap
+/// to a component reference. Struct-shaped targets (object with properties, or
+/// `allOf` compositions) keep the existing field-flattening path so their
+/// generated shape and the `allOf` recursion guard are unchanged.
+fn all_of_ref_wrapper_unwraps(
+    document: &ResolvedDocument<'_>,
+    reference: &str,
+) -> Result<bool, ValidationError> {
+    let name = local_ref_name(reference, "schemas")?;
+    let target = component_schema(document, &name)?;
+    if schema_ref(target, "")?.is_some() {
+        return Ok(true);
+    }
+    let Ok(object) = object_schema(target, "") else {
+        return Ok(false);
+    };
+    if schema_is_union(object) {
+        return Ok(true);
+    }
+    if !object.all_of.is_empty() || !object.properties.is_empty() {
+        return Ok(false);
+    }
+    Ok(true)
 }
 
 fn reject_all_of_sibling_keywords(

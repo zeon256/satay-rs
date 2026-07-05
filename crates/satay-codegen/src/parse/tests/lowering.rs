@@ -568,3 +568,57 @@ components:
         "single-reference untagged union must not synthesize a wrapper component"
     );
 }
+
+#[test]
+fn lowers_wrapped_single_ref_nullable_any_of_to_option_of_ref() {
+    let api = parse_valid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Profile:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    User:
+      type: object
+      properties:
+        profile:
+          anyOf:
+            - description: The user's profile.
+              allOf:
+                - $ref: '#/components/schemas/Profile'
+            - type: 'null'
+"##,
+    );
+
+    match &component(&api, "User").kind {
+        ComponentKind::Struct(fields) => {
+            assert_eq!(
+                field(fields, "profile").ty,
+                TypeRef::Option(Box::new(TypeRef::Named("Profile".to_owned())))
+            );
+        }
+        other => panic!("expected User struct, got {other:?}"),
+    }
+
+    assert!(
+        !api.components
+            .iter()
+            .any(|component| component.rust_name == "UserProfile"),
+        "single-reference untagged union must not synthesize a wrapper component"
+    );
+}

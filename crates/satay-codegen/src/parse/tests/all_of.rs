@@ -756,3 +756,204 @@ components:
         other => panic!("expected Empty alias, got {other:?}"),
     }
 }
+
+#[test]
+fn unwraps_annotation_only_all_of_ref_wrapper_property_to_named_type() {
+    let api = parse_valid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Relationship:
+      type: string
+      enum:
+        - friend
+        - family
+    Person:
+      type: object
+      properties:
+        relationship:
+          description: How they are related.
+          allOf:
+            - $ref: '#/components/schemas/Relationship'
+"##,
+    );
+
+    match &component(&api, "Person").kind {
+        ComponentKind::Struct(fields) => {
+            let relationship = field(fields, "relationship");
+            assert_eq!(relationship.ty, TypeRef::Named("Relationship".to_owned()));
+            assert_eq!(
+                relationship.description.as_deref(),
+                Some("How they are related.")
+            );
+            assert!(!relationship.required);
+        }
+        other => panic!("expected Person struct, got {other:?}"),
+    }
+}
+
+#[test]
+fn wrapped_ref_property_without_description_uses_referenced_description() {
+    let api = parse_valid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Relationship:
+      description: The relationship kind.
+      type: string
+      enum:
+        - friend
+        - family
+    Person:
+      type: object
+      properties:
+        relationship:
+          title: Relationship
+          allOf:
+            - $ref: '#/components/schemas/Relationship'
+"##,
+    );
+
+    match &component(&api, "Person").kind {
+        ComponentKind::Struct(fields) => {
+            assert_eq!(
+                field(fields, "relationship").description.as_deref(),
+                Some("The relationship kind.")
+            );
+        }
+        other => panic!("expected Person struct, got {other:?}"),
+    }
+}
+
+#[test]
+fn unwraps_annotation_only_all_of_ref_wrapper_property_targeting_union() {
+    let api = parse_valid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    User:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    Organization:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+    Choice:
+      anyOf:
+        - $ref: '#/components/schemas/User'
+        - $ref: '#/components/schemas/Organization'
+    Holder:
+      type: object
+      properties:
+        choice:
+          description: Pick one.
+          allOf:
+            - $ref: '#/components/schemas/Choice'
+"##,
+    );
+
+    match &component(&api, "Holder").kind {
+        ComponentKind::Struct(fields) => {
+            assert_eq!(
+                field(fields, "choice").ty,
+                TypeRef::Named("Choice".to_owned())
+            );
+        }
+        other => panic!("expected Holder struct, got {other:?}"),
+    }
+}
+
+#[test]
+fn wrapped_struct_ref_property_still_flattens_to_inline_struct() {
+    let api = parse_valid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Base:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    Holder:
+      type: object
+      properties:
+        child:
+          description: Annotated child.
+          allOf:
+            - $ref: '#/components/schemas/Base'
+"##,
+    );
+
+    match &component(&api, "Holder").kind {
+        ComponentKind::Struct(fields) => {
+            assert_eq!(
+                field(fields, "child").ty,
+                TypeRef::Named("HolderChild".to_owned()),
+                "struct-target wrapper must keep the flattening carve-out"
+            );
+        }
+        other => panic!("expected Holder struct, got {other:?}"),
+    }
+
+    match &component(&api, "HolderChild").kind {
+        ComponentKind::Struct(fields) => {
+            assert_eq!(fields.len(), 1);
+            assert_eq!(field(fields, "id").rust_name, "id");
+            assert!(field(fields, "id").required);
+        }
+        other => panic!("expected flattened HolderChild struct, got {other:?}"),
+    }
+}
