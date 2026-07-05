@@ -211,6 +211,53 @@ components:
 }
 
 #[test]
+fn any_of_const_branches_generate_open_string_enum() {
+    let files = satay_codegen::generate(
+        r#"
+openapi: 3.1.0
+info:
+  title: Messages API
+  version: 1.0.0
+paths:
+  /model:
+    get:
+      operationId: getModel
+      responses:
+        '200':
+          description: Model
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Model'
+components:
+  schemas:
+    Model:
+      anyOf:
+        - type: string
+        - const: claude-sonnet-5
+        - const: claude-haiku-4-5
+"#,
+    )
+    .expect("generate open string enum from const branches fixture");
+
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    let model = find_enum(&types_rs, "Model");
+    assert_eq!(
+        variant_names(model),
+        ["ClaudeSonnet5", "ClaudeHaiku45", "Other"]
+    );
+    assert_eq!(norm(&variant(model, "Other").fields), norm_str("(String)"));
+    assert!(contains_tokens(
+        &types_rs,
+        r#"Self::ClaudeSonnet5 => "claude-sonnet-5""#
+    ));
+    assert!(contains_tokens(
+        &types_rs,
+        r#"Self::ClaudeHaiku45 => "claude-haiku-4-5""#
+    ));
+}
+
+#[test]
 fn open_string_enum_mangles_other_known_value_and_keeps_fallback() {
     let files = satay_codegen::generate(
         r#"

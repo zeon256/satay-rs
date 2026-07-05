@@ -305,6 +305,14 @@ pub enum ValidationError {
         index: usize,
     },
 
+    /// An open string enum `anyOf` repeats an enum or `const` value across branches.
+    ///
+    /// Error message: `{context} declares duplicate open string enum value `{value}` across `anyOf` branches`
+    #[error(
+        "{context} declares duplicate open string enum value `{value}` across `anyOf` branches"
+    )]
+    DuplicateOpenStringEnumValue { context: String, value: String },
+
     /// A nullable plain `anyOf` or `oneOf` union has no non-null branches.
     ///
     /// Error message: `{context}.{keyword} must declare at least one non-null branch`
