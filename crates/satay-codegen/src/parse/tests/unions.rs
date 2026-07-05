@@ -3932,3 +3932,41 @@ components:
         other => panic!("unexpected error: {other}"),
     }
 }
+
+#[test]
+fn ignores_discriminator_on_plain_object_schema() {
+    let api = parse_valid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Message:
+      type: object
+      required:
+        - role
+      properties:
+        role:
+          type: string
+      discriminator:
+        propertyName: role
+"##,
+    );
+
+    match &component(&api, "Message").kind {
+        ComponentKind::Struct(fields) => {
+            assert_eq!(fields.len(), 1);
+            assert!(field(fields, "role").required);
+        }
+        other => panic!("expected Message struct, got {other:?}"),
+    }
+}
