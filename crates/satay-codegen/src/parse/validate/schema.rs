@@ -311,7 +311,7 @@ fn validate_component_schema(
 }
 
 fn schema_is_union(schema: &OasObjectSchema) -> bool {
-    if !schema.any_of.is_empty() || !schema.one_of.is_empty() || schema.discriminator.is_some() {
+    if !schema.any_of.is_empty() || !schema.one_of.is_empty() {
         return true;
     }
 
