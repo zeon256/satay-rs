@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.6.0...satay-codegen-v0.7.0) - 2026-07-05
+
+### Added
+
+- support additionalProperties map schemas and empty-schema JSON values
+
 ## [0.6.0](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.5.0...satay-codegen-v0.6.0) - 2026-07-04
 
 ### Added
