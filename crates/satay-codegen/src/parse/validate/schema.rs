@@ -33,6 +33,7 @@ use crate::model::{
 
 pub(super) fn validate_components(
     document: &ResolvedDocument<'_>,
+    excluded: &std::collections::BTreeSet<String>,
 ) -> Result<Vec<ValidatedComponent>, ValidationError> {
     let Some(components) = document.spec.components.as_ref() else {
         return Ok(vec![]);
@@ -41,6 +42,9 @@ pub(super) fn validate_components(
     let mut parsed = Vec::with_capacity(components.schemas.len());
 
     for (schema_name, schema) in &components.schemas {
+        if excluded.contains(schema_name) {
+            continue;
+        }
         let mut stack = vec![];
         parsed.push(validate_component_schema(
             document,

@@ -32,11 +32,8 @@ pub(super) fn validate_operations(
     for (path, path_item) in paths {
         let path_item = resolve_path_item(document, path_item, &format!("path item `{path}`"))?;
 
-        let path_parameters = validate_parameter_list(
-            document,
-            &path_item.parameters,
-            &format!("path item `{path}` parameters"),
-        )?;
+        let mut present = 0usize;
+        let mut retained: Vec<(HttpMethod, &OasOperation, String)> = vec![];
 
         for (method, operation) in [
             (HttpMethod::Get, path_item.get.as_ref()),
@@ -48,41 +45,45 @@ pub(super) fn validate_operations(
             (HttpMethod::Options, path_item.options.as_ref()),
             (HttpMethod::Trace, path_item.trace.as_ref()),
         ] {
-            validate_path_operation(
+            let Some(operation) = operation else {
+                continue;
+            };
+            present += 1;
+            let operation_id = operation
+                .operation_id
+                .clone()
+                .unwrap_or_else(|| inferred_operation_id(method, path));
+            if operation_satay_skip(operation, &operation_id)? {
+                continue;
+            }
+            retained.push((method, operation, operation_id));
+        }
+
+        // Path has operations and every one is skipped: do not validate the
+        // path-level parameters and produce no operations for this path.
+        if present >= 1 && retained.is_empty() {
+            continue;
+        }
+
+        let path_parameters = validate_parameter_list(
+            document,
+            &path_item.parameters,
+            &format!("path item `{path}` parameters"),
+        )?;
+
+        for (method, operation, operation_id) in retained {
+            operations.push(validate_operation(
                 document,
-                &mut operations,
                 method,
                 path,
-                operation,
                 &path_parameters,
-            )?;
+                operation,
+                operation_id,
+            )?);
         }
     }
 
     Ok(operations)
-}
-
-fn validate_path_operation(
-    document: &ResolvedDocument<'_>,
-    operations: &mut Vec<ValidatedOperation>,
-    method: HttpMethod,
-    path: &str,
-    operation: Option<&OasOperation>,
-    path_parameters: &[ValidatedParameter],
-) -> Result<(), ValidationError> {
-    let Some(operation) = operation else {
-        return Ok(());
-    };
-
-    operations.push(validate_operation(
-        document,
-        method,
-        path,
-        path_parameters,
-        operation,
-    )?);
-
-    Ok(())
 }
 
 fn validate_operation(
@@ -91,12 +92,8 @@ fn validate_operation(
     path: &str,
     path_parameters: &[ValidatedParameter],
     operation: &OasOperation,
+    operation_id: String,
 ) -> Result<ValidatedOperation, ValidationError> {
-    let operation_id = operation
-        .operation_id
-        .clone()
-        .unwrap_or_else(|| inferred_operation_id(method, path));
-
     let mut parameters = path_parameters.to_vec();
 
     for parameter in validate_parameter_list(
@@ -136,6 +133,38 @@ fn validate_operation(
         request_body,
         responses,
     })
+}
+
+/// Reads the operation-level `x-satay` extension; only `skip: bool` is supported.
+pub(super) fn operation_satay_skip(
+    operation: &OasOperation,
+    operation_id: &str,
+) -> Result<bool, ValidationError> {
+    let Some(value) = operation.extensions.get("satay") else {
+        return Ok(false);
+    };
+    let Some(object) = value.as_object() else {
+        return Err(ValidationError::OperationSatayNotObject {
+            operation_id: operation_id.to_owned(),
+        });
+    };
+
+    let mut skip = false;
+    for (key, value) in object {
+        if key != "skip" {
+            return Err(ValidationError::UnsupportedOperationSatayKey {
+                operation_id: operation_id.to_owned(),
+                key: key.clone(),
+            });
+        }
+        skip = value
+            .as_bool()
+            .ok_or_else(|| ValidationError::OperationSataySkipNotBoolean {
+                operation_id: operation_id.to_owned(),
+            })?;
+    }
+
+    Ok(skip)
 }
 
 fn validate_parameter_list(
@@ -462,7 +491,7 @@ fn parse_path_segments(path: &str) -> Result<Vec<PathSegment>, ValidationError> 
     }
 }
 
-fn inferred_operation_id(method: HttpMethod, path: &str) -> String {
+pub(super) fn inferred_operation_id(method: HttpMethod, path: &str) -> String {
     let mut parts = vec![];
     parts.push(method.operation_prefix().to_owned());
     for segment in path.split('/') {

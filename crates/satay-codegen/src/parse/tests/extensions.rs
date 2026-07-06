@@ -588,3 +588,402 @@ components:
 "#,
     );
 }
+
+#[test]
+fn skips_operations_annotated_with_x_satay_skip() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /files:
+    post:
+      operationId: uploadFile
+      x-satay:
+        skip: true
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+      responses:
+        '204':
+          description: No content
+    get:
+      operationId: listFiles
+      responses:
+        '204':
+          description: No content
+"#,
+    );
+
+    assert_eq!(api.operations.len(), 1);
+    assert_eq!(api.operations[0].fn_name, "list_files");
+}
+
+#[test]
+fn validates_operations_with_x_satay_skip_false() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      x-satay:
+        skip: false
+      responses:
+        '204':
+          description: No content
+"#,
+    );
+
+    assert_eq!(api.operations.len(), 1);
+    assert_eq!(api.operations[0].fn_name, "ping");
+}
+
+#[test]
+fn rejects_non_boolean_x_satay_skip() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      x-satay:
+        skip: "yes"
+      responses:
+        '204':
+          description: No content
+"#,
+    );
+
+    match err {
+        ValidationError::OperationSataySkipNotBoolean { operation_id } => {
+            assert_eq!(operation_id, "ping");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_unknown_operation_x_satay_key() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      x-satay:
+        other: true
+      responses:
+        '204':
+          description: No content
+"#,
+    );
+
+    match err {
+        ValidationError::UnsupportedOperationSatayKey { operation_id, key } => {
+            assert_eq!(operation_id, "ping");
+            assert_eq!(key, "other");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn skips_component_schema_used_only_by_skipped_operation() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /files:
+    post:
+      operationId: uploadFile
+      x-satay:
+        skip: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadRequest'
+      responses:
+        '204':
+          description: No content
+    get:
+      operationId: listFiles
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    UploadRequest:
+      type: object
+      required:
+        - flag
+      properties:
+        flag:
+          type: boolean
+          x-satay:
+            parse-as: u8
+"#,
+    );
+
+    assert_eq!(api.operations.len(), 1);
+    assert_eq!(api.operations[0].fn_name, "list_files");
+    assert!(
+        api.components
+            .iter()
+            .all(|component| component.rust_name != "UploadRequest"),
+        "skipped-only component must be excluded from generation"
+    );
+}
+
+#[test]
+fn validates_component_schema_shared_with_non_skipped_operation() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /files:
+    post:
+      operationId: uploadFile
+      x-satay:
+        skip: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Shared'
+      responses:
+        '204':
+          description: No content
+    get:
+      operationId: getShared
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Shared'
+components:
+  schemas:
+    Shared:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+"#,
+    );
+
+    assert_eq!(api.operations.len(), 1);
+    component(&api, "Shared");
+}
+
+#[test]
+fn keeps_unreferenced_component_schema_when_operation_is_skipped() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /files:
+    post:
+      operationId: uploadFile
+      x-satay:
+        skip: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/A'
+      responses:
+        '204':
+          description: No content
+    get:
+      operationId: listFiles
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    A:
+      type: object
+      required:
+        - flag
+      properties:
+        flag:
+          type: boolean
+          x-satay:
+            parse-as: u8
+    Orphan:
+      type: object
+      required:
+        - value
+      properties:
+        value:
+          type: string
+"#,
+    );
+
+    assert_eq!(api.operations.len(), 1);
+    component(&api, "Orphan");
+    assert!(
+        api.components
+            .iter()
+            .all(|component| component.rust_name != "A"),
+        "skipped-only rejectable component must be excluded"
+    );
+}
+
+#[test]
+fn keeps_skipped_only_schema_referenced_by_unreferenced_component() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /files:
+    post:
+      operationId: uploadFile
+      x-satay:
+        skip: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Shared'
+      responses:
+        '204':
+          description: No content
+    get:
+      operationId: listFiles
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Shared:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    Holder:
+      type: object
+      required:
+        - x
+      properties:
+        x:
+          $ref: '#/components/schemas/Shared'
+"#,
+    );
+
+    assert_eq!(api.operations.len(), 1);
+    component(&api, "Shared");
+    component(&api, "Holder");
+}
+
+#[test]
+fn skips_path_level_parameters_when_all_operations_on_path_skipped() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /files/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: array
+          items:
+            type: string
+    delete:
+      operationId: deleteFile
+      x-satay:
+        skip: true
+      responses:
+        '204':
+          description: No content
+  /health:
+    get:
+      operationId: health
+      responses:
+        '204':
+          description: No content
+"#,
+    );
+
+    assert_eq!(api.operations.len(), 1);
+    assert_eq!(api.operations[0].fn_name, "health");
+}
+
+#[test]
+fn unchanged_component_validation_without_skip() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Unused:
+      type: object
+      required:
+        - value
+      properties:
+        value:
+          type: string
+"#,
+    );
+
+    assert_eq!(api.operations.len(), 1);
+    component(&api, "Unused");
+}
