@@ -649,6 +649,43 @@ components:
 }
 
 #[test]
+fn rejects_x_satay_none_if_on_nullable_parameter_union_wrapper() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /reading:
+    get:
+      operationId: getReading
+      parameters:
+        - name: wbgt
+          in: query
+          schema:
+            oneOf:
+              - type: string
+              - type: "null"
+            x-satay:
+              parse-as: f64
+              none-if: [NA]
+      responses:
+        '204':
+          description: No content
+"#,
+    );
+
+    match err {
+        ValidationError::UnsupportedOneOfSiblingKeyword { context, keyword } => {
+            assert_eq!(context, "parameter `wbgt`");
+            assert_eq!(keyword, "x-satay");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
 fn validates_x_satay_parse_as_on_reachable_operation_schemas() {
     let err = parse_invalid(
         r#"

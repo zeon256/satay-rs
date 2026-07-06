@@ -1339,7 +1339,7 @@ fn inline_primitive_union_variant_name(schema_type: OasSchemaType) -> Option<&'s
     }
 }
 
-fn inline_union_null_branch(schema: &OasObjectSchema) -> bool {
+pub(super) fn inline_union_null_branch(schema: &OasObjectSchema) -> bool {
     matches!(
         schema.schema_type.as_ref(),
         Some(OasSchemaTypeSet::Single(OasSchemaType::Null))
@@ -2168,14 +2168,14 @@ fn composite_object_type_is_allowed(schema: &OasObjectSchema) -> bool {
     )
 }
 
-fn reject_any_of_sibling_keywords(
+pub(super) fn reject_any_of_sibling_keywords(
     schema: &OasObjectSchema,
     context: &str,
 ) -> Result<(), ValidationError> {
     reject_plain_union_sibling_keywords(schema, context, PlainUnionKeyword::AnyOf)
 }
 
-fn reject_plain_one_of_sibling_keywords(
+pub(super) fn reject_plain_one_of_sibling_keywords(
     schema: &OasObjectSchema,
     context: &str,
 ) -> Result<(), ValidationError> {
