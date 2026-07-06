@@ -29,6 +29,21 @@ pub(crate) fn response_variant_ident(status: u16) -> String {
     }
 }
 
+/// Variant name for an OpenAPI `NXX` wildcard response range.
+///
+/// Names are disjoint from every `response_variant_ident` output and from
+/// `UnexpectedStatus` by construction; keep it that way when editing either.
+pub(crate) fn response_range_variant_ident(class: u8) -> String {
+    match class {
+        1 => "Informational".to_owned(),
+        2 => "Success".to_owned(),
+        3 => "Redirection".to_owned(),
+        4 => "ClientError".to_owned(),
+        5 => "ServerError".to_owned(),
+        other => unreachable!("wildcard status class out of range: {other}"),
+    }
+}
+
 pub(crate) fn field_ident(value: &str) -> String {
     let ident = value.to_snake_case();
     sanitize_ident(&ident, "field", IdentKind::Field)

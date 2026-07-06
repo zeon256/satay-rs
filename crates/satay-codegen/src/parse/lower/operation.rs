@@ -6,10 +6,13 @@ use super::super::reference::resolve_security_scheme;
 use super::super::resolve::ResolvedDocument;
 use super::schema::SchemaLowerer;
 use crate::error::ValidationError;
-use crate::ident::{field_ident, function_ident, response_variant_ident, type_ident, unique_ident};
+use crate::ident::{
+    field_ident, function_ident, response_range_variant_ident, response_variant_ident, type_ident,
+    unique_ident,
+};
 use crate::model::{
     ApiKeyLocation, ApiKeySecurityScheme, Operation as SatayOperation, Parameter,
-    ParameterLocation, RequestBody, ResponseCase, is_array_type,
+    ParameterLocation, RequestBody, ResponseCase, ResponseStatus, is_array_type,
 };
 use crate::parse::registry::TypeRegistry;
 use crate::parse::validate::{
@@ -200,7 +203,10 @@ fn parse_response(
 ) -> ResponseCase {
     ResponseCase {
         status: response.status,
-        variant_name: response_variant_ident(response.status),
+        variant_name: match response.status {
+            ResponseStatus::Exact(code) => response_variant_ident(code),
+            ResponseStatus::Range(class) => response_range_variant_ident(class),
+        },
         description: response.description.clone(),
         body: response.body.as_ref().map(|body| {
             schemas.parse_type_ref_with_hint(

@@ -284,9 +284,29 @@ pub(crate) struct RequestBody {
     pub(crate) required: bool,
 }
 
+/// A response key: an exact status code or an OpenAPI `NXX` wildcard range.
+///
+/// `Exact` sorts before `Range` so explicit codes shadow the range covering
+/// them in generated decode match arms.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum ResponseStatus {
+    Exact(u16),
+    /// The N of `NXX`, 1..=5.
+    Range(u8),
+}
+
+impl std::fmt::Display for ResponseStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Exact(code) => write!(f, "{code}"),
+            Self::Range(class) => write!(f, "{class}XX"),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct ResponseCase {
-    pub(crate) status: u16,
+    pub(crate) status: ResponseStatus,
     pub(crate) variant_name: String,
     pub(crate) description: Option<String>,
     pub(crate) body: Option<TypeRef>,

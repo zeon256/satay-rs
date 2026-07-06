@@ -451,7 +451,7 @@ mod tests {
                     required: true,
                 }),
                 responses: vec![ResponseCase {
-                    status: 201,
+                    status: crate::model::ResponseStatus::Exact(201),
                     variant_name: "Created".to_owned(),
                     description: None,
                     body: Some(TypeRef::Named("Pet".to_owned())),

@@ -1,7 +1,7 @@
 use syn::parse_quote;
 
 use super::super::{doc_attrs, ident, request_from_parts_expr, rust_type};
-use crate::model::{Operation, ResponseCase};
+use crate::model::{Operation, ResponseCase, ResponseStatus};
 
 pub(super) fn render_encode_function(operation: &Operation) -> syn::ItemFn {
     let docs = doc_attrs(operation.description.as_deref());
@@ -45,23 +45,50 @@ pub(super) fn render_decode_function(operation: &Operation) -> syn::ItemFn {
 }
 
 fn render_decode_arm(response: &ResponseCase, response_name: &syn::Ident) -> syn::Arm {
-    let status = proc_macro2::Literal::u16_unsuffixed(response.status);
     let variant = ident(&response.variant_name);
-    match &response.body {
-        Some(body) => {
-            let body = rust_type(body);
-            parse_quote!(
-                #status => {
-                    let body = response.body;
-                    let value = satay_runtime::from_json_slice::<#body>(body.as_ref())?;
-                    Ok(#response_name::#variant(value))
+    match response.status {
+        ResponseStatus::Exact(code) => {
+            let status = proc_macro2::Literal::u16_unsuffixed(code);
+            match &response.body {
+                Some(body) => {
+                    let body = rust_type(body);
+                    parse_quote!(
+                        #status => {
+                            let body = response.body;
+                            let value = satay_runtime::from_json_slice::<#body>(body.as_ref())?;
+                            Ok(#response_name::#variant(value))
+                        }
+                    )
                 }
-            )
-        }
-        None => parse_quote!(
-            #status => {
-                Ok(#response_name::#variant)
+                None => parse_quote!(
+                    #status => {
+                        Ok(#response_name::#variant)
+                    }
+                ),
             }
-        ),
+        }
+        ResponseStatus::Range(class) => {
+            let lo = u16::from(class) * 100;
+            let hi = lo + 99;
+            let lo = proc_macro2::Literal::u16_unsuffixed(lo);
+            let hi = proc_macro2::Literal::u16_unsuffixed(hi);
+            match &response.body {
+                Some(body) => {
+                    let body = rust_type(body);
+                    parse_quote!(
+                        #lo..=#hi => {
+                            let body = response.body;
+                            let value = satay_runtime::from_json_slice::<#body>(body.as_ref())?;
+                            Ok(#response_name::#variant(status, value))
+                        }
+                    )
+                }
+                None => parse_quote!(
+                    #lo..=#hi => {
+                        Ok(#response_name::#variant(status))
+                    }
+                ),
+            }
+        }
     }
 }

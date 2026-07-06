@@ -8,7 +8,7 @@ use crate::error::ValidationError;
 use crate::model::{
     Api, ApiKeyLocation, Component, ComponentKind, EnumFallback, Field, HttpMethod, IntegerLimit,
     IntegerType, Operation, Parameter, ParameterLocation, ParseAs, PathSegment, RangeScalar,
-    RangeTypeRef, TypeRef, UnionTagStyle, Validation,
+    RangeTypeRef, ResponseStatus, TypeRef, UnionTagStyle, Validation,
 };
 use crate::parse::{parse_api, parse_document};
 
