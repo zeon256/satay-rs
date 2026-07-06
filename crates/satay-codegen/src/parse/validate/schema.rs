@@ -273,7 +273,8 @@ fn validate_component_schema(
                         | OasSchemaType::String
                         | OasSchemaType::Integer
                         | OasSchemaType::Number
-                        | OasSchemaType::Boolean,
+                        | OasSchemaType::Boolean
+                        | OasSchemaType::Object,
                     ) => ValidatedComponentKind::Type(validate_object_type_schema(
                         document,
                         schema,
