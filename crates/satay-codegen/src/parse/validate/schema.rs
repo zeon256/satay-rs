@@ -2114,7 +2114,7 @@ fn reject_all_of_object_branch_keywords(
         ("prefixItems", !schema.prefix_items.is_empty()),
         (
             "additionalProperties",
-            schema.additional_properties.is_some(),
+            schema.additional_properties.is_some() && schema.properties.is_empty(),
         ),
         ("multipleOf", schema.multiple_of.is_some()),
         ("maximum", schema.maximum.is_some()),
