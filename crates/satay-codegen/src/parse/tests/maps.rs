@@ -495,3 +495,114 @@ components:
         other => panic!("unexpected error: {other}"),
     }
 }
+
+#[test]
+fn parses_freeform_map_component_as_alias() {
+    let api = parse_valid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Freeform:
+      type: object
+      additionalProperties: true
+    Holder:
+      type: object
+      required:
+        - value
+      properties:
+        value:
+          $ref: '#/components/schemas/Freeform'
+"##,
+    );
+
+    match &component(&api, "Freeform").kind {
+        ComponentKind::Alias(ty) => {
+            assert_eq!(ty, &TypeRef::Map(Box::new(TypeRef::JsonValue)));
+        }
+        other => panic!("expected Freeform alias, got {other:?}"),
+    }
+
+    // Alias refs are inlined at lowering; the field carries the map shape.
+    match &component(&api, "Holder").kind {
+        ComponentKind::Struct(fields) => {
+            assert_eq!(
+                field(fields, "value").ty,
+                TypeRef::Map(Box::new(TypeRef::JsonValue))
+            );
+        }
+        other => panic!("expected Holder struct, got {other:?}"),
+    }
+}
+
+#[test]
+fn parses_typed_map_component() {
+    let api = parse_valid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Labels:
+      type: object
+      additionalProperties:
+        type: string
+"##,
+    );
+
+    match &component(&api, "Labels").kind {
+        ComponentKind::Alias(ty) => {
+            assert_eq!(ty, &TypeRef::Map(Box::new(TypeRef::String)));
+        }
+        other => panic!("expected Labels alias, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_propertyless_object_component_without_additional_properties() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Empty:
+      type: object
+"##,
+    );
+
+    match err {
+        ValidationError::UnsupportedMapObjectSchema { context } => {
+            assert_eq!(context, "schema `Empty`");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
