@@ -2042,7 +2042,7 @@ fn reject_all_of_sibling_keywords(
     schema: &OasObjectSchema,
     context: &str,
 ) -> Result<(), ValidationError> {
-    if !all_of_object_type_is_allowed(schema) {
+    if !composite_object_type_is_allowed(schema) {
         return Err(ValidationError::UnsupportedAllOfSiblingKeyword {
             context: context.to_owned(),
             keyword: "type".to_owned(),
@@ -2100,7 +2100,7 @@ fn reject_all_of_object_branch_keywords(
     context: &str,
     index: usize,
 ) -> Result<(), ValidationError> {
-    if !all_of_object_type_is_allowed(schema) {
+    if !composite_object_type_is_allowed(schema) {
         return Err(ValidationError::UnsupportedAllOfBranch {
             context: context.to_owned(),
             index,
@@ -2148,7 +2148,7 @@ fn reject_all_of_object_branch_keywords(
     Ok(())
 }
 
-fn all_of_object_type_is_allowed(schema: &OasObjectSchema) -> bool {
+fn composite_object_type_is_allowed(schema: &OasObjectSchema) -> bool {
     matches!(
         schema.schema_type.as_ref(),
         None | Some(OasSchemaTypeSet::Single(OasSchemaType::Object))
@@ -2277,9 +2277,15 @@ fn reject_discriminator_union_sibling_keywords(
     schema: &OasObjectSchema,
     context: &str,
 ) -> Result<(), ValidationError> {
+    if !composite_object_type_is_allowed(schema) {
+        return Err(ValidationError::UnsupportedAnyOfSiblingKeyword {
+            context: context.to_owned(),
+            keyword: "type".to_owned(),
+        });
+    }
+
     for (keyword, present) in [
         ("allOf", !schema.all_of.is_empty()),
-        ("type", schema.schema_type.is_some()),
         ("enum", !schema.enum_values.is_empty()),
         ("const", schema.const_value.is_some()),
         ("items", schema.items.is_some()),

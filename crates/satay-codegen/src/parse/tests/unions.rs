@@ -3970,3 +3970,112 @@ components:
         other => panic!("expected Message struct, got {other:?}"),
     }
 }
+
+#[test]
+fn parses_discriminator_union_with_object_type_sibling() {
+    let api = parse_valid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Dog:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - dog
+    Cat:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - cat
+    Pet:
+      type: object
+      oneOf:
+        - $ref: '#/components/schemas/Dog'
+        - $ref: '#/components/schemas/Cat'
+      discriminator:
+        propertyName: kind
+"##,
+    );
+
+    match &component(&api, "Pet").kind {
+        ComponentKind::Union(union) => {
+            let tag = union.tag.as_ref().expect("embedded discriminator tag");
+            assert_eq!(tag.property_name, "kind");
+            assert_eq!(union.variants.len(), 2);
+        }
+        other => panic!("expected Pet union, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_discriminator_union_with_non_object_type_sibling() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Dog:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - dog
+    Cat:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          enum:
+            - cat
+    Pet:
+      type: string
+      oneOf:
+        - $ref: '#/components/schemas/Dog'
+        - $ref: '#/components/schemas/Cat'
+      discriminator:
+        propertyName: kind
+"##,
+    );
+
+    match err {
+        ValidationError::UnsupportedAnyOfSiblingKeyword { context, keyword } => {
+            assert_eq!(context, "schema `Pet`");
+            assert_eq!(keyword, "type");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
