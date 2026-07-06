@@ -2,7 +2,7 @@ use crate::ast::*;
 use crate::common::*;
 
 #[test]
-fn integer_bounds_infer_smallest_rust_type_and_can_be_overridden() {
+fn explicit_integer_formats_keep_base_type_and_can_be_overridden() {
     let files = satay_codegen::generate(
         r#"
 openapi: 3.1.0
@@ -55,10 +55,11 @@ components:
     .expect("generate integer inference fixture");
 
     let types_rs = parse_rust(find_file(&files, "types.rs"));
-    assert_tuple_struct(&types_rs, "BusDirection", "u8");
+    assert_tuple_struct(&types_rs, "BusDirection", "i32");
+    assert_tuple_struct(&types_rs, "BusByte", "i64");
     assert_tuple_struct(&types_rs, "BusLegacyDirection", "i32");
     let bus = find_struct(&types_rs, "Bus");
-    assert_field(bus, "byte", "u8");
+    assert_field(bus, "byte", "BusByte");
     assert_field(bus, "no_bounds", "i32");
 }
 

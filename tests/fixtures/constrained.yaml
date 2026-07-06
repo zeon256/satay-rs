@@ -20,7 +20,6 @@ paths:
           required: false
           schema:
             type: integer
-            format: int32
             minimum: 1
             maximum: 100
         - name: tags
@@ -44,7 +43,6 @@ components:
   schemas:
     Age:
       type: integer
-      format: int32
       minimum: 0
       maximum: 130
     Email:
