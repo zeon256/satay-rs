@@ -2,6 +2,31 @@
 
 Satay accepts OpenAPI vendor extensions under `x-satay` when the spec's shape alone cannot produce the Rust type you want.
 
+## `skip`
+
+Use `x-satay.skip` on an operation that Satay cannot represent yet, such as a multipart upload or binary download:
+
+```yaml
+paths:
+  /files:
+    post:
+      operationId: uploadFile
+      x-satay:
+        skip: true
+      requestBody:
+        content:
+          multipart/form-data: {}
+      responses:
+        "204":
+          description: Uploaded
+```
+
+Skipped operations are not validated or generated. `skip: false` keeps normal behavior. The operation-level `x-satay` value must be an object containing only a boolean `skip` key.
+
+When every operation on a path is skipped, Satay also skips the path-level parameters. Component schemas reachable only from skipped operations are excluded from validation and generation, including transitive references. A schema remains included when a retained operation or an otherwise unreferenced component needs it, preventing dangling generated references.
+
+Skipping does not bypass OpenAPI parsing or the document's reference-resolution pass. The document must still be structurally valid.
+
 ## Standard `unixtime` Format
 
 Satay supports the OpenAPI format registry's `unixtime` format on `type: integer` and `type: string` schemas. Both generate `satay_runtime::OffsetDateTime` and represent Unix timestamp seconds.
