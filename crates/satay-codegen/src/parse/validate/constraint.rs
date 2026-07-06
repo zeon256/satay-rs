@@ -74,6 +74,8 @@ fn parse_integer_format_type(
     match schema.format.as_deref() {
         Some("int32") => Ok((IntegerType::I32, true)),
         Some("int64") => Ok((IntegerType::I64, true)),
+        Some("uint32") => Ok((IntegerType::U32, true)),
+        Some("uint64") => Ok((IntegerType::U64, true)),
         None => Ok((IntegerType::I64, false)),
         Some(format) => Err(ValidationError::UnsupportedIntegerFormat {
             context: context.to_owned(),
@@ -108,7 +110,12 @@ fn infer_integer_type(
     let (minimum, maximum) =
         intersect_integer_range(raw_minimum, raw_maximum, format_type, context)?;
 
-    if raw_minimum < format_type.min_value() || raw_maximum > format_type.max_value() {
+    // An explicit `format` fixes the Rust type; bounds only contribute
+    // validation. Bound-based narrowing applies to unformatted integers only.
+    if explicit_format
+        || raw_minimum < format_type.min_value()
+        || raw_maximum > format_type.max_value()
+    {
         return Ok(format_type);
     }
 

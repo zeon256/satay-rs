@@ -377,15 +377,17 @@ components:
     let direction = component(&api, "Direction");
     match &direction.kind {
         ComponentKind::Nutype(constrained) => {
-            assert_eq!(constrained.inner, TypeRef::Integer(IntegerType::U8));
+            assert_eq!(constrained.inner, TypeRef::Integer(IntegerType::I32));
         }
         other => panic!("expected Direction nutype, got {other:?}"),
     }
 
     let byte = component(&api, "Byte");
     match &byte.kind {
-        ComponentKind::Alias(ty) => assert_eq!(ty, &TypeRef::Integer(IntegerType::U8)),
-        other => panic!("expected Byte alias, got {other:?}"),
+        ComponentKind::Nutype(constrained) => {
+            assert_eq!(constrained.inner, TypeRef::Integer(IntegerType::I64));
+        }
+        other => panic!("expected Byte nutype, got {other:?}"),
     }
 
     let legacy_direction = component(&api, "LegacyDirection");
