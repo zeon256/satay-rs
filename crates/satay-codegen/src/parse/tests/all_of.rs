@@ -957,3 +957,93 @@ components:
         other => panic!("expected flattened HolderChild struct, got {other:?}"),
     }
 }
+
+#[test]
+fn flattens_all_of_branch_with_additional_properties_false_and_properties() {
+    let api = parse_valid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Target:
+      type: object
+      additionalProperties: false
+      required:
+        - enabled
+      properties:
+        enabled:
+          type: boolean
+    Holder:
+      type: object
+      properties:
+        config:
+          description: Annotated config.
+          allOf:
+            - $ref: '#/components/schemas/Target'
+"##,
+    );
+
+    match &component(&api, "Holder").kind {
+        ComponentKind::Struct(fields) => {
+            assert_eq!(
+                field(fields, "config").ty,
+                TypeRef::Named("HolderConfig".to_owned())
+            );
+        }
+        other => panic!("expected Holder struct, got {other:?}"),
+    }
+
+    match &component(&api, "HolderConfig").kind {
+        ComponentKind::Struct(fields) => {
+            assert_eq!(fields.len(), 1);
+            assert!(field(fields, "enabled").required);
+        }
+        other => panic!("expected flattened HolderConfig struct, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_all_of_branch_with_additional_properties_on_propertyless_object() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Holder:
+      type: object
+      properties:
+        config:
+          description: Annotated config.
+          allOf:
+            - type: object
+              additionalProperties: false
+"##,
+    );
+
+    match err {
+        ValidationError::UnsupportedAllOfSiblingKeyword { keyword, .. } => {
+            assert_eq!(keyword, "additionalProperties");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
