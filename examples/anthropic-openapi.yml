@@ -33431,7 +33431,6 @@ components:
           description: Remaining tokens in the budget. Use this to track usage across
             contexts when implementing compaction client-side. Defaults to total if
             not provided.
-          minimum: 0
           title: Remaining
         total:
           description: Total token budget across all contexts in the session.

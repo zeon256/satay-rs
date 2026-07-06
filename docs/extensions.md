@@ -91,12 +91,11 @@ The wire format stays a string: serde deserializes from a JSON string and serial
 
 ## `integer-type`
 
-Satay infers the smallest Rust integer primitive for `type: integer` schemas that declare both `minimum` and `maximum`. Unformatted integer schemas with a one-sided non-negative lower bound and no `maximum` infer `u64`. Bounds that remain narrower than the primitive still generate validation newtypes.
+Satay infers the smallest Rust integer primitive for unformatted `type: integer` schemas that declare both `minimum` and `maximum`. Unformatted integer schemas with a one-sided non-negative lower bound and no `maximum` infer `u64`. An explicit integer format (`int32`, `int64`, `uint32`, `uint64`) fixes the primitive instead, and bounds become validation newtypes. Bounds that remain narrower than the primitive still generate validation newtypes.
 
 ```yaml
 Direction:
   type: integer
-  format: int32
   minimum: 1
   maximum: 2
 ```
@@ -108,7 +107,6 @@ Use `x-satay.integer-type` to opt out of inference or pick a specific Rust integ
 ```yaml
 Direction:
   type: integer
-  format: int32
   minimum: 1
   maximum: 2
   x-satay:
@@ -169,3 +167,23 @@ pub struct BusServiceArrival {
 ```
 
 This is useful for APIs that return empty or malformed values in nested objects when data is unavailable, rather than omitting the field or returning `null`. The `treat-error-as-none` extension requires the generated crate's `json` feature.
+
+## `skip`
+
+Use `x-satay.skip` on an operation to exclude it from generation entirely. The operation bypasses operation-level validation, and any `components.schemas` entry reachable only from skipped operations is excluded from validation and generation too, so this is useful for operations Satay cannot represent yet, such as multipart uploads or binary downloads. Component schemas that are also reachable from a non-skipped operation, and schemas not referenced by any operation, are still validated and generated. Every `$ref` in the document must still resolve to an existing component even when its only user is skipped. When every operation on a path is skipped, that path's shared parameters are not validated.
+
+```yaml
+paths:
+  /v1/files:
+    post:
+      operationId: upload_file
+      x-satay:
+        skip: true
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+```
+
+`skip: false` is equivalent to omitting the extension. `skip` is the only key Satay accepts in an operation-level `x-satay` object.
