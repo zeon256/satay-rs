@@ -6,7 +6,8 @@ mod schema;
 use super::resolve::ResolvedDocument;
 use crate::error::ValidationError;
 use crate::model::{
-    Enum, HttpMethod, IntegerType, ParameterLocation, ParseAs, PathSegment, RangeScalar, Validation,
+    Enum, HttpMethod, IntegerType, ParameterLocation, ParseAs, PathSegment, RangeScalar,
+    ResponseStatus, Validation,
 };
 
 #[derive(Debug)]
@@ -227,7 +228,7 @@ pub(crate) struct ValidatedRequestBody {
 
 #[derive(Debug)]
 pub(crate) struct ValidatedResponse {
-    pub(crate) status: u16,
+    pub(crate) status: ResponseStatus,
     pub(crate) description: Option<String>,
     pub(crate) body: Option<ValidatedType>,
 }

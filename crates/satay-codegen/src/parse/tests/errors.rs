@@ -231,3 +231,53 @@ components:
         other => panic!("unexpected error: {other}"),
     }
 }
+
+#[test]
+fn rejects_status_range_above_5xx() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '6XX':
+          description: Bogus range
+"#,
+    );
+    match err {
+        ValidationError::InvalidStatusCode { status, .. } => {
+            assert_eq!(status, "6XX");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_lowercase_status_range() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      responses:
+        '4xx':
+          description: Lowercase wildcard
+"#,
+    );
+    match err {
+        ValidationError::InvalidStatusCode { status, .. } => {
+            assert_eq!(status, "4xx");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}

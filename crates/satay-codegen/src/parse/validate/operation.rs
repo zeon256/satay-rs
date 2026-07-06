@@ -16,7 +16,7 @@ use super::super::resolve::ResolvedDocument;
 use super::schema::{schema_uses_all_of, schema_uses_any_of, validate_type_schema};
 use super::{ValidatedOperation, ValidatedParameter, ValidatedRequestBody, ValidatedResponse};
 use crate::error::ValidationError;
-use crate::model::{HttpMethod, ParameterLocation, PathSegment};
+use crate::model::{HttpMethod, ParameterLocation, PathSegment, ResponseStatus};
 
 pub(super) fn validate_operations(
     document: &ResolvedDocument<'_>,
@@ -309,19 +309,24 @@ fn validate_responses(
             continue;
         }
 
-        let status_code =
-            status
-                .parse::<u16>()
-                .map_err(|_| ValidationError::InvalidStatusCode {
+        let parsed_status = if let Some(class) = wildcard_status_class(status) {
+            ResponseStatus::Range(class)
+        } else {
+            let status_code =
+                status
+                    .parse::<u16>()
+                    .map_err(|_| ValidationError::InvalidStatusCode {
+                        context: context.to_owned(),
+                        status: status.to_owned(),
+                    })?;
+            if !(100..=599).contains(&status_code) {
+                return Err(ValidationError::OutOfRangeStatusCode {
                     context: context.to_owned(),
-                    status: status.to_owned(),
-                })?;
-        if !(100..=599).contains(&status_code) {
-            return Err(ValidationError::OutOfRangeStatusCode {
-                context: context.to_owned(),
-                status_code,
-            });
-        }
+                    status_code,
+                });
+            }
+            ResponseStatus::Exact(status_code)
+        };
 
         let response = resolve_response(document, response, &format!("{context} {status}"))?;
 
@@ -349,7 +354,7 @@ fn validate_responses(
         };
 
         parsed.push(ValidatedResponse {
-            status: status_code,
+            status: parsed_status,
             description: optional_description(&response.description),
             body,
         });
@@ -357,6 +362,14 @@ fn validate_responses(
 
     parsed.sort_by_key(|response| response.status);
     Ok(parsed)
+}
+
+/// Matches OpenAPI wildcard response keys `1XX`..`5XX` (uppercase only).
+fn wildcard_status_class(status: &str) -> Option<u8> {
+    match status.as_bytes() {
+        [class @ b'1'..=b'5', b'X', b'X'] => Some(class - b'0'),
+        _ => None,
+    }
 }
 
 fn upsert_parameter(parameters: &mut Vec<ValidatedParameter>, parameter: ValidatedParameter) {

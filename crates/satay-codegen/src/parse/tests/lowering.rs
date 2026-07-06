@@ -261,13 +261,13 @@ components:
     assert!(request_body.required);
 
     assert_eq!(operation.responses.len(), 2);
-    assert_eq!(operation.responses[0].status, 200);
+    assert_eq!(operation.responses[0].status, ResponseStatus::Exact(200));
     assert_eq!(operation.responses[0].variant_name, "Ok");
     assert_eq!(
         operation.responses[0].body,
         Some(TypeRef::Named("User".to_owned()))
     );
-    assert_eq!(operation.responses[1].status, 404);
+    assert_eq!(operation.responses[1].status, ResponseStatus::Exact(404));
     assert_eq!(operation.responses[1].variant_name, "NotFound");
     assert_eq!(operation.responses[1].body, None);
 }
@@ -622,5 +622,65 @@ components:
             .iter()
             .any(|component| component.rust_name == "UserProfile"),
         "single-reference untagged union must not synthesize a wrapper component"
+    );
+}
+
+#[test]
+fn parses_wildcard_response_range_after_exact_statuses() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /users:
+    get:
+      operationId: getUser
+      responses:
+        '4XX':
+          description: Client error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '200':
+          description: Found user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '404':
+          description: Not found
+components:
+  schemas:
+    User:
+      type: object
+      required:
+        - id
+      properties:
+        id:
+          type: string
+    ErrorResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+"#,
+    );
+
+    let operation = &api.operations[0];
+    assert_eq!(operation.responses.len(), 3);
+    assert_eq!(operation.responses[0].status, ResponseStatus::Exact(200));
+    assert_eq!(operation.responses[0].variant_name, "Ok");
+    assert_eq!(operation.responses[1].status, ResponseStatus::Exact(404));
+    assert_eq!(operation.responses[1].variant_name, "NotFound");
+    assert_eq!(operation.responses[2].status, ResponseStatus::Range(4));
+    assert_eq!(operation.responses[2].variant_name, "ClientError");
+    assert_eq!(
+        operation.responses[2].body,
+        Some(TypeRef::Named("ErrorResponse".to_owned()))
     );
 }
