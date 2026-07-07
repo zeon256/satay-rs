@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.8.1...satay-codegen-v0.8.2) - 2026-07-07
+
+### Added
+
+- *(codegen)* support wildcard status-code ranges in responses
+- *(codegen)* support propertyless object components as map aliases
+- *(codegen)* support uint32 and uint64 integer formats
+- *(codegen)* ignore additionalProperties on allOf branches with properties
+- *(codegen)* allow type object sibling on discriminator unions
+- *(codegen)* ignore discriminator on plain object schemas
+
 ## [0.8.1](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.8.0...satay-codegen-v0.8.1) - 2026-07-05
 
 ### Added
