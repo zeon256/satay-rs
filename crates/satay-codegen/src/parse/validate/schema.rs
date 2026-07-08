@@ -1332,7 +1332,7 @@ fn inline_primitive_union_variant_name(schema_type: OasSchemaType) -> Option<&'s
     }
 }
 
-fn inline_union_null_branch(schema: &OasObjectSchema) -> bool {
+pub(super) fn inline_union_null_branch(schema: &OasObjectSchema) -> bool {
     matches!(
         schema.schema_type.as_ref(),
         Some(OasSchemaTypeSet::Single(OasSchemaType::Null))

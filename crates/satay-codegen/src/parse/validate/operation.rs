@@ -5,15 +5,19 @@ use oas3::{
     spec::{
         ObjectOrReference, Operation as OasOperation, Parameter as OasParameter,
         ParameterIn as OasParameterIn, RequestBody as OasRequestBody, Response as OasResponse,
+        Schema as OasSchema,
     },
 };
 
 use super::super::helpers::{json_media_type, optional_description};
 use super::super::reference::{
-    resolve_parameter, resolve_path_item, resolve_request_body, resolve_response,
+    object_schema, resolve_parameter, resolve_path_item, resolve_request_body, resolve_response,
+    schema_ref,
 };
 use super::super::resolve::ResolvedDocument;
-use super::schema::{schema_uses_all_of, schema_uses_any_of, validate_type_schema};
+use super::schema::{
+    inline_union_null_branch, schema_uses_all_of, schema_uses_any_of, validate_type_schema,
+};
 use super::{ValidatedOperation, ValidatedParameter, ValidatedRequestBody, ValidatedResponse};
 use crate::error::ValidationError;
 use crate::model::{HttpMethod, ParameterLocation, PathSegment, ResponseStatus};
@@ -218,6 +222,18 @@ fn validate_parameter(
                 wire_name: wire_name.clone(),
             })?;
 
+    let required = match location {
+        ParameterLocation::Path => {
+            if parameter.required != Some(true) {
+                return Err(ValidationError::PathParameterNotRequired { wire_name });
+            }
+            true
+        }
+        ParameterLocation::Query | ParameterLocation::Header => parameter.required.unwrap_or(false),
+    };
+
+    let schema = peel_nullable_parameter_schema(schema, required, location);
+
     if schema_uses_all_of(document, schema)? {
         return Err(ValidationError::UnsupportedComposition {
             context: format!("parameter `{wire_name}`"),
@@ -225,12 +241,25 @@ fn validate_parameter(
         });
     }
 
-    let ty = validate_type_schema(document, schema, &format!("parameter `{wire_name}`"), false)?;
+    let mut ty =
+        validate_type_schema(document, schema, &format!("parameter `{wire_name}`"), false)?;
 
     if ty.is_nullable() {
-        return Err(ValidationError::NullableParameterUnsupported {
-            wire_name: wire_name.clone(),
-        });
+        if !required
+            && matches!(
+                location,
+                ParameterLocation::Query | ParameterLocation::Header
+            )
+        {
+            // Absent and null mean the same thing on the wire for optional
+            // query/header parameters: fold nullability into optionality;
+            // `required: false` already renders `Option<T>`.
+            ty.nullable = false;
+        } else {
+            return Err(ValidationError::NullableParameterUnsupported {
+                wire_name: wire_name.clone(),
+            });
+        }
     }
 
     if ty.contains_inline_struct() {
@@ -264,16 +293,6 @@ fn validate_parameter(
         });
     }
 
-    let required = match location {
-        ParameterLocation::Path => {
-            if parameter.required != Some(true) {
-                return Err(ValidationError::PathParameterNotRequired { wire_name });
-            }
-            true
-        }
-        ParameterLocation::Query | ParameterLocation::Header => parameter.required.unwrap_or(false),
-    };
-
     Ok(ValidatedParameter {
         location,
         wire_name: parameter.name.clone(),
@@ -281,6 +300,45 @@ fn validate_parameter(
         ty,
         required,
     })
+}
+
+/// Returns the non-null branch of an optional query/header parameter shaped
+/// `anyOf`/`oneOf`: `[T, {type: "null"}]` (FastAPI `Optional[T]`), so its
+/// nullability folds into optionality. Any other shape is returned unchanged.
+fn peel_nullable_parameter_schema(
+    schema: &OasSchema,
+    required: bool,
+    location: ParameterLocation,
+) -> &OasSchema {
+    if required
+        || !matches!(
+            location,
+            ParameterLocation::Query | ParameterLocation::Header
+        )
+    {
+        return schema;
+    }
+    if !matches!(schema_ref(schema, ""), Ok(None)) {
+        return schema;
+    }
+    let Ok(object) = object_schema(schema, "") else {
+        return schema;
+    };
+
+    let ((branches @ [_, _], []) | ([], branches @ [_, _])) =
+        (object.any_of.as_slice(), object.one_of.as_slice())
+    else {
+        return schema;
+    };
+
+    let is_null_branch =
+        |branch: &OasSchema| object_schema(branch, "").is_ok_and(inline_union_null_branch);
+
+    match (is_null_branch(&branches[0]), is_null_branch(&branches[1])) {
+        (false, true) => &branches[0],
+        (true, false) => &branches[1],
+        _ => schema,
+    }
 }
 
 fn validate_request_body(

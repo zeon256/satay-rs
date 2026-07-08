@@ -684,3 +684,142 @@ components:
         Some(TypeRef::Named("ErrorResponse".to_owned()))
     );
 }
+
+#[test]
+fn folds_nullable_optional_query_and_header_parameters() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+        - name: page
+          in: query
+          schema:
+            oneOf:
+              - type: string
+              - type: "null"
+        - name: limit
+          in: query
+          schema:
+            type: [integer, "null"]
+        - name: x-trace
+          in: header
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+        - name: count
+          in: query
+          schema:
+            anyOf:
+              - type: integer
+                minimum: 1
+              - type: "null"
+      responses:
+        '204':
+          description: No content
+"#,
+    );
+
+    let operation = &api.operations[0];
+
+    for wire_name in ["q", "page", "x-trace"] {
+        let param = parameter(operation, wire_name);
+        assert!(!param.required, "{wire_name} must stay optional");
+        assert_eq!(param.ty, TypeRef::String, "{wire_name} folds to plain T");
+    }
+
+    let limit = parameter(operation, "limit");
+    assert!(!limit.required);
+    assert_eq!(limit.ty, TypeRef::Integer(IntegerType::I64));
+
+    // Constraints on the peeled branch survive as a validation newtype.
+    let count = parameter(operation, "count");
+    assert!(!count.required);
+    match &count.ty {
+        TypeRef::Constrained { inner, .. } => {
+            assert_eq!(inner.as_ref(), &TypeRef::Integer(IntegerType::U64));
+        }
+        other => panic!("expected constrained count parameter, got {other:?}"),
+    }
+}
+
+#[test]
+fn rejects_required_nullable_query_parameter() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            anyOf:
+              - type: string
+              - type: "null"
+      responses:
+        '204':
+          description: No content
+"#,
+    );
+
+    match err {
+        ValidationError::NullableParameterUnsupported { wire_name } => {
+            assert_eq!(wire_name, "q");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_optional_query_parameter_with_non_null_union() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /ping:
+    get:
+      operationId: ping
+      parameters:
+        - name: q
+          in: query
+          schema:
+            anyOf:
+              - type: string
+              - type: integer
+      responses:
+        '204':
+          description: No content
+"#,
+    );
+
+    match err {
+        ValidationError::AnyOfParameterUnsupported { wire_name } => {
+            assert_eq!(wire_name, "q");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
