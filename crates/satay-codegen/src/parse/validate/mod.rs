@@ -1,5 +1,6 @@
 pub(crate) mod constraint;
 mod operation;
+mod reachability;
 mod satay;
 mod schema;
 
@@ -244,7 +245,8 @@ pub(crate) fn validate_document<'a>(
         });
     }
 
-    let components = schema::validate_components(&document)?;
+    let excluded = reachability::excluded_component_schemas(&document)?;
+    let components = schema::validate_components(&document, &excluded)?;
     let operations = operation::validate_operations(&document)?;
 
     Ok(ValidatedDocument {

@@ -105,6 +105,26 @@ pub enum ValidationError {
     #[error("{context}.x-satay.enum-variants maps multiple values to `{rust_name}`")]
     DuplicateSatayEnumVariantName { context: String, rust_name: String },
 
+    /// An operation-level `x-satay` extension is not an object.
+    ///
+    /// Error message: `operation `{operation_id}` has a non-object `x-satay` extension`
+    #[error("operation `{operation_id}` has a non-object `x-satay` extension")]
+    OperationSatayNotObject { operation_id: String },
+
+    /// An operation-level `x-satay` extension uses an unsupported key.
+    ///
+    /// Error message: `operation `{operation_id}` uses unsupported `x-satay` key `{key}`; only `skip` is supported`
+    #[error(
+        "operation `{operation_id}` uses unsupported `x-satay` key `{key}`; only `skip` is supported"
+    )]
+    UnsupportedOperationSatayKey { operation_id: String, key: String },
+
+    /// An operation-level `x-satay.skip` value is not a boolean.
+    ///
+    /// Error message: `operation `{operation_id}` `x-satay.skip` must be a boolean`
+    #[error("operation `{operation_id}` `x-satay.skip` must be a boolean")]
+    OperationSataySkipNotBoolean { operation_id: String },
+
     /// A schema has a `required` field that is not an array.
     ///
     /// Error message: `{context} has a non-array `required` field`
