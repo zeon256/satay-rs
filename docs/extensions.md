@@ -89,6 +89,26 @@ pub struct Bus {
 
 The wire format stays a string: serde deserializes from a JSON string and serializes back to one. Supported string-backed `parse-as` values are `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`, `date`, `naive-datetime`, `offset-datetime`, and `time`. Float parsing uses `fast-float`; `date` generates `satay_runtime::Date` and expects `YYYY-MM-DD` values such as `2024-07-16`; optional query parameters become `Option<satay_runtime::Date>` and encode with `satay_runtime::format_date`. `naive-datetime` generates `satay_runtime::PrimitiveDateTime` and expects `YYYY-MM-DDTHH:mm:ss` values such as `2024-07-16T23:59:00`; optional query parameters encode with `satay_runtime::format_naive_datetime`. `offset-datetime` generates `satay_runtime::OffsetDateTime`; `time` generates `satay_runtime::Time` and expects `HHMM` values such as `0620` or `2352`. Nullable `time` fields generate `Option<satay_runtime::Time>` and treat an empty string as `None`. `bool` also supports integer schemas, accepting `1`, `0`, `"1"`, `"0"`, `true`, and `false`; integer-backed bool fields serialize as `1` or `0`.
 
+## `none-if`
+
+Use `x-satay.none-if` on a struct property with a string-backed `parse-as` when the API uses one or more sentinel strings for an unavailable value:
+
+```yaml
+wbgt:
+  type: string
+  x-satay:
+    parse-as: f64
+    none-if: [NA, "-"]
+```
+
+The list must contain at least one string. Matching is exact and case-sensitive, with no trimming or normalization. Empty strings are valid configured values. Satay checks the raw string against the list and then invokes the normal `parse-as` parser for every non-match, so an unexpected invalid value still fails deserialization.
+
+A field with `none-if` generates `Option<T>`. Required, non-null fields still reject missing keys and JSON `null`; optional fields accept missing keys and `null` as `None`; required nullable fields accept `null`. Existing parser-specific behavior is preserved, including numeric and boolean inputs accepted by `parse-as: bool` and blank optional `time` values.
+
+On serialization, `Some(T)` uses the configured string parser. An optional `None` field is omitted. A required `None` field serializes as the first configured sentinel, so multiple accepted sentinel spellings canonicalize to the first list entry.
+
+`none-if` is supported on inline struct properties using the `serde_string` parsers. It is not supported on parameters, `$ref` siblings, integer-backed `bool`, `integer-range`, `number-range`, or union payloads. It cannot be combined with `treat-error-as-none`, because that extension intentionally hides every inner deserialization error while `none-if` preserves errors for unconfigured values.
+
 ## `integer-type`
 
 Satay infers the smallest Rust integer primitive for `type: integer` schemas that declare both `minimum` and `maximum`. Unformatted integer schemas with a one-sided non-negative lower bound and no `maximum` infer `u64`. Bounds that remain narrower than the primitive still generate validation newtypes.

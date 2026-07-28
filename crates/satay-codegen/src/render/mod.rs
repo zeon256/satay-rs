@@ -307,6 +307,7 @@ pub fn input_fields(operation: &Operation) -> Vec<Field> {
         ty: parameter.ty.clone(),
         required: parameter.required,
         treat_error_as_none: false,
+        none_if: vec![],
     }));
     if let Some(body) = &operation.request_body {
         input_fields.push(Field {
@@ -316,6 +317,7 @@ pub fn input_fields(operation: &Operation) -> Vec<Field> {
             ty: body.ty.clone(),
             required: body.required,
             treat_error_as_none: false,
+            none_if: vec![],
         });
     }
 
@@ -388,6 +390,7 @@ mod tests {
                         ty: TypeRef::String,
                         required: true,
                         treat_error_as_none: false,
+                        none_if: vec![],
                     },
                     Field {
                         wire_name: "tag_count".to_owned(),
@@ -396,6 +399,7 @@ mod tests {
                         ty: TypeRef::Integer(IntegerType::I32),
                         required: false,
                         treat_error_as_none: false,
+                        none_if: vec![],
                     },
                 ]),
             }],

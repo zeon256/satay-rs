@@ -74,6 +74,9 @@ fn render_component(component: &Component, items: &mut Vec<syn::Item>) {
                 fields,
                 true,
             )));
+            if let Some(impl_) = structs::render_none_if_impl(&component.rust_name, fields) {
+                items.push(Item::Impl(impl_));
+            }
         }
         ComponentKind::Enum(enum_) => items.extend(enums::render_enum(
             &component.rust_name,

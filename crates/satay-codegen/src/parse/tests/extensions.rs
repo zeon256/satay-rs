@@ -444,6 +444,211 @@ components:
 }
 
 #[test]
+fn parses_x_satay_none_if_for_parsed_string_fields() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Reading:
+      type: object
+      required: [wbgt]
+      properties:
+        wbgt:
+          type: string
+          x-satay:
+            parse-as: f64
+            none-if: [NA, "-"]
+        optionalWbgt:
+          type: string
+          x-satay:
+            parse-as: f64
+            none-if: [NA]
+"#,
+    );
+
+    let reading = component(&api, "Reading");
+    let ComponentKind::Struct(fields) = &reading.kind else {
+        panic!("expected Reading struct");
+    };
+    assert_eq!(field(fields, "wbgt").none_if, ["NA", "-"]);
+    assert_eq!(field(fields, "optionalWbgt").none_if, ["NA"]);
+}
+
+#[test]
+fn rejects_invalid_x_satay_none_if_configurations() {
+    let cases = [
+        (
+            "none-if: []",
+            "property `Reading.wbgt`.x-satay.none-if must contain at least one string",
+        ),
+        (
+            "none-if: NA",
+            "property `Reading.wbgt`.x-satay.none-if must be an array",
+        ),
+        (
+            "none-if: [NA, 1]",
+            "property `Reading.wbgt`.x-satay.none-if values must be strings",
+        ),
+    ];
+
+    for (none_if, expected) in cases {
+        let spec = format!(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {{}}
+components:
+  schemas:
+    Reading:
+      type: object
+      properties:
+        wbgt:
+          type: string
+          x-satay:
+            parse-as: f64
+            {none_if}
+"#
+        );
+        assert_eq!(parse_invalid(&spec).to_string(), expected);
+    }
+}
+
+#[test]
+fn rejects_x_satay_none_if_without_string_parser_or_with_lossy_mode() {
+    let without_parser = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Reading:
+      type: object
+      properties:
+        wbgt:
+          type: string
+          x-satay:
+            none-if: [NA]
+"#,
+    );
+    assert!(matches!(
+        without_parser,
+        ValidationError::SatayNoneIfRequiresParsedString { context }
+            if context == "property `Reading.wbgt`"
+    ));
+
+    let conflicting = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Reading:
+      type: object
+      properties:
+        wbgt:
+          type: string
+          x-satay:
+            parse-as: f64
+            none-if: [NA]
+            treat-error-as-none: true
+"#,
+    );
+    assert!(matches!(
+        conflicting,
+        ValidationError::ConflictingSatayNoneHandling { context }
+            if context == "property `Reading.wbgt`"
+    ));
+}
+
+#[test]
+fn rejects_x_satay_none_if_outside_supported_parsed_struct_fields() {
+    let integer_bool = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Reading:
+      type: object
+      properties:
+        monitored:
+          type: integer
+          x-satay:
+            parse-as: bool
+            none-if: [NA]
+"#,
+    );
+    assert!(matches!(
+        integer_bool,
+        ValidationError::SatayNoneIfRequiresParsedString { context }
+            if context == "property `Reading.monitored`"
+    ));
+
+    let range = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Reading:
+      type: object
+      properties:
+        range:
+          type: string
+          x-satay:
+            parse-as: number-range
+            none-if: [NA]
+"#,
+    );
+    assert!(matches!(
+        range,
+        ValidationError::SatayNoneIfRequiresParsedString { context }
+            if context == "property `Reading.range`"
+    ));
+
+    let component = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Wbgt:
+      type: string
+      x-satay:
+        parse-as: f64
+        none-if: [NA]
+"#,
+    );
+    assert!(matches!(
+        component,
+        ValidationError::SatayNoneIfRequiresStructField { context }
+            if context == "schema `Wbgt`"
+    ));
+}
+
+#[test]
 fn validates_x_satay_parse_as_on_reachable_operation_schemas() {
     let err = parse_invalid(
         r#"

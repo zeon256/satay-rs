@@ -228,6 +228,156 @@ mod tests {
 }
 
 #[test]
+fn x_satay_none_if_generates_strict_optional_parsed_fields() {
+    let files = satay_codegen::generate(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Reading:
+      type: object
+      required: [requiredWbgt, nullableWbgt]
+      properties:
+        requiredWbgt:
+          type: string
+          x-satay:
+            parse-as: f64
+            none-if: [NA, "-"]
+        optionalWbgt:
+          type: string
+          x-satay:
+            parse-as: f64
+            none-if: [NA]
+        nullableWbgt:
+          type: [string, "null"]
+          x-satay:
+            parse-as: f64
+            none-if: [NA]
+"#,
+    )
+    .expect("generate none-if fixture");
+
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    let reading = find_struct(&types_rs, "Reading");
+    assert_field(reading, "required_wbgt", "Option<f64>");
+    assert_field(reading, "optional_wbgt", "Option<f64>");
+    assert_field(reading, "nullable_wbgt", "Option<f64>");
+    assert_attr_contains(
+        &field(reading, "required_wbgt").attrs,
+        "cfg_attr",
+        r#"deserialize_with = "Reading::__satay_deserialize_required_wbgt_none_if""#,
+    );
+    assert_attr_contains(
+        &field(reading, "optional_wbgt").attrs,
+        "cfg_attr",
+        "default",
+    );
+    assert_attr_contains(
+        &field(reading, "optional_wbgt").attrs,
+        "cfg_attr",
+        r#"skip_serializing_if = "Option::is_none""#,
+    );
+    assert!(contains_tokens(
+        &types_rs,
+        "satay_runtime::serde_string::as_f64::deserialize_none_if"
+    ));
+    assert!(contains_tokens(&types_rs, "&[\"NA\", \"-\"]"));
+    assert!(contains_tokens(
+        &types_rs,
+        "satay_runtime::serde_string::as_f64::option::deserialize_none_if"
+    ));
+    assert!(contains_tokens(
+        &types_rs,
+        "satay_runtime::serde_string::as_f64::serialize_none_if(value, \"NA\", serializer)"
+    ));
+    assert!(contains_tokens(
+        &types_rs,
+        "#[allow(clippy::ref_option)] fn __satay_serialize_required_wbgt_none_if"
+    ));
+
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+    let runtime_path = runtime_path_toml();
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::Reading;
+
+    #[test]
+    fn sentinel_fields_decode_and_encode_strictly() {
+        let valid: Reading = serde_json::from_str(
+            r#"{"requiredWbgt":"28.7","optionalWbgt":"17.5","nullableWbgt":"12.0"}"#,
+        )
+        .unwrap();
+        assert_eq!(valid.required_wbgt, Some(28.7));
+        assert_eq!(valid.optional_wbgt, Some(17.5));
+        assert_eq!(valid.nullable_wbgt, Some(12.0));
+
+        let sentinel: Reading = serde_json::from_str(
+            r#"{"requiredWbgt":"-","optionalWbgt":"NA","nullableWbgt":"NA"}"#,
+        )
+        .unwrap();
+        assert_eq!(sentinel.required_wbgt, None);
+        assert_eq!(sentinel.optional_wbgt, None);
+        assert_eq!(sentinel.nullable_wbgt, None);
+
+        let null_and_missing: Reading =
+            serde_json::from_str(r#"{"requiredWbgt":"28.7","nullableWbgt":null}"#).unwrap();
+        assert_eq!(null_and_missing.optional_wbgt, None);
+        assert_eq!(null_and_missing.nullable_wbgt, None);
+
+        assert!(serde_json::from_str::<Reading>(
+            r#"{"optionalWbgt":"1","nullableWbgt":"2"}"#,
+        )
+        .is_err());
+        assert!(serde_json::from_str::<Reading>(
+            r#"{"requiredWbgt":null,"nullableWbgt":"2"}"#,
+        )
+        .is_err());
+        assert!(serde_json::from_str::<Reading>(
+            r#"{"requiredWbgt":"unknown","nullableWbgt":"2"}"#,
+        )
+        .is_err());
+
+        let encoded = serde_json::to_value(Reading {
+            required_wbgt: None,
+            optional_wbgt: None,
+            nullable_wbgt: None,
+        })
+        .unwrap();
+        assert_eq!(
+            encoded,
+            serde_json::json!({"requiredWbgt": "NA", "nullableWbgt": "NA"})
+        );
+    }
+}
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    run_temp_cargo(crate_dir, "test", &[], "none-if generated crate tests");
+    run_temp_cargo(
+        crate_dir,
+        "check",
+        &["--no-default-features", "--features", "serde"],
+        "none-if serde-only generated crate check",
+    );
+    run_temp_cargo(
+        crate_dir,
+        "clippy",
+        &["--lib", "--", "-D", "clippy::ref_option"],
+        "none-if generated crate ref-option clippy",
+    );
+}
+
+#[test]
 fn x_satay_parse_as_date_generates_query_parameter_encoding() {
     let files = satay_codegen::generate(
         r#"
