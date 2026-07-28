@@ -294,6 +294,7 @@ mod tests {
                 ty: TypeRef::String,
                 required: true,
                 treat_error_as_none: false,
+                none_if: vec![],
             }],
         );
 

@@ -136,6 +136,7 @@ pub(crate) struct Field {
     pub(crate) ty: TypeRef,
     pub(crate) required: bool,
     pub(crate) treat_error_as_none: bool,
+    pub(crate) none_if: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

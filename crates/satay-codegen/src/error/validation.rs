@@ -153,6 +153,42 @@ pub enum ValidationError {
         kind: String,
     },
 
+    /// An `x-satay.none-if` value is not an array.
+    ///
+    /// Error message: `{context}.x-satay.none-if must be an array`
+    #[error("{context}.x-satay.none-if must be an array")]
+    InvalidSatayNoneIf { context: String },
+
+    /// An `x-satay.none-if` array is empty.
+    ///
+    /// Error message: `{context}.x-satay.none-if must contain at least one string`
+    #[error("{context}.x-satay.none-if must contain at least one string")]
+    EmptySatayNoneIf { context: String },
+
+    /// An `x-satay.none-if` entry is not a string.
+    ///
+    /// Error message: `{context}.x-satay.none-if values must be strings`
+    #[error("{context}.x-satay.none-if values must be strings")]
+    InvalidSatayNoneIfValue { context: String },
+
+    /// `x-satay.none-if` was applied outside a struct property.
+    ///
+    /// Error message: `{context} uses x-satay.none-if outside a struct field`
+    #[error("{context} uses x-satay.none-if outside a struct field")]
+    SatayNoneIfRequiresStructField { context: String },
+
+    /// `x-satay.none-if` was not paired with a string-backed parser.
+    ///
+    /// Error message: `{context} uses x-satay.none-if without a string-backed x-satay.parse-as`
+    #[error("{context} uses x-satay.none-if without a string-backed x-satay.parse-as")]
+    SatayNoneIfRequiresParsedString { context: String },
+
+    /// `x-satay.none-if` and `x-satay.treat-error-as-none` were combined.
+    ///
+    /// Error message: `{context} cannot combine x-satay.none-if with x-satay.treat-error-as-none`
+    #[error("{context} cannot combine x-satay.none-if with x-satay.treat-error-as-none")]
+    ConflictingSatayNoneHandling { context: String },
+
     /// An `x-satay.integer-type` value is not a supported Rust integer type.
     ///
     /// Error message: `{context} uses unsupported x-satay.integer-type `{integer_type}``

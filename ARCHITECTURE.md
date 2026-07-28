@@ -123,13 +123,14 @@ Schema decisions are carried by `ValidatedType`:
 - `validation`: normalized string, integer, number, or array constraints that will render as `nutype` newtypes.
 - `description`: the OpenAPI description, filtered to `None` when blank.
 - `treat_error_as_none`: validated `x-satay.treat-error-as-none` metadata for struct fields.
+- `none_if`: ordered sentinel strings for strict optional decoding of parsed string fields.
 
 Validation responsibilities are split by file:
 
 - `validate/schema.rs` validates component schemas and inline type schemas, rejects unsupported schema shapes, validates enum shape, validates references, and records constraints on `ValidatedType`.
 - `validate/operation.rs` validates paths, operation parameters, request bodies, responses, status codes, path placeholders, and JSON media-type requirements.
 - `validate/constraint.rs` parses and normalizes string, integer, number, and array constraints for `nutype` rendering. It also infers integer types from bounds when no explicit `x-satay.integer-type` is provided.
-- `validate/satay.rs` validates Satay vendor extensions such as `parse-as`, `integer-type`, `enum-variants`, and `treat-error-as-none`.
+- `validate/satay.rs` validates Satay vendor extensions such as `parse-as`, `none-if`, `integer-type`, `enum-variants`, and `treat-error-as-none`.
 - `parse/satay.rs` contains lower-level `x-satay` parsing helpers shared by validation.
 
 Unsupported OpenAPI features are rejected with `ValidationError` instead of being ignored. Lowering and rendering rely on those validation guarantees and use `unreachable!` or `expect` for states that validation should have made impossible.
@@ -254,6 +255,7 @@ Important IR conventions:
 - `TypeRef::Option` maps to `Option<T>` during rendering.
 - Optional fields are represented by `Field.required == false`; rendering decides whether to wrap in `Option<T>`.
 - `Field.treat_error_as_none` forces `Option<T>` plus custom serde handling even when a property is required in OpenAPI.
+- `Field.none_if` forces `Option<T>` and generated field-specific serde helpers that preserve the configured string parser while recognizing exact sentinel strings.
 
 ## Rendering Stage
 

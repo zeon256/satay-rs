@@ -112,6 +112,7 @@ fn validate_type_schema_with_stack(
             validation: None,
             description: optional_description(&schema.description),
             treat_error_as_none: false,
+            none_if: vec![],
         });
     }
     let (schema_type, nullable) = schema_type_and_nullable(schema, context)?;
@@ -257,6 +258,7 @@ fn validate_component_schema(
                     validation: None,
                     description: optional_description(&schema.description),
                     treat_error_as_none: false,
+                    none_if: vec![],
                 })
             } else {
                 match schema_type {
@@ -349,6 +351,7 @@ fn validate_union_type_schema(
             validation: None,
             description: optional_description(&schema.description),
             treat_error_as_none: false,
+            none_if: vec![],
         });
     }
 
@@ -381,6 +384,7 @@ fn validate_union_type_schema(
         validation: None,
         description: optional_description(&schema.description),
         treat_error_as_none: false,
+        none_if: vec![],
     })
 }
 
@@ -509,6 +513,7 @@ fn validate_open_string_enum_any_of(
         validation: None,
         description: optional_description(&schema.description).or(branch_description),
         treat_error_as_none: false,
+        none_if: vec![],
     }))
 }
 
@@ -978,6 +983,7 @@ fn validate_nested_discriminator_union_branch(
         validation: None,
         description: optional_description(&schema.description),
         treat_error_as_none: false,
+        none_if: vec![],
     };
     Ok(PlainUnionBranch::Variant(Box::new(ValidatedUnionVariant {
         rust_name: unique_ident("Union".to_owned(), used),
@@ -1024,6 +1030,7 @@ fn validate_inline_plain_union_branch(
             validation: None,
             description: optional_description(&schema.description),
             treat_error_as_none: false,
+            none_if: vec![],
         };
         let rust_name = inline_union_enum_variant_name(&ty)
             .expect("validated inline union enum branch has at least one variant");
@@ -1661,6 +1668,7 @@ fn embedded_discriminator_value(
     if !field.required
         || field.treat_error_as_none
         || field.ty.treat_error_as_none
+        || !field.ty.none_if.is_empty()
         || field.ty.nullable
     {
         return Err(invalid_discriminator_property(
@@ -2514,6 +2522,7 @@ fn validate_object_type_schema(
             validation: None,
             description,
             treat_error_as_none: validated_satay.treat_error_as_none,
+            none_if: validated_satay.none_if,
         });
     }
 
@@ -2532,6 +2541,7 @@ fn validate_object_type_schema(
             validation: None,
             description,
             treat_error_as_none: validated_satay.treat_error_as_none,
+            none_if: validated_satay.none_if,
         });
     }
 
@@ -2554,6 +2564,7 @@ fn validate_object_type_schema(
         validation,
         description,
         treat_error_as_none: validated_satay.treat_error_as_none,
+        none_if: validated_satay.none_if,
     })
 }
 
@@ -2621,6 +2632,7 @@ fn validate_inline_type_kind(
                     validation: None,
                     description: None,
                     treat_error_as_none: false,
+                    none_if: vec![],
                 })))
             }
             Some(value @ OasSchema::Object(_)) => {

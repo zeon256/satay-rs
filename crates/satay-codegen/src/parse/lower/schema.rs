@@ -170,6 +170,7 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
                 ),
                 required: field.required,
                 treat_error_as_none: field.treat_error_as_none,
+                none_if: field.ty.none_if.clone(),
             });
         }
 

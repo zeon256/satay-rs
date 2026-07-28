@@ -500,6 +500,32 @@ pub mod serde_string {
                     super::deserialize_from_str(deserializer)
                 }
 
+                pub fn serialize_none_if<S>(
+                    value: &Option<$ty>,
+                    none_value: &str,
+                    serializer: S,
+                ) -> Result<S::Ok, S::Error>
+                where
+                    S: serde::Serializer,
+                {
+                    super::serialize_option_or_sentinel(
+                        value.as_ref(),
+                        none_value,
+                        serializer,
+                        serialize,
+                    )
+                }
+
+                pub fn deserialize_none_if<'de, D>(
+                    deserializer: D,
+                    none_if: &[&str],
+                ) -> Result<Option<$ty>, D::Error>
+                where
+                    D: serde::Deserializer<'de>,
+                {
+                    super::deserialize_none_if_with(deserializer, none_if, str::parse::<$ty>)
+                }
+
                 pub mod option {
                     pub fn serialize<S>(
                         value: &Option<$ty>,
@@ -516,6 +542,20 @@ pub mod serde_string {
                         D: serde::Deserializer<'de>,
                     {
                         super::super::deserialize_option_from_str(deserializer)
+                    }
+
+                    pub fn deserialize_none_if<'de, D>(
+                        deserializer: D,
+                        none_if: &[&str],
+                    ) -> Result<Option<$ty>, D::Error>
+                    where
+                        D: serde::Deserializer<'de>,
+                    {
+                        super::super::deserialize_option_none_if_with(
+                            deserializer,
+                            none_if,
+                            str::parse::<$ty>,
+                        )
                     }
                 }
             }
@@ -543,6 +583,34 @@ pub mod serde_string {
                     fast_float2::parse::<$ty, _>(&value).map_err(DeError::custom)
                 }
 
+                pub fn serialize_none_if<S>(
+                    value: &Option<$ty>,
+                    none_value: &str,
+                    serializer: S,
+                ) -> Result<S::Ok, S::Error>
+                where
+                    S: serde::Serializer,
+                {
+                    super::serialize_option_or_sentinel(
+                        value.as_ref(),
+                        none_value,
+                        serializer,
+                        serialize,
+                    )
+                }
+
+                pub fn deserialize_none_if<'de, D>(
+                    deserializer: D,
+                    none_if: &[&str],
+                ) -> Result<Option<$ty>, D::Error>
+                where
+                    D: serde::Deserializer<'de>,
+                {
+                    super::deserialize_none_if_with(deserializer, none_if, |value| {
+                        fast_float2::parse::<$ty, _>(value)
+                    })
+                }
+
                 pub mod option {
                     use serde::Deserialize;
                     use serde::de::Error as DeError;
@@ -567,6 +635,20 @@ pub mod serde_string {
                                 fast_float2::parse::<$ty, _>(&value).map_err(DeError::custom)
                             })
                             .transpose()
+                    }
+
+                    pub fn deserialize_none_if<'de, D>(
+                        deserializer: D,
+                        none_if: &[&str],
+                    ) -> Result<Option<$ty>, D::Error>
+                    where
+                        D: serde::Deserializer<'de>,
+                    {
+                        super::super::deserialize_option_none_if_with(
+                            deserializer,
+                            none_if,
+                            |value| fast_float2::parse::<$ty, _>(value),
+                        )
                     }
                 }
             }
@@ -601,6 +683,27 @@ pub mod serde_string {
             D: serde::Deserializer<'de>,
         {
             deserializer.deserialize_any(BoolVisitor)
+        }
+
+        pub fn serialize_none_if<S>(
+            value: &Option<bool>,
+            none_value: &str,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            super::serialize_option_or_sentinel(value.as_ref(), none_value, serializer, serialize)
+        }
+
+        pub fn deserialize_none_if<'de, D>(
+            deserializer: D,
+            none_if: &[&str],
+        ) -> Result<Option<bool>, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            deserializer.deserialize_any(BoolNoneIfVisitor { none_if })
         }
 
         struct BoolVisitor;
@@ -653,6 +756,64 @@ pub mod serde_string {
             }
         }
 
+        struct BoolNoneIfVisitor<'a> {
+            none_if: &'a [&'a str],
+        }
+
+        impl Visitor<'_> for BoolNoneIfVisitor<'_> {
+            type Value = Option<bool>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a boolean string, numeric boolean, or configured sentinel")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E> {
+                Ok(Some(value))
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                if self.none_if.contains(&value) {
+                    Ok(None)
+                } else {
+                    super::deserialize_bool(value)
+                        .map(Some)
+                        .map_err(DeError::custom)
+                }
+            }
+
+            fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                self.visit_str(&value)
+            }
+
+            fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                match value {
+                    0 => Ok(Some(false)),
+                    1 => Ok(Some(true)),
+                    _ => Err(DeError::custom("invalid boolean number")),
+                }
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: DeError,
+            {
+                match value {
+                    0 => Ok(Some(false)),
+                    1 => Ok(Some(true)),
+                    _ => Err(DeError::custom("invalid boolean number")),
+                }
+            }
+        }
+
         pub mod option {
             use std::fmt;
 
@@ -673,6 +834,16 @@ pub mod serde_string {
                 D: serde::Deserializer<'de>,
             {
                 deserializer.deserialize_option(BoolOptionVisitor)
+            }
+
+            pub fn deserialize_none_if<'de, D>(
+                deserializer: D,
+                none_if: &[&str],
+            ) -> Result<Option<bool>, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                deserializer.deserialize_option(BoolOptionNoneIfVisitor { none_if })
             }
 
             struct BoolOptionVisitor;
@@ -699,6 +870,35 @@ pub mod serde_string {
                     super::deserialize(deserializer).map(Some)
                 }
             }
+
+            struct BoolOptionNoneIfVisitor<'a> {
+                none_if: &'a [&'a str],
+            }
+
+            impl<'de> Visitor<'de> for BoolOptionNoneIfVisitor<'_> {
+                type Value = Option<bool>;
+
+                fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    formatter.write_str("an optional boolean string, numeric boolean, or sentinel")
+                }
+
+                fn visit_none<E>(self) -> Result<Self::Value, E> {
+                    Ok(None)
+                }
+
+                fn visit_unit<E>(self) -> Result<Self::Value, E> {
+                    Ok(None)
+                }
+
+                fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+                where
+                    D: serde::Deserializer<'de>,
+                {
+                    deserializer.deserialize_any(super::BoolNoneIfVisitor {
+                        none_if: self.none_if,
+                    })
+                }
+            }
         }
     }
 
@@ -723,10 +923,32 @@ pub mod serde_string {
             crate::parse_date(&value).map_err(DeError::custom)
         }
 
+        pub fn serialize_none_if<S>(
+            value: &Option<Date>,
+            none_value: &str,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            super::serialize_option_or_sentinel(value.as_ref(), none_value, serializer, serialize)
+        }
+
+        pub fn deserialize_none_if<'de, D>(
+            deserializer: D,
+            none_if: &[&str],
+        ) -> Result<Option<Date>, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            super::deserialize_none_if_with(deserializer, none_if, crate::parse_date)
+        }
+
         pub mod option {
             use serde::Deserialize;
             use serde::de::Error as DeError;
 
+            use super::super as serde_string;
             use crate::Date;
 
             pub fn serialize<S>(value: &Option<Date>, serializer: S) -> Result<S::Ok, S::Error>
@@ -747,6 +969,20 @@ pub mod serde_string {
                 value
                     .map(|value| crate::parse_date(&value).map_err(DeError::custom))
                     .transpose()
+            }
+
+            pub fn deserialize_none_if<'de, D>(
+                deserializer: D,
+                none_if: &[&str],
+            ) -> Result<Option<Date>, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                serde_string::deserialize_option_none_if_with(
+                    deserializer,
+                    none_if,
+                    crate::parse_date,
+                )
             }
         }
     }
@@ -772,10 +1008,32 @@ pub mod serde_string {
             crate::parse_naive_datetime(&value).map_err(DeError::custom)
         }
 
+        pub fn serialize_none_if<S>(
+            value: &Option<PrimitiveDateTime>,
+            none_value: &str,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            super::serialize_option_or_sentinel(value.as_ref(), none_value, serializer, serialize)
+        }
+
+        pub fn deserialize_none_if<'de, D>(
+            deserializer: D,
+            none_if: &[&str],
+        ) -> Result<Option<PrimitiveDateTime>, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            super::deserialize_none_if_with(deserializer, none_if, crate::parse_naive_datetime)
+        }
+
         pub mod option {
             use serde::Deserialize;
             use serde::de::Error as DeError;
 
+            use super::super as serde_string;
             use crate::PrimitiveDateTime;
 
             pub fn serialize<S>(
@@ -801,6 +1059,20 @@ pub mod serde_string {
                 value
                     .map(|value| crate::parse_naive_datetime(&value).map_err(DeError::custom))
                     .transpose()
+            }
+
+            pub fn deserialize_none_if<'de, D>(
+                deserializer: D,
+                none_if: &[&str],
+            ) -> Result<Option<PrimitiveDateTime>, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                serde_string::deserialize_option_none_if_with(
+                    deserializer,
+                    none_if,
+                    crate::parse_naive_datetime,
+                )
             }
         }
     }
@@ -829,10 +1101,34 @@ pub mod serde_string {
             OffsetDateTime::parse(&value, &Rfc3339).map_err(DeError::custom)
         }
 
+        pub fn serialize_none_if<S>(
+            value: &Option<OffsetDateTime>,
+            none_value: &str,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            super::serialize_option_or_sentinel(value.as_ref(), none_value, serializer, serialize)
+        }
+
+        pub fn deserialize_none_if<'de, D>(
+            deserializer: D,
+            none_if: &[&str],
+        ) -> Result<Option<OffsetDateTime>, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            super::deserialize_none_if_with(deserializer, none_if, |value| {
+                OffsetDateTime::parse(value, &Rfc3339)
+            })
+        }
+
         pub mod option {
             use serde::Deserialize;
             use serde::de::Error as DeError;
 
+            use super::super as serde_string;
             use crate::OffsetDateTime;
             use time::format_description::well_known::Rfc3339;
 
@@ -857,6 +1153,18 @@ pub mod serde_string {
                 value
                     .map(|value| OffsetDateTime::parse(&value, &Rfc3339).map_err(DeError::custom))
                     .transpose()
+            }
+
+            pub fn deserialize_none_if<'de, D>(
+                deserializer: D,
+                none_if: &[&str],
+            ) -> Result<Option<OffsetDateTime>, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                serde_string::deserialize_option_none_if_with(deserializer, none_if, |value| {
+                    OffsetDateTime::parse(value, &Rfc3339)
+                })
             }
         }
     }
@@ -883,10 +1191,35 @@ pub mod serde_string {
             OffsetDateTime::from_unix_timestamp(value).map_err(DeError::custom)
         }
 
+        pub fn serialize_none_if<S>(
+            value: &Option<OffsetDateTime>,
+            none_value: &str,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            super::serialize_option_or_sentinel(value.as_ref(), none_value, serializer, serialize)
+        }
+
+        pub fn deserialize_none_if<'de, D>(
+            deserializer: D,
+            none_if: &[&str],
+        ) -> Result<Option<OffsetDateTime>, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            super::deserialize_none_if_with(deserializer, none_if, |value| {
+                let value = value.parse::<i64>().map_err(|error| error.to_string())?;
+                OffsetDateTime::from_unix_timestamp(value).map_err(|error| error.to_string())
+            })
+        }
+
         pub mod option {
             use serde::Deserialize;
             use serde::de::Error as DeError;
 
+            use super::super as serde_string;
             use crate::OffsetDateTime;
 
             pub fn serialize<S>(
@@ -914,6 +1247,19 @@ pub mod serde_string {
                     })
                     .transpose()
             }
+
+            pub fn deserialize_none_if<'de, D>(
+                deserializer: D,
+                none_if: &[&str],
+            ) -> Result<Option<OffsetDateTime>, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                serde_string::deserialize_option_none_if_with(deserializer, none_if, |value| {
+                    let value = value.parse::<i64>().map_err(|error| error.to_string())?;
+                    OffsetDateTime::from_unix_timestamp(value).map_err(|error| error.to_string())
+                })
+            }
         }
     }
 
@@ -936,6 +1282,27 @@ pub mod serde_string {
         {
             let value = <String as Deserialize>::deserialize(deserializer)?;
             crate::parse_time(&value).map_err(DeError::custom)
+        }
+
+        pub fn serialize_none_if<S>(
+            value: &Option<Time>,
+            none_value: &str,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            super::serialize_option_or_sentinel(value.as_ref(), none_value, serializer, serialize)
+        }
+
+        pub fn deserialize_none_if<'de, D>(
+            deserializer: D,
+            none_if: &[&str],
+        ) -> Result<Option<Time>, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            super::deserialize_none_if_with(deserializer, none_if, crate::parse_time)
         }
 
         pub mod option {
@@ -968,6 +1335,27 @@ pub mod serde_string {
                 }
                 crate::parse_time(value).map(Some).map_err(DeError::custom)
             }
+
+            pub fn deserialize_none_if<'de, D>(
+                deserializer: D,
+                none_if: &[&str],
+            ) -> Result<Option<Time>, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let value = <Option<String> as Deserialize>::deserialize(deserializer)?;
+                let Some(value) = value else {
+                    return Ok(None);
+                };
+                if none_if.contains(&value.as_str()) {
+                    return Ok(None);
+                }
+                let value = value.trim();
+                if value.is_empty() {
+                    return Ok(None);
+                }
+                crate::parse_time(value).map(Some).map_err(DeError::custom)
+            }
         }
     }
 
@@ -987,6 +1375,21 @@ pub mod serde_string {
         match value {
             Some(value) => serialize_display(value, serializer),
             None => serializer.serialize_none(),
+        }
+    }
+
+    fn serialize_option_or_sentinel<T, S>(
+        value: Option<&T>,
+        none_value: &str,
+        serializer: S,
+        serialize: impl FnOnce(&T, S) -> Result<S::Ok, S::Error>,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match value {
+            Some(value) => serialize(value, serializer),
+            None => serializer.serialize_str(none_value),
         }
     }
 
@@ -1010,6 +1413,49 @@ pub mod serde_string {
         value
             .map(|value| value.parse::<T>().map_err(DeError::custom))
             .transpose()
+    }
+
+    fn deserialize_none_if_with<'de, T, D, E>(
+        deserializer: D,
+        none_if: &[&str],
+        parse: impl FnOnce(&str) -> Result<T, E>,
+    ) -> Result<Option<T>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+        E: fmt::Display,
+    {
+        let value = String::deserialize(deserializer)?;
+        parse_none_if_with(&value, none_if, parse)
+    }
+
+    fn deserialize_option_none_if_with<'de, T, D, E>(
+        deserializer: D,
+        none_if: &[&str],
+        parse: impl FnOnce(&str) -> Result<T, E>,
+    ) -> Result<Option<T>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+        E: fmt::Display,
+    {
+        let Some(value) = Option::<String>::deserialize(deserializer)? else {
+            return Ok(None);
+        };
+        parse_none_if_with(&value, none_if, parse)
+    }
+
+    fn parse_none_if_with<T, E, D>(
+        value: &str,
+        none_if: &[&str],
+        parse: impl FnOnce(&str) -> Result<T, E>,
+    ) -> Result<Option<T>, D>
+    where
+        E: fmt::Display,
+        D: DeError,
+    {
+        if none_if.contains(&value) {
+            return Ok(None);
+        }
+        parse(value).map(Some).map_err(DeError::custom)
     }
 
     fn deserialize_bool(value: &str) -> Result<bool, &'static str> {
@@ -1227,6 +1673,46 @@ const fn is_unreserved(byte: u8) -> bool {
 mod tests {
     use super::*;
 
+    #[cfg(all(feature = "serde", feature = "json"))]
+    mod required_f64_none_if {
+        use crate::serde_string::as_f64;
+
+        #[allow(clippy::ref_option)]
+        pub fn serialize<S>(value: &Option<f64>, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            as_f64::serialize_none_if(value, "NA", serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            as_f64::deserialize_none_if(deserializer, &["NA", "-"])
+        }
+    }
+
+    #[cfg(all(feature = "serde", feature = "json"))]
+    mod optional_f64_none_if {
+        use crate::serde_string::as_f64::{self, option};
+
+        #[allow(clippy::ref_option)]
+        pub fn serialize<S>(value: &Option<f64>, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            as_f64::serialize_none_if(value, "NA", serializer)
+        }
+
+        pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            option::deserialize_none_if(deserializer, &["NA", "-"])
+        }
+    }
+
     #[test]
     fn encodes_path_segments() {
         let mut out = String::new();
@@ -1387,6 +1873,65 @@ mod tests {
 
         let encoded = serde_json::to_value(Value { monitored: false }).unwrap();
         assert_eq!(encoded, serde_json::json!({ "monitored": "0" }));
+    }
+
+    #[cfg(all(feature = "serde", feature = "json"))]
+    #[test]
+    fn serde_string_none_if_is_strict_and_canonical() {
+        #[derive(Debug, serde::Deserialize, serde::Serialize)]
+        struct Value {
+            #[serde(with = "required_f64_none_if")]
+            required: Option<f64>,
+            #[serde(default, with = "optional_f64_none_if")]
+            optional: Option<f64>,
+        }
+
+        let valid =
+            serde_json::from_str::<Value>(r#"{"required":"28.7","optional":"10.5"}"#).unwrap();
+        assert_eq!(valid.required, Some(28.7));
+        assert_eq!(valid.optional, Some(10.5));
+
+        let sentinel =
+            serde_json::from_str::<Value>(r#"{"required":"-","optional":"NA"}"#).unwrap();
+        assert_eq!(sentinel.required, None);
+        assert_eq!(sentinel.optional, None);
+
+        let null_optional =
+            serde_json::from_str::<Value>(r#"{"required":"28.7","optional":null}"#).unwrap();
+        assert_eq!(null_optional.optional, None);
+        assert!(serde_json::from_str::<Value>(r#"{"required":null}"#).is_err());
+        assert!(serde_json::from_str::<Value>(r#"{"required":"unexpected"}"#).is_err());
+
+        let encoded = serde_json::to_value(Value {
+            required: None,
+            optional: Some(10.5),
+        })
+        .unwrap();
+        assert_eq!(
+            encoded,
+            serde_json::json!({"required": "NA", "optional": "10.5"})
+        );
+    }
+
+    #[cfg(all(feature = "serde", feature = "json"))]
+    #[test]
+    fn serde_string_none_if_preserves_bool_and_time_parsers() {
+        use crate::serde_string::{as_bool, as_time::option as time_option};
+        use serde_json::Value;
+
+        let bool_sentinel =
+            as_bool::deserialize_none_if(Value::String("NA".to_owned()), &["NA"]).unwrap();
+        assert_eq!(bool_sentinel, None);
+
+        let bool_numeric = as_bool::deserialize_none_if(Value::from(1), &["NA"]).unwrap();
+        assert_eq!(bool_numeric, Some(true));
+
+        let empty_time =
+            time_option::deserialize_none_if(Value::String("  ".to_owned()), &["-"]).unwrap();
+        assert_eq!(empty_time, None);
+        assert!(
+            time_option::deserialize_none_if(Value::String("invalid".to_owned()), &["-"]).is_err()
+        );
     }
 
     #[cfg(all(feature = "serde", feature = "json"))]

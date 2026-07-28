@@ -25,6 +25,7 @@ pub(crate) struct ValidatedSataySchema {
     pub(crate) explicit_integer_type: Option<IntegerType>,
     pub(crate) enum_variants: BTreeMap<String, String>,
     pub(crate) treat_error_as_none: bool,
+    pub(crate) none_if: Vec<String>,
 }
 
 pub(super) fn validate_component_enum_satay(
@@ -46,6 +47,9 @@ pub(super) fn validate_type_satay(
 ) -> Result<ValidatedSataySchema, ValidationError> {
     let parse_as = parse_satay_parse_as(schema, context)?;
     let explicit_integer_type = parse_satay_integer_type(schema, context)?;
+    let none_if = validate_none_if(schema, context)?;
+    let treat_error_as_none =
+        allow_treat_error_as_none && validate_treat_error_as_none(schema, context)?;
 
     validate_satay_integer_type(schema_type, parse_as, explicit_integer_type, context)?;
 
@@ -80,11 +84,27 @@ pub(super) fn validate_type_satay(
         None
     };
 
+    if !none_if.is_empty() && !allow_treat_error_as_none {
+        return Err(ValidationError::SatayNoneIfRequiresStructField {
+            context: context.to_owned(),
+        });
+    }
+    if !none_if.is_empty() && !matches!(parse_as, Some(ValidatedParseAs::ParsedString(_))) {
+        return Err(ValidationError::SatayNoneIfRequiresParsedString {
+            context: context.to_owned(),
+        });
+    }
+    if !none_if.is_empty() && treat_error_as_none {
+        return Err(ValidationError::ConflictingSatayNoneHandling {
+            context: context.to_owned(),
+        });
+    }
+
     Ok(ValidatedSataySchema {
         parse_as,
         explicit_integer_type,
-        treat_error_as_none: allow_treat_error_as_none
-            && validate_treat_error_as_none(schema, context)?,
+        treat_error_as_none,
+        none_if,
         ..ValidatedSataySchema::default()
     })
 }
@@ -137,6 +157,41 @@ fn validate_treat_error_as_none(
         })?;
 
     Ok(value)
+}
+
+fn validate_none_if(
+    schema: &OasObjectSchema,
+    context: &str,
+) -> Result<Vec<String>, ValidationError> {
+    let Some(satay) = satay_object(schema, context)? else {
+        return Ok(vec![]);
+    };
+
+    let Some(value) = satay.get("none-if") else {
+        return Ok(vec![]);
+    };
+
+    let Some(values) = value.as_array() else {
+        return Err(ValidationError::InvalidSatayNoneIf {
+            context: context.to_owned(),
+        });
+    };
+    if values.is_empty() {
+        return Err(ValidationError::EmptySatayNoneIf {
+            context: context.to_owned(),
+        });
+    }
+
+    values
+        .iter()
+        .map(|value| {
+            value.as_str().map(ToOwned::to_owned).ok_or_else(|| {
+                ValidationError::InvalidSatayNoneIfValue {
+                    context: context.to_owned(),
+                }
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
