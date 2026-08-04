@@ -1,0 +1,47 @@
+[package]
+name = "roast"
+description = "Structures and tools to parse, navigate, and validate OpenAPI v3.1 specifications"
+version = "0.12.0"
+publish = false
+authors = ["Rob Ede <robjtede@icloud.com>"]
+keywords = ["oas3", "openapi", "swagger", "api", "conformance"]
+categories = ["development-tools::testing"]
+repository = "https://github.com/x52dev/oas3-rs"
+license = "MIT"
+edition = "2021"
+rust-version = "1.87"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["bytes::*", "colored::*", "http::*", "oas3::*", "reqwest::*", "serde_json::*"]
+
+[dependencies]
+bytes = { workspace = true }
+colored = { workspace = true }
+derive_more = { workspace = true, features = ["display", "error", "from"] }
+futures-util = { workspace = true }
+http = { workspace = true }
+log = { workspace = true }
+oas3 = { workspace = true, default-features = false }
+once_cell = { workspace = true }
+prettytable-rs = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+serde_json = { workspace = true }
+url = { workspace = true, features = ["serde"] }
+
+[dev-dependencies]
+color-eyre = { workspace = true }
+dotenvy = { workspace = true }
+eyre = { workspace = true }
+maplit = { workspace = true }
+oas3 = { workspace = true, features = ["yaml-spec"] }
+pretty_env_logger = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+
+[[example]]
+name = "conformance"
+
+[lints]
+workspace = true

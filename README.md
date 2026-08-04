@@ -147,6 +147,7 @@ OpenAPI `pattern` uses ECMA-262 regex syntax, while `nutype` uses Rust's `regex`
 
 - [crates/satay-cli](crates/satay-cli): user-facing `satay` executable.
 - [crates/satay-codegen](crates/satay-codegen): OpenAPI parser, normalized IR, and Rust generator.
+- [crates/satay-oas3](crates/satay-oas3): in-tree `oas3` source fork with its upstream companion crate, integration tests, and fixtures.
 - [crates/satay-runtime](crates/satay-runtime): small IO-free support crate for generated code.
 - [crates/satay-reqwest](crates/satay-reqwest): adapter traits for sending generated actions with `reqwest`.
 - [crates/satay-ureq](crates/satay-ureq): adapter traits for sending generated actions with `ureq`.

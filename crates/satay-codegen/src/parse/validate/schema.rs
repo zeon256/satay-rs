@@ -534,6 +534,7 @@ fn open_string_any_of_branch_is_unconstrained_string(
     let (schema_type, nullable) = schema_type_and_nullable(schema, context)?;
 
     let OasObjectSchema {
+        reference: _,
         all_of,
         any_of,
         one_of,
@@ -606,6 +607,7 @@ fn open_string_any_of_branch_is_unconstrained_string(
 /// common OpenAPI idiom for attaching `title`/`description` to a reference.
 fn annotation_only_all_of_ref_wrapper(schema: &OasObjectSchema) -> Option<&str> {
     let OasObjectSchema {
+        reference: _,
         all_of,
         any_of,
         one_of,

@@ -1,9 +1,6 @@
 use oas3::{
     Map as OasMap,
-    spec::{
-        MediaType as OasMediaType, ObjectOrReference, ObjectSchema as OasObjectSchema,
-        Schema as OasSchema,
-    },
+    spec::{MediaType as OasMediaType, ObjectSchema as OasObjectSchema, Schema as OasSchema},
 };
 
 use crate::error::ValidationError;
@@ -18,10 +15,7 @@ pub(super) fn optional_description(description: &Option<String>) -> Option<Strin
 pub(super) fn schema_description(schema: &OasSchema) -> Option<String> {
     match schema {
         OasSchema::Boolean(_) => None,
-        OasSchema::Object(object) => match object.as_ref() {
-            ObjectOrReference::Object(schema) => optional_description(&schema.description),
-            ObjectOrReference::Ref { description, .. } => optional_description(description),
-        },
+        OasSchema::Object(schema) => optional_description(&schema.description),
     }
 }
 

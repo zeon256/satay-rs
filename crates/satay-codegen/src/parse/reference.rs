@@ -15,10 +15,7 @@ pub(super) fn schema_ref<'a>(
 ) -> Result<Option<&'a str>, ValidationError> {
     match schema {
         OasSchema::Boolean(_) => Ok(None),
-        OasSchema::Object(object) => match object.as_ref() {
-            ObjectOrReference::Ref { ref_path, .. } => Ok(Some(ref_path.as_str())),
-            ObjectOrReference::Object(_) => Ok(None),
-        },
+        OasSchema::Object(schema) => Ok(schema.reference.as_deref()),
     }
 }
 
@@ -35,12 +32,7 @@ pub(super) fn object_schema<'a>(
         OasSchema::Boolean(_) => Err(ValidationError::UnsupportedBooleanSchema {
             context: context.to_owned(),
         }),
-        OasSchema::Object(object) => match object.as_ref() {
-            ObjectOrReference::Object(schema) => Ok(schema),
-            ObjectOrReference::Ref { .. } => Err(ValidationError::ExpectedObject {
-                context: context.to_owned(),
-            }),
-        },
+        OasSchema::Object(schema) => Ok(schema),
     }
 }
 

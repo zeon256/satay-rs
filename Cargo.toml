@@ -3,6 +3,21 @@ resolver = "3"
 members = [
   "crates/satay-cli",
   "crates/satay-codegen",
+  "crates/satay-oas3/crates/oas3",
+  "crates/satay-oas3/crates/roast",
+  "crates/satay-oas3/integration-tests",
+  "crates/satay-reqwest",
+  "crates/satay-runtime",
+  "crates/satay-ureq",
+  "examples/reqwest",
+  "examples/reqwest-blocking",
+  "examples/reqwest-manual",
+  "examples/tungstenite-ws",
+  "examples/ureq",
+]
+default-members = [
+  "crates/satay-cli",
+  "crates/satay-codegen",
   "crates/satay-reqwest",
   "crates/satay-runtime",
   "crates/satay-ureq",
@@ -21,26 +36,59 @@ rust-version = "1.88.0"
 
 [workspace.dependencies]
 argh = "0.1.19"
+assert_matches = "1"
+bytes = "1.11"
+color-eyre = "0.6"
+colored = "3"
+derive_more = "2"
+dotenvy = "0.15"
+eyre = "0.6.12"
 fast-float2 = "0.2"
+futures-util = "0.3"
 http = "1"
-oas3 = { version = "0.22", features = ["yaml-spec"] }
+indexmap = "2"
+indoc = "2"
+log = "0.4"
+maplit = "1"
+oas3 = { package = "satay-oas3", version = "0.22.0", path = "crates/satay-oas3/crates/oas3", default-features = false }
+once_cell = "1"
 prettyplease = "0.2"
+pretty_assertions = "1"
+pretty_env_logger = "0.5"
+prettytable-rs = "0.10"
 proc-macro2 = "1"
 quote = "1"
+regex = "1.12.3"
+reqwest = { version = "0.13", default-features = false }
 satay-codegen = { version = "0.10.0", path = "crates/satay-codegen" }
 satay-reqwest = { version = "0.10.0", path = "crates/satay-reqwest" }
 satay-runtime = { version = "0.10.0", path = "crates/satay-runtime" }
 satay-ureq = { version = "0.10.0", path = "crates/satay-ureq" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_path_to_error = "0.1.20"
+serde-saphyr = "1"
 serde_yaml = "0.9"
-yaml_serde = "0.10"
+semver = "1"
 syn = { version = "2", features = ["full"] }
 tempfile = "3"
 thiserror = "2"
 time = { version = "0.3", features = ["formatting", "parsing"] }
+tokio = "1.52.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+url = "2"
+
+[workspace.lints.rust]
+rust-2018-idioms = "deny"
+nonstandard-style = "deny"
+future-incompatible = "deny"
+missing-debug-implementations = { level = "warn", priority = -1 }
+missing-docs = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+uninlined-format-args = "warn"
+disallowed-names = "warn"
 
 # Release-binary profile: fat LTO and single codegen unit for smaller, faster CLI
 # artifacts. Used by `.github/workflows/release-binaries.yml` only; local

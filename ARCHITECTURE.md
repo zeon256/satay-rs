@@ -79,7 +79,7 @@ flowchart LR
 
 ## Parse Stage
 
-`parse::parse_document` parses the incoming string with `oas3::from_yaml` and stores the parsed `oas3::spec::Spec` in a small `Document` wrapper.
+`parse::parse_document` parses the incoming string with `oas3::from_yaml` and stores the parsed `oas3::spec::Spec` in a small `Document` wrapper. The `oas3` Rust library is provided by the in-tree `satay-oas3` package, a source fork that preserves Schema Object `$ref` siblings and uses `serde-saphyr` for YAML.
 
 `parse::parse_api` runs three phases:
 

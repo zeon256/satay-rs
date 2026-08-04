@@ -118,14 +118,12 @@ fn validate_schema_refs(
 ) -> Result<(), ValidationError> {
     match schema {
         OasSchema::Boolean(_) => Ok(()),
-        OasSchema::Object(schema) => match schema.as_ref() {
-            ObjectOrReference::Object(schema) => {
-                validate_object_schema_refs(document, schema, context)
+        OasSchema::Object(schema) => {
+            if let Some(reference) = schema.reference.as_deref() {
+                validate_schema_ref(document, reference, context)?;
             }
-            ObjectOrReference::Ref { ref_path, .. } => {
-                validate_schema_ref(document, ref_path, context)
-            }
-        },
+            validate_object_schema_refs(document, schema, context)
+        }
     }
 }
 
