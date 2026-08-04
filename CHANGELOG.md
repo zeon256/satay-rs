@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0](https://github.com/zeon256/satay-rs/compare/satay-oas3-v0.10.0...satay-oas3-v0.11.0) - 2026-08-04
+
+### Other
+
+- update version number for oas so that it matches us
+- *(parser)* fork oas3 as satay-oas3 ([#91](https://github.com/zeon256/satay-rs/pull/91))
+
 ### Changed
 
 - *(parser)* fork `oas3` as the in-tree `satay-oas3` crate and parse YAML with `serde-saphyr`
