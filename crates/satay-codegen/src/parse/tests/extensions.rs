@@ -444,6 +444,76 @@ components:
 }
 
 #[test]
+fn parses_x_satay_treat_error_as_none_on_required_reference_property() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    BusArrivalTiming:
+      type: object
+      required: [estimatedArrival]
+      properties:
+        estimatedArrival:
+          type: string
+    BusServiceArrival:
+      type: object
+      required: [nextBus]
+      properties:
+        nextBus:
+          $ref: '#/components/schemas/BusArrivalTiming'
+          x-satay:
+            treat-error-as-none: true
+"#,
+    );
+
+    let arrival = component(&api, "BusServiceArrival");
+    let ComponentKind::Struct(fields) = &arrival.kind else {
+        panic!("expected BusServiceArrival struct");
+    };
+    let next_bus = field(fields, "nextBus");
+    assert!(next_bus.required);
+    assert!(next_bus.treat_error_as_none);
+    assert_eq!(next_bus.ty, TypeRef::Named("BusArrivalTiming".to_owned()));
+}
+
+#[test]
+fn rejects_unsupported_x_satay_reference_sibling() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Identifier:
+      type: string
+    Record:
+      type: object
+      properties:
+        id:
+          $ref: '#/components/schemas/Identifier'
+          x-satay:
+            parse-as: u32
+"#,
+    );
+
+    match err {
+        ValidationError::UnsupportedRefSiblingKeyword { context, keyword } => {
+            assert_eq!(context, "property `Record.id`");
+            assert_eq!(keyword, "x-satay.parse-as");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
 fn parses_x_satay_none_if_for_parsed_string_fields() {
     let api = parse_valid(
         r#"

@@ -83,12 +83,16 @@ fn validate_type_schema_with_stack(
     stack: &mut Vec<String>,
 ) -> Result<ValidatedType, ValidationError> {
     if let Some(reference) = schema_ref(schema, context)? {
-        let description = match schema_description(schema) {
+        let schema = object_schema(schema, context)?;
+        let validated_satay =
+            validate_reference_siblings(schema, context, allow_treat_error_as_none)?;
+        let description = match optional_description(&schema.description) {
             Some(description) => Some(description),
             None => referenced_schema_description(document, reference)?,
         };
         let mut ty = ValidatedType::named(schema_ref_type_name(reference)?);
         ty.description = description;
+        ty.treat_error_as_none = validated_satay.treat_error_as_none;
         return Ok(ty);
     }
 
@@ -130,6 +134,126 @@ fn validate_type_schema_with_stack(
         allow_treat_error_as_none,
         stack,
     )
+}
+
+fn validate_reference_siblings(
+    schema: &OasObjectSchema,
+    context: &str,
+    allow_treat_error_as_none: bool,
+) -> Result<ValidatedSataySchema, ValidationError> {
+    if let Some(keyword) = unsupported_reference_schema_keyword(schema) {
+        return Err(ValidationError::UnsupportedRefSiblingKeyword {
+            context: context.to_owned(),
+            keyword: keyword.to_owned(),
+        });
+    }
+
+    for extension in schema.extensions.keys() {
+        if extension != "satay" {
+            return Err(ValidationError::UnsupportedRefSiblingKeyword {
+                context: context.to_owned(),
+                keyword: format!("x-{extension}"),
+            });
+        }
+    }
+
+    if let Some(satay) = super::super::helpers::satay_object(schema, context)? {
+        for keyword in satay.keys() {
+            if keyword != "treat-error-as-none" {
+                return Err(ValidationError::UnsupportedRefSiblingKeyword {
+                    context: context.to_owned(),
+                    keyword: format!("x-satay.{keyword}"),
+                });
+            }
+        }
+        if satay.contains_key("treat-error-as-none") && !allow_treat_error_as_none {
+            return Err(ValidationError::UnsupportedRefSiblingKeyword {
+                context: context.to_owned(),
+                keyword: "x-satay.treat-error-as-none".to_owned(),
+            });
+        }
+    }
+
+    validate_type_satay(schema, None, context, allow_treat_error_as_none)
+}
+
+fn unsupported_reference_schema_keyword(schema: &OasObjectSchema) -> Option<&'static str> {
+    let OasObjectSchema {
+        reference: _,
+        all_of,
+        any_of,
+        one_of,
+        items,
+        prefix_items,
+        properties,
+        additional_properties,
+        schema_type,
+        enum_values,
+        const_value,
+        multiple_of,
+        maximum,
+        exclusive_maximum,
+        minimum,
+        exclusive_minimum,
+        max_length,
+        min_length,
+        pattern,
+        max_items,
+        min_items,
+        unique_items,
+        max_properties,
+        min_properties,
+        required,
+        format,
+        title,
+        description: _,
+        default,
+        deprecated,
+        read_only,
+        write_only,
+        examples,
+        discriminator,
+        example,
+        extensions: _,
+    } = schema;
+
+    [
+        (!all_of.is_empty(), "allOf"),
+        (!any_of.is_empty(), "anyOf"),
+        (!one_of.is_empty(), "oneOf"),
+        (items.is_some(), "items"),
+        (!prefix_items.is_empty(), "prefixItems"),
+        (!properties.is_empty(), "properties"),
+        (additional_properties.is_some(), "additionalProperties"),
+        (schema_type.is_some(), "type"),
+        (!enum_values.is_empty(), "enum"),
+        (const_value.is_some(), "const"),
+        (multiple_of.is_some(), "multipleOf"),
+        (maximum.is_some(), "maximum"),
+        (exclusive_maximum.is_some(), "exclusiveMaximum"),
+        (minimum.is_some(), "minimum"),
+        (exclusive_minimum.is_some(), "exclusiveMinimum"),
+        (max_length.is_some(), "maxLength"),
+        (min_length.is_some(), "minLength"),
+        (pattern.is_some(), "pattern"),
+        (max_items.is_some(), "maxItems"),
+        (min_items.is_some(), "minItems"),
+        (unique_items.is_some(), "uniqueItems"),
+        (max_properties.is_some(), "maxProperties"),
+        (min_properties.is_some(), "minProperties"),
+        (!required.is_empty(), "required"),
+        (format.is_some(), "format"),
+        (title.is_some(), "title"),
+        (default.is_some(), "default"),
+        (deprecated.is_some(), "deprecated"),
+        (read_only.is_some(), "readOnly"),
+        (write_only.is_some(), "writeOnly"),
+        (!examples.is_empty(), "examples"),
+        (discriminator.is_some(), "discriminator"),
+        (example.is_some(), "example"),
+    ]
+    .into_iter()
+    .find_map(|(present, keyword)| present.then_some(keyword))
 }
 
 pub(super) fn schema_uses_any_of(
@@ -229,6 +353,8 @@ fn validate_component_schema(
     let context = format!("schema `{schema_name}`");
     let schema_description = schema_description(schema);
     let kind = if let Some(reference) = schema_ref(schema, &context)? {
+        let schema = object_schema(schema, &context)?;
+        validate_reference_siblings(schema, &context, false)?;
         ValidatedComponentKind::Reference(schema_ref_type_name(reference)?)
     } else {
         let schema = object_schema(schema, &context)?;
