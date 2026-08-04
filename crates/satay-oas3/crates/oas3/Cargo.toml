@@ -1,7 +1,7 @@
 [package]
 name = "satay-oas3"
 description = "Satay's lossless OpenAPI v3.1 parser, forked from oas3"
-version = "0.22.0"
+version.workspace = true
 authors = ["softprops <d.tangren@gmail.com>", "Rob Ede <robjtede@icloud.com>"]
 keywords = ["openapi", "oas3", "swagger", "api", "oas"]
 categories = ["data-structures", "parsing"]
