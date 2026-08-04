@@ -213,6 +213,8 @@ pub struct BusServiceArrival {
 
 This is useful for APIs that return empty or malformed values in nested objects when data is unavailable, rather than omitting the field or returning `null`. The `treat-error-as-none` extension requires the generated crate's `json` feature.
 
+For a referenced field, place `x-satay` directly beside `$ref` as shown above. Satay supports `description` and `x-satay.treat-error-as-none` beside a field `$ref`; other `$ref` siblings are rejected instead of being ignored. An `allOf` wrapper is not required or supported for this extension.
+
 ## `skip`
 
 Use `x-satay.skip` on an operation to exclude it from generation entirely. The operation bypasses operation-level validation, and any `components.schemas` entry reachable only from skipped operations is excluded from validation and generation too, so this is useful for operations Satay cannot represent yet, such as multipart uploads or binary downloads. Component schemas that are also reachable from a non-skipped operation, and schemas not referenced by any operation, are still validated and generated. Every `$ref` in the document must still resolve to an existing component even when its only user is skipped. When every operation on a path is skipped, that path's shared parameters are not validated.

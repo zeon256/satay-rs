@@ -291,6 +291,12 @@ pub enum ValidationError {
         keyword: &'static str,
     },
 
+    /// A schema uses a sibling beside `$ref` that Satay cannot apply.
+    ///
+    /// Error message: `{context} uses unsupported `$ref` sibling `{keyword}``
+    #[error("{context} uses unsupported `$ref` sibling `{keyword}`")]
+    UnsupportedRefSiblingKeyword { context: String, keyword: String },
+
     /// An `allOf` schema combines supported struct flattening with another schema keyword.
     ///
     /// Error message: `{context} uses `allOf` with `{keyword}`; only object branch flattening is supported`

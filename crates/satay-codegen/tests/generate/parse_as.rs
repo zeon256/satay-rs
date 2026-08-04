@@ -4,6 +4,122 @@ use crate::ast::*;
 use crate::common::*;
 
 #[test]
+fn referenced_treat_error_as_none_fields_decode_lossily() {
+    let files = satay_codegen::generate(
+        r#"
+openapi: 3.1.0
+info:
+  title: Bus Arrival API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    BusArrivalTiming:
+      type: object
+      required: [OriginCode, EstimatedArrival]
+      properties:
+        OriginCode:
+          type: string
+          x-satay:
+            parse-as: u32
+        EstimatedArrival:
+          type: string
+          x-satay:
+            parse-as: offset-datetime
+    BusServiceArrival:
+      type: object
+      required: [NextBus, NextBus2, NextBus3]
+      properties:
+        NextBus:
+          $ref: '#/components/schemas/BusArrivalTiming'
+          x-satay:
+            treat-error-as-none: true
+        NextBus2:
+          $ref: '#/components/schemas/BusArrivalTiming'
+          x-satay:
+            treat-error-as-none: true
+        NextBus3:
+          $ref: '#/components/schemas/BusArrivalTiming'
+          x-satay:
+            treat-error-as-none: true
+"#,
+    )
+    .expect("generate referenced treat-error-as-none fixture");
+
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    let service = find_struct(&types_rs, "BusServiceArrival");
+    for field_name in ["next_bus", "next_bus2", "next_bus3"] {
+        assert_field(service, field_name, "Option<BusArrivalTiming>");
+        assert_attr_contains(
+            &field(service, field_name).attrs,
+            "cfg_attr",
+            r#"deserialize_with = "satay_runtime::treat_error_as_none::deserialize""#,
+        );
+        assert_attr_contains(
+            &field(service, field_name).attrs,
+            "cfg_attr",
+            r#"serialize_with = "satay_runtime::treat_error_as_none::serialize""#,
+        );
+        assert_attr_contains(&field(service, field_name).attrs, "cfg_attr", "default");
+        assert_attr_contains(
+            &field(service, field_name).attrs,
+            "cfg_attr",
+            r#"skip_serializing_if = "Option::is_none""#,
+        );
+    }
+
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+    let runtime_path = runtime_path_toml();
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::BusServiceArrival;
+
+    #[test]
+    fn valid_nested_bus_is_some_and_invalid_buses_are_none() {
+        let service: BusServiceArrival = serde_json::from_str(
+            r#"{
+                "NextBus": {
+                    "OriginCode": "12345",
+                    "EstimatedArrival": "2024-08-14T16:41:48+08:00"
+                },
+                "NextBus2": {},
+                "NextBus3": {
+                    "OriginCode": "",
+                    "EstimatedArrival": ""
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert!(service.next_bus.is_some());
+        assert_eq!(service.next_bus.as_ref().unwrap().origin_code, 12345);
+        assert_eq!(service.next_bus2, None);
+        assert_eq!(service.next_bus3, None);
+
+        let encoded = serde_json::to_value(service).unwrap();
+        assert!(encoded.get("NextBus").is_some());
+        assert!(encoded.get("NextBus2").is_none());
+        assert!(encoded.get("NextBus3").is_none());
+    }
+}
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    run_temp_cargo(
+        crate_dir,
+        "test",
+        &[],
+        "referenced treat-error-as-none generated crate tests",
+    );
+}
+
+#[test]
 fn x_satay_parse_as_generates_wire_backed_deserializers() {
     let files = satay_codegen::generate(
         r#"
