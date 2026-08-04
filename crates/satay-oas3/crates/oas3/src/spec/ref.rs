@@ -1,0 +1,216 @@
+use std::str::FromStr;
+
+use derive_more::derive::{Display, Error};
+use log::trace;
+use once_cell::sync::Lazy;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+
+use super::Spec;
+
+static RE_REF: Lazy<Regex> = Lazy::new(|| {
+    Regex::new("^(?P<source>[^#]*)#/components/(?P<type>[^/]+)/(?P<name>.+)$").unwrap()
+});
+
+/// Container for a type of OpenAPI object, or a reference to one.
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum ObjectOrReference<T> {
+    /// Object reference.
+    ///
+    /// See <https://spec.openapis.org/oas/v3.1.1#reference-object>.
+    Ref {
+        /// Path, file reference, or URL pointing to object.
+        #[serde(rename = "$ref")]
+        ref_path: String,
+
+        /// Summary override.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
+
+        /// Description override.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+    },
+
+    /// Inline object.
+    Object(T),
+}
+
+impl<T> ObjectOrReference<T>
+where
+    T: FromRef,
+{
+    /// Resolves the object (if needed) from the given `spec` and returns it.
+    pub fn resolve(&self, spec: &Spec) -> Result<T, RefError> {
+        match self {
+            Self::Object(component) => Ok(component.clone()),
+            Self::Ref { ref_path, .. } => T::from_ref(spec, ref_path),
+        }
+    }
+}
+
+/// Object reference error.
+#[derive(Debug, Clone, PartialEq, Display, Error)]
+pub enum RefError {
+    /// Referenced object has unknown type.
+    #[display("Invalid type: {}", _0)]
+    UnknownType(#[error(not(source))] String),
+
+    /// Referenced object was not of expected type.
+    #[display("Mismatched type: cannot reference a {} as a {}", _0, _1)]
+    MismatchedType(RefType, RefType),
+
+    /// Reference path points outside the given spec file.
+    #[display("Unresolvable path: {}", _0)]
+    Unresolvable(#[error(not(source))] String), // TODO: use some kind of path structure
+}
+
+/// Component type of a reference.
+#[derive(Debug, Clone, Copy, PartialEq, Display)]
+pub enum RefType {
+    /// Schema component type.
+    Schema,
+
+    /// Response component type.
+    Response,
+
+    /// Parameter component type.
+    Parameter,
+
+    /// Example component type.
+    Example,
+
+    /// Request body component type.
+    RequestBody,
+
+    /// Header component type.
+    Header,
+
+    /// Security scheme component type.
+    SecurityScheme,
+
+    /// Link component type.
+    Link,
+
+    /// Callback component type.
+    Callback,
+}
+
+impl FromStr for RefType {
+    type Err = RefError;
+
+    fn from_str(typ: &str) -> Result<Self, Self::Err> {
+        Ok(match typ {
+            "schemas" => Self::Schema,
+            "responses" => Self::Response,
+            "parameters" => Self::Parameter,
+            "examples" => Self::Example,
+            "requestBodies" => Self::RequestBody,
+            "headers" => Self::Header,
+            "securitySchemes" => Self::SecurityScheme,
+            "links" => Self::Link,
+            "callbacks" => Self::Callback,
+            typ => return Err(RefError::UnknownType(typ.to_owned())),
+        })
+    }
+}
+
+/// Parsed reference path.
+#[derive(Debug, Clone)]
+pub struct Ref {
+    /// Source file of the object being references.
+    pub source: String,
+
+    /// Type of object being referenced.
+    pub kind: RefType,
+
+    /// Name of object being referenced.
+    pub name: String,
+}
+
+impl FromStr for Ref {
+    type Err = RefError;
+
+    fn from_str(path: &str) -> Result<Self, Self::Err> {
+        let parts = RE_REF
+            .captures(path)
+            .ok_or_else(|| RefError::Unresolvable(path.to_owned()))?;
+
+        trace!("creating Ref: {}/{}", &parts["type"], &parts["name"]);
+
+        Ok(Self {
+            source: parts["source"].to_owned(),
+            kind: parts["type"].parse()?,
+            name: parts["name"].to_owned(),
+        })
+    }
+}
+
+/// Find an object from a reference path (`$ref`).
+///
+/// Implemented for object types which can be shared via a spec's `components` object.
+pub trait FromRef: Clone {
+    /// Finds an object in `spec` using the given `path`.
+    fn from_ref(spec: &Spec, path: &str) -> Result<Self, RefError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use assert_matches::assert_matches;
+    use serde_json::json;
+
+    use super::{ObjectOrReference, Ref, RefError};
+
+    #[test]
+    fn ref_serialization_omits_empty_overrides() {
+        // A plain reference should not emit `null` summary/description slots.
+        let reference = ObjectOrReference::<()>::Ref {
+            ref_path: "#/components/examples/RustMascot".to_owned(),
+            summary: None,
+            description: None,
+        };
+
+        let serialized = serde_json::to_value(reference).expect("serializing ref");
+
+        assert_eq!(
+            serialized,
+            json!({
+                "$ref": "#/components/examples/RustMascot",
+            })
+        );
+    }
+
+    #[test]
+    fn ref_serialization_includes_present_overrides() {
+        // Explicit overrides must still be preserved during serialization.
+        let reference = ObjectOrReference::<()>::Ref {
+            ref_path: "#/components/examples/RustMascot".to_owned(),
+            summary: Some("Rust mascot override".to_owned()),
+            description: Some("Let Ferris do the talking.".to_owned()),
+        };
+
+        let serialized = serde_json::to_value(reference).expect("serializing ref");
+
+        assert_eq!(
+            serialized,
+            json!({
+                "$ref": "#/components/examples/RustMascot",
+                "summary": "Rust mascot override",
+                "description": "Let Ferris do the talking.",
+            })
+        );
+    }
+
+    #[test]
+    fn invalid_ref_path_returns_error() {
+        let err = "/components/schemas/petdetails#pet_details_id"
+            .parse::<Ref>()
+            .expect_err("invalid $ref should not parse");
+
+        assert_matches!(
+            err,
+            RefError::Unresolvable(path) if path == "/components/schemas/petdetails#pet_details_id"
+        );
+    }
+}

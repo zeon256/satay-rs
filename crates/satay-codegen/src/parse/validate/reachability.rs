@@ -162,35 +162,33 @@ pub(super) fn excluded_component_schemas(
 fn collect_schema_ref_names(schema: &OasSchema, out: &mut BTreeSet<String>) {
     match schema {
         OasSchema::Boolean(_) => {}
-        OasSchema::Object(object) => match object.as_ref() {
-            ObjectOrReference::Ref { ref_path, .. } => {
-                if let Ok(name) = local_ref_name(ref_path, "schemas") {
-                    out.insert(name);
-                }
+        OasSchema::Object(object) => {
+            if let Some(reference) = object.reference.as_deref()
+                && let Ok(name) = local_ref_name(reference, "schemas")
+            {
+                out.insert(name);
             }
-            ObjectOrReference::Object(object) => {
-                for property in object.properties.values() {
-                    collect_schema_ref_names(property, out);
-                }
-                if let Some(items) = object.items.as_deref() {
-                    collect_schema_ref_names(items, out);
-                }
-                for item in &object.prefix_items {
-                    collect_schema_ref_names(item, out);
-                }
-                if let Some(additional) = object.additional_properties.as_ref() {
-                    collect_schema_ref_names(additional, out);
-                }
-                for schema in object
-                    .all_of
-                    .iter()
-                    .chain(&object.any_of)
-                    .chain(&object.one_of)
-                {
-                    collect_schema_ref_names(schema, out);
-                }
+            for property in object.properties.values() {
+                collect_schema_ref_names(property, out);
             }
-        },
+            if let Some(items) = object.items.as_deref() {
+                collect_schema_ref_names(items, out);
+            }
+            for item in &object.prefix_items {
+                collect_schema_ref_names(item, out);
+            }
+            if let Some(additional) = object.additional_properties.as_ref() {
+                collect_schema_ref_names(additional, out);
+            }
+            for schema in object
+                .all_of
+                .iter()
+                .chain(&object.any_of)
+                .chain(&object.one_of)
+            {
+                collect_schema_ref_names(schema, out);
+            }
+        }
     }
 }
 

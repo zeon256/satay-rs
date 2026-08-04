@@ -1,0 +1,51 @@
+[package]
+name = "satay-oas3"
+description = "Satay's lossless OpenAPI v3.1 parser, forked from oas3"
+version = "0.22.0"
+authors = ["softprops <d.tangren@gmail.com>", "Rob Ede <robjtede@icloud.com>"]
+keywords = ["openapi", "oas3", "swagger", "api", "oas"]
+categories = ["data-structures", "parsing"]
+repository = "https://github.com/zeon256/satay-rs"
+license = "MIT"
+edition = "2021"
+rust-version = "1.87"
+
+[package.metadata.docs.rs]
+all-features = true
+
+[package.metadata.cargo_check_external_types]
+allowed_external_types = ["http::*", "semver::*", "serde_core::*", "serde_json::*", "serde_saphyr::*", "url::*"]
+
+[features]
+default = ["preserve-order"]
+preserve-order = ["serde_json/preserve_order"]
+yaml-spec = ["dep:serde-saphyr"]
+
+[lib]
+name = "oas3"
+
+[dependencies]
+derive_more = { workspace = true, features = ["display", "error", "from"] }
+http = { workspace = true }
+indexmap = { workspace = true }
+log = { workspace = true }
+once_cell = { workspace = true }
+regex = { workspace = true }
+semver = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+url = { workspace = true, features = ["serde"] }
+serde-saphyr = { workspace = true, optional = true }
+
+[dev-dependencies]
+assert_matches = { workspace = true }
+eyre = { workspace = true }
+indoc = { workspace = true }
+pretty_assertions = { workspace = true }
+
+[[example]]
+name = "printer"
+required-features = ["yaml-spec"]
+
+[lints]
+workspace = true

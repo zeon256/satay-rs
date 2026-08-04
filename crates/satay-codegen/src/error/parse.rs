@@ -9,5 +9,5 @@ pub enum ParseError {
     ///
     /// Error message: `failed to parse OpenAPI YAML document: {0}`
     #[error("failed to parse OpenAPI YAML document: {0}")]
-    OpenApiDocument(#[from] yaml_serde::Error),
+    OpenApiDocument(#[from] oas3::YamlDeserializeError),
 }

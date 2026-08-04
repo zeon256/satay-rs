@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- *(parser)* fork `oas3` as the in-tree `satay-oas3` crate and parse YAML with `serde-saphyr`
+
 ## [0.10.0](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.9.0...satay-codegen-v0.10.0) - 2026-08-03
 
 ### Added

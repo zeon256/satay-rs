@@ -1,0 +1,37 @@
+version: "0.2"
+words:
+  - btreemap
+  - clippy
+  - deque
+  - deserializable
+  - docsrs
+  - dotenv
+  - indoc
+  - ints
+  - maplit
+  - MSRV
+  - nextest
+  - nixpkgs
+  - noncomposite
+  - nums
+  - openapi
+  - petstore
+  - pkgs
+  - prettytable
+  - println
+  - refpath
+  - reqwest
+  - RUSTDOCFLAGS
+  - rustfmt
+  - rustup
+  - semver
+  - serde
+  - strs
+  - struct
+  - structs
+  - subschema
+  - subschemas
+  - taplo
+  - valtree
+  - valtrees
+  - watchexec

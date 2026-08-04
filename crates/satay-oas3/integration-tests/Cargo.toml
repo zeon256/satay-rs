@@ -1,0 +1,15 @@
+[package]
+name = "satay-oas3-integration-tests"
+publish = false
+edition = "2021"
+rust-version = "1.87"
+
+[dependencies]
+assert_matches = { workspace = true }
+indoc = { workspace = true }
+oas3 = { workspace = true, features = ["preserve-order", "yaml-spec"] }
+serde_json = { workspace = true }
+serde_path_to_error = { workspace = true }
+
+[lints]
+workspace = true

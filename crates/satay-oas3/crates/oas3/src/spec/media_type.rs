@@ -1,0 +1,61 @@
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    spec::{spec_extensions, Encoding, Error, Example, MediaTypeExamples, Schema, Spec},
+    Map,
+};
+
+/// Each Media Type Object provides schema and examples for the media type identified by its key.
+///
+/// See <https://spec.openapis.org/oas/v3.1.1#media-type-object>.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub struct MediaType {
+    /// The schema defining the type used for the request body.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema: Option<Schema>,
+
+    /// Example of the media type.
+    // TODO: figure out how to make this not an Option
+    // #[serde(flatten, default, skip_serializing_if = "MediaTypeExamples::is_empty")]
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub examples: Option<MediaTypeExamples>,
+
+    /// A map between a property name and its encoding information. The key, being the
+    /// property name, MUST exist in the schema as a property. The encoding object SHALL
+    /// only apply to `requestBody` objects when the media type is `multipart`
+    /// or `application/x-www-form-urlencoded`.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Map::is_empty")]
+    pub encoding: Map<String, Encoding>,
+
+    /// Specification extensions.
+    ///
+    /// Only "x-" prefixed keys are collected, and the prefix is stripped.
+    ///
+    /// See <https://spec.openapis.org/oas/v3.1.1#specification-extensions>.
+    #[serde(flatten, with = "spec_extensions")]
+    pub extensions: Map<String, serde_json::Value>,
+}
+
+impl MediaType {
+    /// Resolves and returns the JSON schema definition for this media type.
+    pub fn schema(&self, spec: &Spec) -> Result<Option<Schema>, Error> {
+        let Some(schema) = self.schema.as_ref() else {
+            return Ok(None);
+        };
+
+        let schema = schema.resolve(spec).map_err(Error::Ref)?;
+
+        Ok(Some(schema))
+    }
+
+    /// Resolves and returns the provided examples for this media type.
+    ///
+    /// Also see [`MediaTypeExamples::resolve_all()`].
+    pub fn examples(&self, spec: &Spec) -> Map<String, Example> {
+        self.examples
+            .as_ref()
+            .map(|examples| examples.resolve_all(spec))
+            .unwrap_or_default()
+    }
+}
