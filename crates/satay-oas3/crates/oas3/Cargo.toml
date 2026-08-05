@@ -29,8 +29,6 @@ derive_more = { workspace = true, features = ["display", "error", "from"] }
 http = { workspace = true }
 indexmap = { workspace = true }
 log = { workspace = true }
-once_cell = { workspace = true }
-regex = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
