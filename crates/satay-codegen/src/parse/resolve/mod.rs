@@ -188,30 +188,12 @@ fn validate_schema_refs(
 ) -> Result<(), ValidationError> {
     document.resolve_schema(schema, context)?;
 
-    let Some(schema) = schema.as_object() else {
-        return Ok(());
-    };
-
-    for (property_name, property_schema) in &schema.properties {
+    for (index, subschema) in schema.subschemas().enumerate() {
         validate_schema_refs(
             document,
-            property_schema,
-            &format!("{context}.properties.{property_name}"),
+            subschema,
+            &format!("{context}.subschemas[{index}]"),
         )?;
-    }
-
-    if let Some(items) = schema.items.as_deref() {
-        validate_schema_refs(document, items, &format!("{context}.items"))?;
-    }
-
-    for (keyword, schemas) in [
-        ("oneOf", &schema.one_of),
-        ("anyOf", &schema.any_of),
-        ("allOf", &schema.all_of),
-    ] {
-        for (index, schema) in schemas.iter().enumerate() {
-            validate_schema_refs(document, schema, &format!("{context}.{keyword}[{index}]"))?;
-        }
     }
 
     Ok(())

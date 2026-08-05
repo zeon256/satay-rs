@@ -9,10 +9,10 @@ use oas3::spec::{
 };
 use serde_json::Value as JsonValue;
 
-use super::super::helpers::{optional_description, schema_description};
+use super::super::helpers::{optional_description, schema_options};
 use super::super::reference::{
-    object_schema, reject_one_of, schema_component_ref, schema_ref, schema_ref_type_name,
-    schema_type_and_nullable, schema_type_wire,
+    reject_one_of, schema_component_ref, schema_ref_type_name, schema_type_and_nullable,
+    schema_type_wire,
 };
 use super::super::resolve::ResolvedDocument;
 use super::constraint::{parse_integer_type, parse_validation, reject_keyword};
@@ -30,6 +30,18 @@ use crate::ident::{type_ident, unique_ident, variant_ident};
 use crate::model::{
     Enum, EnumFallback, EnumVariant, IntegerLimit, IntegerType, ParseAs, TypeRef, Validation,
 };
+
+/// Annotation keywords permitted beside a single `allOf`/`$ref` branch.
+const ALLOWED_ANNOTATION_KEYWORDS: &[&str] = &[
+    "title",
+    "description",
+    "default",
+    "deprecated",
+    "readOnly",
+    "writeOnly",
+    "examples",
+    "example",
+];
 
 pub(super) fn validate_components(
     document: &ResolvedDocument<'_>,
@@ -82,8 +94,15 @@ fn validate_type_schema_with_stack(
     allow_treat_error_as_none: bool,
     stack: &mut Vec<String>,
 ) -> Result<ValidatedType, ValidationError> {
-    if let Some(reference) = schema_ref(schema, context)? {
-        let schema = object_schema(schema, context)?;
+    reject_preserved_unknown_keywords(schema, context)?;
+
+    if let Some(reference) = schema.reference() {
+        let schema =
+            schema
+                .as_object()
+                .ok_or_else(|| ValidationError::UnsupportedBooleanSchema {
+                    context: context.to_owned(),
+                })?;
         let validated_satay =
             validate_reference_siblings(schema, context, allow_treat_error_as_none)?;
         let description = match optional_description(&schema.description) {
@@ -96,7 +115,11 @@ fn validate_type_schema_with_stack(
         return Ok(ty);
     }
 
-    let schema = object_schema(schema, context)?;
+    let schema = schema
+        .as_object()
+        .ok_or_else(|| ValidationError::UnsupportedBooleanSchema {
+            context: context.to_owned(),
+        })?;
     if schema_is_union(schema) {
         return validate_union_type_schema(document, schema, context, stack);
     }
@@ -157,104 +180,38 @@ fn validate_reference_siblings(
         }
     }
 
-    if let Some(satay) = super::super::helpers::satay_object(schema, context)? {
-        for keyword in satay.keys() {
-            if keyword != "treat-error-as-none" {
-                return Err(ValidationError::UnsupportedRefSiblingKeyword {
-                    context: context.to_owned(),
-                    keyword: format!("x-satay.{keyword}"),
-                });
-            }
-        }
-        if satay.contains_key("treat-error-as-none") && !allow_treat_error_as_none {
-            return Err(ValidationError::UnsupportedRefSiblingKeyword {
-                context: context.to_owned(),
-                keyword: "x-satay.treat-error-as-none".to_owned(),
-            });
-        }
+    let options = schema_options(schema, context)?.unwrap_or_default();
+    if options.parse_as.is_some()
+        || options.integer_type.is_some()
+        || options.none_if.is_some()
+        || options.enum_variants.is_some()
+    {
+        let keyword = options
+            .parse_as
+            .map(|_| "parse-as")
+            .or_else(|| options.integer_type.map(|_| "integer-type"))
+            .or_else(|| options.none_if.as_ref().map(|_| "none-if"))
+            .or_else(|| options.enum_variants.as_ref().map(|_| "enum-variants"))
+            .expect("at least one forbidden field is set");
+        return Err(ValidationError::UnsupportedRefSiblingKeyword {
+            context: context.to_owned(),
+            keyword: format!("x-satay.{keyword}"),
+        });
+    }
+    if options.treat_error_as_none.is_some() && !allow_treat_error_as_none {
+        return Err(ValidationError::UnsupportedRefSiblingKeyword {
+            context: context.to_owned(),
+            keyword: "x-satay.treat-error-as-none".to_owned(),
+        });
     }
 
     validate_type_satay(schema, None, context, allow_treat_error_as_none)
 }
 
-fn unsupported_reference_schema_keyword(schema: &OasObjectSchema) -> Option<&'static str> {
-    let OasObjectSchema {
-        reference: _,
-        all_of,
-        any_of,
-        one_of,
-        items,
-        prefix_items,
-        properties,
-        additional_properties,
-        schema_type,
-        enum_values,
-        const_value,
-        multiple_of,
-        maximum,
-        exclusive_maximum,
-        minimum,
-        exclusive_minimum,
-        max_length,
-        min_length,
-        pattern,
-        max_items,
-        min_items,
-        unique_items,
-        max_properties,
-        min_properties,
-        required,
-        format,
-        title,
-        description: _,
-        default,
-        deprecated,
-        read_only,
-        write_only,
-        examples,
-        discriminator,
-        example,
-        unknown_keywords: _,
-        extensions: _,
-    } = schema;
-
-    [
-        (!all_of.is_empty(), "allOf"),
-        (!any_of.is_empty(), "anyOf"),
-        (!one_of.is_empty(), "oneOf"),
-        (items.is_some(), "items"),
-        (!prefix_items.is_empty(), "prefixItems"),
-        (!properties.is_empty(), "properties"),
-        (additional_properties.is_some(), "additionalProperties"),
-        (schema_type.is_some(), "type"),
-        (!enum_values.is_empty(), "enum"),
-        (const_value.is_some(), "const"),
-        (multiple_of.is_some(), "multipleOf"),
-        (maximum.is_some(), "maximum"),
-        (exclusive_maximum.is_some(), "exclusiveMaximum"),
-        (minimum.is_some(), "minimum"),
-        (exclusive_minimum.is_some(), "exclusiveMinimum"),
-        (max_length.is_some(), "maxLength"),
-        (min_length.is_some(), "minLength"),
-        (pattern.is_some(), "pattern"),
-        (max_items.is_some(), "maxItems"),
-        (min_items.is_some(), "minItems"),
-        (unique_items.is_some(), "uniqueItems"),
-        (max_properties.is_some(), "maxProperties"),
-        (min_properties.is_some(), "minProperties"),
-        (!required.is_empty(), "required"),
-        (format.is_some(), "format"),
-        (title.is_some(), "title"),
-        (default.is_some(), "default"),
-        (deprecated.is_some(), "deprecated"),
-        (read_only.is_some(), "readOnly"),
-        (write_only.is_some(), "writeOnly"),
-        (!examples.is_empty(), "examples"),
-        (discriminator.is_some(), "discriminator"),
-        (example.is_some(), "example"),
-    ]
-    .into_iter()
-    .find_map(|(present, keyword)| present.then_some(keyword))
+fn unsupported_reference_schema_keyword(schema: &OasObjectSchema) -> Option<&str> {
+    schema
+        .present_keywords()
+        .find(|&keyword| keyword != "$ref" && keyword != "description")
 }
 
 pub(super) fn schema_uses_any_of(
@@ -285,8 +242,13 @@ fn schema_uses_any_of_inner(
         }
     }
 
-    let schema = document.resolve_schema(schema, "anyOf parameter validation")?;
-    let schema = object_schema(schema, "anyOf parameter validation")?;
+    let context = "anyOf parameter validation";
+    let schema = document.resolve_schema(schema, context)?;
+    let schema = schema
+        .as_object()
+        .ok_or_else(|| ValidationError::UnsupportedBooleanSchema {
+            context: context.to_owned(),
+        })?;
     if !schema.any_of.is_empty() || !schema.one_of.is_empty() || schema.discriminator.is_some() {
         return Ok(true);
     }
@@ -312,8 +274,13 @@ fn schema_uses_all_of_inner(
         }
     }
 
-    let schema = document.resolve_schema(schema, "allOf parameter validation")?;
-    let schema = object_schema(schema, "allOf parameter validation")?;
+    let context = "allOf parameter validation";
+    let schema = document.resolve_schema(schema, context)?;
+    let schema = schema
+        .as_object()
+        .ok_or_else(|| ValidationError::UnsupportedBooleanSchema {
+            context: context.to_owned(),
+        })?;
     if !schema.all_of.is_empty() {
         return Ok(true);
     }
@@ -340,13 +307,23 @@ fn validate_component_schema(
     stack: &mut Vec<String>,
 ) -> Result<ValidatedComponent, ValidationError> {
     let context = format!("schema `{schema_name}`");
-    let schema_description = schema_description(schema);
-    let kind = if let Some(reference) = schema_ref(schema, &context)? {
-        let schema = object_schema(schema, &context)?;
+    reject_preserved_unknown_keywords(schema, &context)?;
+    let kind = if let Some(reference) = schema.reference() {
+        let schema =
+            schema
+                .as_object()
+                .ok_or_else(|| ValidationError::UnsupportedBooleanSchema {
+                    context: context.clone(),
+                })?;
         validate_reference_siblings(schema, &context, false)?;
         ValidatedComponentKind::Reference(schema_ref_type_name(reference)?)
     } else {
-        let schema = object_schema(schema, &context)?;
+        let schema =
+            schema
+                .as_object()
+                .ok_or_else(|| ValidationError::UnsupportedBooleanSchema {
+                    context: context.clone(),
+                })?;
         if schema_is_union(schema) {
             ValidatedComponentKind::Type(validate_union_type_schema(
                 document, schema, &context, stack,
@@ -420,16 +397,51 @@ fn validate_component_schema(
             }
         }
     };
-    let description = schema_description.or_else(|| match &kind {
-        ValidatedComponentKind::Type(ty) => ty.description.clone(),
-        _ => None,
-    });
+    let description = component_description(schema, &kind);
 
     Ok(ValidatedComponent {
         schema_name: schema_name.to_owned(),
         description,
         kind,
     })
+}
+
+fn component_description(schema: &OasSchema, kind: &ValidatedComponentKind) -> Option<String> {
+    schema
+        .description()
+        .and_then(|description| optional_description(&Some(description.to_owned())))
+        .or_else(|| match kind {
+            ValidatedComponentKind::Type(ty) => ty.description.clone(),
+            ValidatedComponentKind::Reference(_) | ValidatedComponentKind::Struct(_) => None,
+        })
+}
+
+/// Rejects preserved Schema Object keywords that codegen cannot safely model.
+///
+/// `present_keywords()` is the authoritative wire-name traversal supplied by
+/// `satay-oas3`; membership in `unknown_keywords` distinguishes preserved
+/// keywords from the modeled fields yielded by the same iterator. Recursing
+/// through `subschemas()` keeps this guard complete as the AST grows.
+fn reject_preserved_unknown_keywords(
+    schema: &OasSchema,
+    context: &str,
+) -> Result<(), ValidationError> {
+    if let Some(object) = schema.as_object()
+        && let Some(keyword) = object
+            .present_keywords()
+            .find(|keyword| object.unknown_keywords.contains_key(*keyword))
+    {
+        return Err(ValidationError::UnsupportedKeyword {
+            context: context.to_owned(),
+            keyword: keyword.to_owned(),
+        });
+    }
+
+    for subschema in schema.subschemas() {
+        reject_preserved_unknown_keywords(subschema, context)?;
+    }
+
+    Ok(())
 }
 
 fn schema_is_union(schema: &OasObjectSchema) -> bool {
@@ -722,78 +734,17 @@ fn open_string_any_of_branch_is_unconstrained_string(
 /// wrapper: exactly one `$ref` branch with only annotation siblings. This is a
 /// common OpenAPI idiom for attaching `title`/`description` to a reference.
 fn annotation_only_all_of_ref_wrapper(schema: &OasObjectSchema) -> Option<&str> {
-    let OasObjectSchema {
-        reference: _,
-        all_of,
-        any_of,
-        one_of,
-        items,
-        prefix_items,
-        properties,
-        additional_properties,
-        schema_type,
-        enum_values,
-        const_value,
-        multiple_of,
-        maximum,
-        exclusive_maximum,
-        minimum,
-        exclusive_minimum,
-        max_length,
-        min_length,
-        pattern,
-        max_items,
-        min_items,
-        unique_items,
-        max_properties,
-        min_properties,
-        required,
-        format,
-        title: _,
-        description: _,
-        default: _,
-        deprecated: _,
-        read_only: _,
-        write_only: _,
-        examples: _,
-        discriminator,
-        example: _,
-        unknown_keywords: _,
-        extensions: _,
-    } = schema;
-
-    if all_of.len() != 1 {
+    if schema.all_of.len() != 1 {
         return None;
     }
-    let reference = schema_ref(&all_of[0], "").ok().flatten()?;
+    let reference = schema.all_of[0].reference()?;
 
-    (any_of.is_empty()
-        && one_of.is_empty()
-        && discriminator.is_none()
-        && schema_type.is_none()
-        && enum_values.is_empty()
-        && const_value.is_none()
-        && items.is_none()
-        && prefix_items.is_empty()
-        && properties.is_empty()
-        && additional_properties.is_none()
-        && required.is_empty()
-        && format.is_none()
-        && multiple_of.is_none()
-        && maximum.is_none()
-        && exclusive_maximum.is_none()
-        && minimum.is_none()
-        && exclusive_minimum.is_none()
-        && max_length.is_none()
-        && min_length.is_none()
-        && pattern.is_none()
-        && max_items.is_none()
-        && min_items.is_none()
-        && unique_items.is_none()
-        && max_properties.is_none()
-        && min_properties.is_none()
-        && unsupported_union_extension(schema).is_none())
-    .then_some(reference)
+    let only_annotations = schema
+        .present_keywords()
+        .all(|keyword| keyword == "allOf" || ALLOWED_ANNOTATION_KEYWORDS.contains(&keyword));
+    let no_semantic_extension = unsupported_union_extension(schema).is_none();
+
+    (only_annotations && no_semantic_extension).then_some(reference)
 }
 
 /// One enum/const branch's contribution to a merged open string enum.
@@ -838,16 +789,13 @@ fn validate_open_string_enum_any_of_branch<'a>(
 
 fn open_string_any_of_object_branch<'a>(
     branch: &'a OasSchema,
-    context: &str,
+    _context: &str,
 ) -> Result<Option<&'a OasObjectSchema>, ValidationError> {
-    if schema_ref(branch, context)?.is_some() {
+    if branch.reference().is_some() {
         return Ok(None);
     }
 
-    match object_schema(branch, context) {
-        Ok(schema) => Ok(Some(schema)),
-        Err(_) => Ok(None),
-    }
+    Ok(branch.as_object())
 }
 
 fn validate_plain_any_of_union(
@@ -995,7 +943,7 @@ fn validate_plain_union_branch(
     used: &mut BTreeSet<String>,
     stack: &mut Vec<String>,
 ) -> Result<PlainUnionBranch, ValidationError> {
-    if let Some(reference) = schema_ref(branch, context)? {
+    if let Some(reference) = branch.reference() {
         let schema_name = schema_component_ref(reference)?.name().to_owned();
         let type_name = schema_ref_type_name(reference)?;
         return Ok(PlainUnionBranch::Variant(Box::new(ValidatedUnionVariant {
@@ -1008,8 +956,9 @@ fn validate_plain_union_branch(
         })));
     }
 
-    let schema =
-        object_schema(branch, context).map_err(|_| keyword.branch_error(context, index))?;
+    let schema = branch
+        .as_object()
+        .ok_or_else(|| keyword.branch_error(context, index))?;
     if inline_union_null_branch(schema) {
         return Ok(PlainUnionBranch::Null);
     }
@@ -1590,7 +1539,7 @@ fn validate_discriminator_branch_refs(
     let mut used_targets = BTreeSet::new();
 
     for (index, branch) in branches.iter().enumerate() {
-        let Some(reference) = schema_ref(branch, context)? else {
+        let Some(reference) = branch.reference() else {
             return Err(ValidationError::UnsupportedDiscriminatorBranch {
                 context: context.to_owned(),
                 keyword,
@@ -1849,12 +1798,13 @@ fn discriminator_branch_fields(
 ) -> Result<Vec<ValidatedField>, ValidationError> {
     let schema = component_schema(document, schema_name)?;
 
-    if schema_ref(schema, context)?.is_some() {
+    if schema.reference().is_some() {
         return Err(discriminator_branch_not_object(context, schema_name));
     }
 
-    let schema = object_schema(schema, context)
-        .map_err(|_| discriminator_branch_not_object(context, schema_name))?;
+    let schema = schema
+        .as_object()
+        .ok_or_else(|| discriminator_branch_not_object(context, schema_name))?;
 
     if !schema.all_of.is_empty() {
         return validate_all_of_struct_properties(document, schema_name, schema, stack)
@@ -1995,7 +1945,7 @@ impl<'a, 'doc> AllOfFieldCollector<'a, 'doc> {
         index: usize,
         context: &str,
     ) -> Result<(), ValidationError> {
-        if let Some(reference) = schema_ref(branch, context)? {
+        if let Some(reference) = branch.reference() {
             let branch_schema_name = schema_component_ref(reference).map_err(|_| {
                 ValidationError::UnsupportedAllOfBranch {
                     context: context.to_owned(),
@@ -2006,12 +1956,12 @@ impl<'a, 'doc> AllOfFieldCollector<'a, 'doc> {
             return self.collect_component_fields(&branch_schema_name, context, index);
         }
 
-        let schema = object_schema(branch, context).map_err(|_| {
-            ValidationError::UnsupportedAllOfBranch {
+        let schema = branch
+            .as_object()
+            .ok_or_else(|| ValidationError::UnsupportedAllOfBranch {
                 context: context.to_owned(),
                 index,
-            }
-        })?;
+            })?;
         self.collect_object_fields(schema_name, schema, context, index, false)
     }
 
@@ -2038,7 +1988,7 @@ impl<'a, 'doc> AllOfFieldCollector<'a, 'doc> {
         context: &str,
         index: usize,
     ) -> Result<(), ValidationError> {
-        if let Some(reference) = schema_ref(schema, context)? {
+        if let Some(reference) = schema.reference() {
             let target_schema_name = schema_component_ref(reference).map_err(|_| {
                 ValidationError::UnsupportedAllOfBranch {
                     context: context.to_owned(),
@@ -2049,12 +1999,12 @@ impl<'a, 'doc> AllOfFieldCollector<'a, 'doc> {
             return self.collect_component_fields(&target_schema_name, context, index);
         }
 
-        let schema = object_schema(schema, context).map_err(|_| {
-            ValidationError::UnsupportedAllOfBranch {
+        let schema = schema
+            .as_object()
+            .ok_or_else(|| ValidationError::UnsupportedAllOfBranch {
                 context: context.to_owned(),
                 index,
-            }
-        })?;
+            })?;
         self.collect_object_fields(component_schema_name, schema, context, index, true)
     }
 
@@ -2158,10 +2108,10 @@ fn all_of_ref_wrapper_unwraps(
 ) -> Result<bool, ValidationError> {
     let name = schema_component_ref(reference)?.name().to_owned();
     let target = component_schema(document, &name)?;
-    if schema_ref(target, "")?.is_some() {
+    if target.reference().is_some() {
         return Ok(true);
     }
-    let Ok(object) = object_schema(target, "") else {
+    let Some(object) = target.as_object() else {
         return Ok(false);
     };
     if schema_is_union(object) {
@@ -2890,11 +2840,14 @@ fn referenced_schema_description_inner(
         .and_then(|components| components.schemas.get(&name))
         .ok_or(ValidationError::MissingJsonPointerToken { token: name })?;
 
-    if let Some(description) = schema_description(target) {
+    if let Some(description) = target
+        .description()
+        .and_then(|d| optional_description(&Some(d.to_owned())))
+    {
         return Ok(Some(description));
     }
 
-    let Some(reference) = schema_ref(target, "referenced schema description")? else {
+    let Some(reference) = target.reference() else {
         return Ok(None);
     };
     referenced_schema_description_inner(document, reference, visited)

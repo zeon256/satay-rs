@@ -1795,6 +1795,7 @@ dependencies = [
  "proc-macro2",
  "quote",
  "satay-oas3",
+ "serde",
  "serde_json",
  "syn 2.0.119",
  "tempfile",

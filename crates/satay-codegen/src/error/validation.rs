@@ -67,11 +67,15 @@ pub enum ValidationError {
     #[error("{context} declares a `const` value that is not in its `enum`")]
     ConstNotInEnum { context: String },
 
-    /// An `x-satay.enum-variants` value is not an object.
+    /// A typed specification extension could not be deserialized.
     ///
-    /// Error message: `{context}.x-satay.enum-variants must be an object`
-    #[error("{context}.x-satay.enum-variants must be an object")]
-    InvalidSatayEnumVariants { context: String },
+    /// Error message: `{context}: failed to deserialize specification extension at `{path}`: {source}`
+    #[error("{context}: failed to deserialize specification extension at `{path}`: {source}")]
+    InvalidExtension {
+        context: String,
+        path: String,
+        source: serde_json::Error,
+    },
 
     /// An `x-satay.enum-variants` entry points at a value that is not in the enum.
     ///
@@ -80,12 +84,6 @@ pub enum ValidationError {
         "{context}.x-satay.enum-variants contains `{wire_name}`, which is not declared in the enum"
     )]
     UnknownSatayEnumVariantValue { context: String, wire_name: String },
-
-    /// An `x-satay.enum-variants` entry has a non-string Rust variant name.
-    ///
-    /// Error message: `{context}.x-satay.enum-variants[{wire_name:?}] must be a string`
-    #[error("{context}.x-satay.enum-variants[{wire_name:?}] must be a string")]
-    InvalidSatayEnumVariantName { context: String, wire_name: String },
 
     /// An `x-satay.enum-variants` entry uses a name reserved for generated fallback variants.
     ///
@@ -104,26 +102,6 @@ pub enum ValidationError {
     /// Error message: `{context}.x-satay.enum-variants maps multiple values to `{rust_name}``
     #[error("{context}.x-satay.enum-variants maps multiple values to `{rust_name}`")]
     DuplicateSatayEnumVariantName { context: String, rust_name: String },
-
-    /// An operation-level `x-satay` extension is not an object.
-    ///
-    /// Error message: `operation `{operation_id}` has a non-object `x-satay` extension`
-    #[error("operation `{operation_id}` has a non-object `x-satay` extension")]
-    OperationSatayNotObject { operation_id: String },
-
-    /// An operation-level `x-satay` extension uses an unsupported key.
-    ///
-    /// Error message: `operation `{operation_id}` uses unsupported `x-satay` key `{key}`; only `skip` is supported`
-    #[error(
-        "operation `{operation_id}` uses unsupported `x-satay` key `{key}`; only `skip` is supported"
-    )]
-    UnsupportedOperationSatayKey { operation_id: String, key: String },
-
-    /// An operation-level `x-satay.skip` value is not a boolean.
-    ///
-    /// Error message: `operation `{operation_id}` `x-satay.skip` must be a boolean`
-    #[error("operation `{operation_id}` `x-satay.skip` must be a boolean")]
-    OperationSataySkipNotBoolean { operation_id: String },
 
     /// A schema has a `required` field that is not an array.
     ///
@@ -149,18 +127,6 @@ pub enum ValidationError {
     #[error("{context} uses unsupported number format `{format}`")]
     UnsupportedNumberFormat { context: String, format: String },
 
-    /// An `x-satay.parse-as` value is not a supported target type.
-    ///
-    /// Error message: `{context} uses unsupported x-satay.parse-as `{parse_as}``
-    #[error("{context} uses unsupported x-satay.parse-as `{parse_as}`")]
-    UnsupportedSatayParseAs { context: String, parse_as: String },
-
-    /// An `x-satay.parse-as` value is not a string.
-    ///
-    /// Error message: `{context}.x-satay.parse-as must be a string`
-    #[error("{context}.x-satay.parse-as must be a string")]
-    InvalidSatayParseAs { context: String },
-
     /// `x-satay.parse-as` was applied to an unsupported wire schema.
     ///
     /// Error message: `{context} uses x-satay.parse-as `{parse_as}` on `{kind}`; supported parse-as wire schemas are string schemas, plus integer schemas for bool`
@@ -173,23 +139,11 @@ pub enum ValidationError {
         kind: String,
     },
 
-    /// An `x-satay.none-if` value is not an array.
-    ///
-    /// Error message: `{context}.x-satay.none-if must be an array`
-    #[error("{context}.x-satay.none-if must be an array")]
-    InvalidSatayNoneIf { context: String },
-
     /// An `x-satay.none-if` array is empty.
     ///
     /// Error message: `{context}.x-satay.none-if must contain at least one string`
     #[error("{context}.x-satay.none-if must contain at least one string")]
     EmptySatayNoneIf { context: String },
-
-    /// An `x-satay.none-if` entry is not a string.
-    ///
-    /// Error message: `{context}.x-satay.none-if values must be strings`
-    #[error("{context}.x-satay.none-if values must be strings")]
-    InvalidSatayNoneIfValue { context: String },
 
     /// `x-satay.none-if` was applied outside a struct property.
     ///
@@ -208,21 +162,6 @@ pub enum ValidationError {
     /// Error message: `{context} cannot combine x-satay.none-if with x-satay.treat-error-as-none`
     #[error("{context} cannot combine x-satay.none-if with x-satay.treat-error-as-none")]
     ConflictingSatayNoneHandling { context: String },
-
-    /// An `x-satay.integer-type` value is not a supported Rust integer type.
-    ///
-    /// Error message: `{context} uses unsupported x-satay.integer-type `{integer_type}``
-    #[error("{context} uses unsupported x-satay.integer-type `{integer_type}`")]
-    UnsupportedSatayIntegerType {
-        context: String,
-        integer_type: String,
-    },
-
-    /// An `x-satay.integer-type` value is not a string.
-    ///
-    /// Error message: `{context}.x-satay.integer-type must be a string`
-    #[error("{context}.x-satay.integer-type must be a string")]
-    InvalidSatayIntegerType { context: String },
 
     /// `x-satay.integer-type` was applied to a non-integer schema.
     ///
@@ -531,25 +470,13 @@ pub enum ValidationError {
     ///
     /// Error message: `{context} uses `{keyword}`, which is not safely supported yet`
     #[error("{context} uses `{keyword}`, which is not safely supported yet")]
-    UnsupportedKeyword {
-        context: String,
-        keyword: &'static str,
-    },
+    UnsupportedKeyword { context: String, keyword: String },
 
     /// A schema keyword that must be a non-negative integer has an invalid value.
     ///
     /// Error message: `{context}.{keyword} must be a non-negative integer`
     #[error("{context}.{keyword} must be a non-negative integer")]
     InvalidNonNegativeIntegerKeyword {
-        context: String,
-        keyword: &'static str,
-    },
-
-    /// A schema keyword that must be a boolean has an invalid value.
-    ///
-    /// Error message: `{context}.{keyword} must be a boolean`
-    #[error("{context}.{keyword} must be a boolean")]
-    InvalidBooleanKeyword {
         context: String,
         keyword: &'static str,
     },
@@ -798,13 +725,35 @@ pub enum ValidationError {
     /// Error message: `{context} must be an object`
     #[error("{context} must be an object")]
     ExpectedObject { context: String },
+}
 
-    /// A nested field expected to be an object is not.
-    ///
-    /// Error message: `{context}.{field} must be an object`
-    #[error("{context}.{field} must be an object")]
-    ExpectedObjectField {
-        context: String,
-        field: &'static str,
-    },
+impl ValidationError {
+    /// Wraps an [`ExtensionError`] with a codegen context string such as a schema
+    /// or operation identifier.
+    pub(crate) fn extension_error(context: &str, source: oas3::spec::ExtensionError) -> Self {
+        match source {
+            oas3::spec::ExtensionError::InvalidValue { path, source, .. } => {
+                ValidationError::InvalidExtension {
+                    context: context.to_owned(),
+                    path,
+                    source,
+                }
+            }
+            // `x-satay` is always a valid extension name when used by codegen.
+            // The invalid-name case only fires when a caller passes a bad name
+            // itself; preserve it here as a fallback diagnostic.
+            other => ValidationError::InvalidExtension {
+                context: context.to_owned(),
+                path: name_or_other_path(other),
+                source: serde::de::Error::custom("invalid specification extension"),
+            },
+        }
+    }
+}
+
+fn name_or_other_path(error: oas3::spec::ExtensionError) -> String {
+    match error {
+        oas3::spec::ExtensionError::InvalidName { name } => name,
+        _ => "x-satay".to_owned(),
+    }
 }

@@ -552,21 +552,12 @@ components:
 #[test]
 fn rejects_invalid_x_satay_none_if_configurations() {
     let cases = [
-        (
-            "none-if: []",
-            "property `Reading.wbgt`.x-satay.none-if must contain at least one string",
-        ),
-        (
-            "none-if: NA",
-            "property `Reading.wbgt`.x-satay.none-if must be an array",
-        ),
-        (
-            "none-if: [NA, 1]",
-            "property `Reading.wbgt`.x-satay.none-if values must be strings",
-        ),
+        ("none-if: []", None),
+        ("none-if: NA", Some("x-satay.none-if")),
+        ("none-if: [NA, 1]", Some("x-satay.none-if[1]")),
     ];
 
-    for (none_if, expected) in cases {
+    for (none_if, invalid_path) in cases {
         let spec = format!(
             r#"
 openapi: 3.1.0
@@ -586,7 +577,16 @@ components:
             {none_if}
 "#
         );
-        assert_eq!(parse_invalid(&spec).to_string(), expected);
+        match (parse_invalid(&spec), invalid_path) {
+            (ValidationError::EmptySatayNoneIf { context }, None) => {
+                assert_eq!(context, "property `Reading.wbgt`");
+            }
+            (ValidationError::InvalidExtension { context, path, .. }, Some(expected_path)) => {
+                assert_eq!(context, "property `Reading.wbgt`");
+                assert_eq!(path, expected_path);
+            }
+            (other, _) => panic!("unexpected error: {other}"),
+        }
     }
 }
 
@@ -865,9 +865,13 @@ components:
     );
 
     match err {
-        ValidationError::InvalidBooleanKeyword { context, keyword } => {
+        ValidationError::InvalidExtension {
+            context,
+            path,
+            source: _,
+        } => {
             assert_eq!(context, "property `Arrival.timing`");
-            assert_eq!(keyword, "treat-error-as-none");
+            assert_eq!(path, "x-satay.treat-error-as-none");
         }
         other => panic!("unexpected error: {other}"),
     }
@@ -984,8 +988,13 @@ paths:
     );
 
     match err {
-        ValidationError::OperationSataySkipNotBoolean { operation_id } => {
-            assert_eq!(operation_id, "ping");
+        ValidationError::InvalidExtension {
+            context,
+            path,
+            source: _,
+        } => {
+            assert_eq!(context, "operation `ping`");
+            assert_eq!(path, "x-satay.skip");
         }
         other => panic!("unexpected error: {other}"),
     }
@@ -1011,8 +1020,13 @@ paths:
     );
 
     match err {
-        ValidationError::OperationSatayNotObject { operation_id } => {
-            assert_eq!(operation_id, "ping");
+        ValidationError::InvalidExtension {
+            context,
+            path,
+            source: _,
+        } => {
+            assert_eq!(context, "operation `ping`");
+            assert_eq!(path, "x-satay");
         }
         other => panic!("unexpected error: {other}"),
     }
@@ -1039,9 +1053,13 @@ paths:
     );
 
     match err {
-        ValidationError::UnsupportedOperationSatayKey { operation_id, key } => {
-            assert_eq!(operation_id, "ping");
-            assert_eq!(key, "other");
+        ValidationError::InvalidExtension {
+            context,
+            path,
+            source: _,
+        } => {
+            assert_eq!(context, "operation `ping`");
+            assert_eq!(path, "x-satay.other");
         }
         other => panic!("unexpected error: {other}"),
     }
