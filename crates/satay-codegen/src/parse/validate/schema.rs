@@ -214,6 +214,7 @@ fn unsupported_reference_schema_keyword(schema: &OasObjectSchema) -> Option<&'st
         examples,
         discriminator,
         example,
+        unknown_keywords: _,
         extensions: _,
     } = schema;
 
@@ -695,6 +696,7 @@ fn open_string_any_of_branch_is_unconstrained_string(
         examples: _,
         discriminator,
         example: _,
+        unknown_keywords: _,
         extensions: _,
     } = schema;
 
@@ -768,6 +770,7 @@ fn annotation_only_all_of_ref_wrapper(schema: &OasObjectSchema) -> Option<&str> 
         examples: _,
         discriminator,
         example: _,
+        unknown_keywords: _,
         extensions: _,
     } = schema;
 

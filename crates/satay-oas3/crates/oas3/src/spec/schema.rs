@@ -541,6 +541,13 @@ pub struct ObjectSchema {
     )]
     pub example: Option<serde_json::Value>,
 
+    /// JSON Schema keywords not represented by a typed field.
+    ///
+    /// Keys use their JSON wire names. Specification extensions are stored separately in
+    /// [`extensions`](Self::extensions).
+    #[serde(flatten, with = "unknown_schema_keywords")]
+    pub unknown_keywords: Map<String, serde_json::Value>,
+
     // #########################################################################
     // OpenAPI Other
     // #########################################################################
@@ -562,6 +569,53 @@ impl ObjectSchema {
             TypeSet::Single(type_) => *type_ == Type::Null,
             TypeSet::Multiple(set) => set.contains(&Type::Null),
         })
+    }
+
+    /// Returns the JSON wire names of the keywords represented by this Schema Object.
+    ///
+    /// Typed keywords are yielded in field order, followed by preserved unknown keywords in their
+    /// stored order. Specification extensions are excluded.
+    pub fn present_keywords(&self) -> impl Iterator<Item = &str> {
+        [
+            (self.reference.is_some(), "$ref"),
+            (!self.all_of.is_empty(), "allOf"),
+            (!self.any_of.is_empty(), "anyOf"),
+            (!self.one_of.is_empty(), "oneOf"),
+            (self.items.is_some(), "items"),
+            (!self.prefix_items.is_empty(), "prefixItems"),
+            (!self.properties.is_empty(), "properties"),
+            (self.additional_properties.is_some(), "additionalProperties"),
+            (self.schema_type.is_some(), "type"),
+            (!self.enum_values.is_empty(), "enum"),
+            (self.const_value.is_some(), "const"),
+            (self.multiple_of.is_some(), "multipleOf"),
+            (self.maximum.is_some(), "maximum"),
+            (self.exclusive_maximum.is_some(), "exclusiveMaximum"),
+            (self.minimum.is_some(), "minimum"),
+            (self.exclusive_minimum.is_some(), "exclusiveMinimum"),
+            (self.max_length.is_some(), "maxLength"),
+            (self.min_length.is_some(), "minLength"),
+            (self.pattern.is_some(), "pattern"),
+            (self.max_items.is_some(), "maxItems"),
+            (self.min_items.is_some(), "minItems"),
+            (self.unique_items.is_some(), "uniqueItems"),
+            (self.max_properties.is_some(), "maxProperties"),
+            (self.min_properties.is_some(), "minProperties"),
+            (!self.required.is_empty(), "required"),
+            (self.format.is_some(), "format"),
+            (self.title.is_some(), "title"),
+            (self.description.is_some(), "description"),
+            (self.default.is_some(), "default"),
+            (self.deprecated.is_some(), "deprecated"),
+            (self.read_only.is_some(), "readOnly"),
+            (self.write_only.is_some(), "writeOnly"),
+            (!self.examples.is_empty(), "examples"),
+            (self.discriminator.is_some(), "discriminator"),
+            (self.example.is_some(), "example"),
+        ]
+        .into_iter()
+        .filter_map(|(present, keyword)| present.then_some(keyword))
+        .chain(self.unknown_keywords.keys().map(String::as_str))
     }
 }
 
@@ -609,6 +663,15 @@ impl Schema {
     /// Boolean schemas and object schemas without a description return `None`.
     pub fn description(&self) -> Option<&str> {
         self.as_object()?.description.as_deref()
+    }
+
+    /// Returns the JSON wire names of the keywords represented by this schema.
+    ///
+    /// Boolean schemas have no keywords. Specification extensions are excluded.
+    pub fn present_keywords(&self) -> impl Iterator<Item = &str> {
+        self.as_object()
+            .into_iter()
+            .flat_map(ObjectSchema::present_keywords)
     }
 
     /// Returns the schemas directly contained by this schema.
@@ -709,6 +772,57 @@ where
     D: Deserializer<'de>,
 {
     T::deserialize(de).map(Some)
+}
+
+/// Preserves flattened Schema Object fields that are not specification extensions.
+mod unknown_schema_keywords {
+    use serde::{de, Deserializer, Serializer};
+
+    use super::{fmt, Map};
+
+    pub(super) fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<Map<String, serde_json::Value>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct UnknownKeywordsVisitor;
+
+        impl<'de> de::Visitor<'de> for UnknownKeywordsVisitor {
+            type Value = Map<String, serde_json::Value>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("unknown Schema Object keywords")
+            }
+
+            fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+            where
+                M: de::MapAccess<'de>,
+            {
+                let mut keywords = Map::new();
+
+                while let Some((key, value)) = access.next_entry::<String, serde_json::Value>()? {
+                    if !key.starts_with("x-") {
+                        keywords.insert(key, value);
+                    }
+                }
+
+                Ok(keywords)
+            }
+        }
+
+        deserializer.deserialize_map(UnknownKeywordsVisitor)
+    }
+
+    pub(super) fn serialize<S>(
+        keywords: &Map<String, serde_json::Value>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_map(keywords)
+    }
 }
 
 #[cfg(test)]
@@ -830,6 +944,79 @@ mod traversal_tests {
                 "#/components/schemas/Property",
             ]
         );
+    }
+}
+
+#[cfg(test)]
+mod keyword_tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn preserves_unknown_keywords_separately_from_extensions() {
+        let schema = serde_json::from_value::<Schema>(json!({
+            "$ref": "#/components/schemas/Name",
+            "type": "string",
+            "minLength": 0,
+            "deprecated": false,
+            "not": { "type": "null" },
+            "$defs": { "label": { "type": "string" } },
+            "x-satay": { "parse-as": "text" },
+        }))
+        .expect("valid schema");
+
+        let object = schema.as_object().expect("object schema");
+        assert_eq!(object.unknown_keywords["not"], json!({ "type": "null" }));
+        assert_eq!(
+            object.unknown_keywords["$defs"],
+            json!({ "label": { "type": "string" } })
+        );
+        assert!(!object.unknown_keywords.contains_key("x-satay"));
+        assert_eq!(object.extensions["satay"], json!({ "parse-as": "text" }));
+
+        let serialized = serde_json::to_value(&schema).expect("serializable schema");
+        assert_eq!(serialized["not"], json!({ "type": "null" }));
+        assert_eq!(
+            serialized["$defs"],
+            json!({ "label": { "type": "string" } })
+        );
+        assert_eq!(serialized["x-satay"], json!({ "parse-as": "text" }));
+    }
+
+    #[test]
+    fn present_keywords_includes_known_and_unknown_wire_names() {
+        let schema = serde_json::from_value::<Schema>(json!({
+            "$ref": "#/components/schemas/Name",
+            "type": "string",
+            "minLength": 0,
+            "deprecated": false,
+            "not": true,
+            "$defs": {},
+            "x-satay": { "parse-as": "text" },
+        }))
+        .expect("valid schema");
+
+        let keywords = schema.present_keywords().collect::<Vec<_>>();
+        assert_eq!(&keywords[..4], ["$ref", "type", "minLength", "deprecated"]);
+        assert_eq!(keywords.len(), 6);
+        assert!(keywords.contains(&"not"));
+        assert!(keywords.contains(&"$defs"));
+        assert!(!keywords.contains(&"x-satay"));
+
+        let object_keywords = schema
+            .as_object()
+            .expect("object schema")
+            .present_keywords()
+            .collect::<Vec<_>>();
+        assert_eq!(object_keywords, keywords);
+    }
+
+    #[test]
+    fn boolean_schemas_have_no_present_keywords() {
+        let schema = Schema::Boolean(BooleanSchema(false));
+
+        assert_eq!(schema.present_keywords().count(), 0);
     }
 }
 
