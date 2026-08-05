@@ -59,7 +59,12 @@ impl TryFrom<CallbackSerde> for Callback {
 
         Ok(Self {
             paths,
-            extensions: extensions.into_iter().collect(),
+            extensions: extensions
+                .into_iter()
+                .filter_map(|(key, value)| {
+                    key.strip_prefix("x-").map(|key| (key.to_owned(), value))
+                })
+                .collect(),
         })
     }
 }
@@ -93,7 +98,11 @@ impl From<Callback> for CallbackSerde {
                         serde_json::to_value(val).expect("path item serialization should not fail"),
                     )
                 })
-                .chain(extensions)
+                .chain(
+                    extensions
+                        .into_iter()
+                        .map(|(key, value)| (format!("x-{key}"), value)),
+                )
                 .collect(),
         )
     }

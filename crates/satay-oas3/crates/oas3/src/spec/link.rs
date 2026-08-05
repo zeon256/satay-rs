@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use super::{spec_extensions, Server};
+use super::{
+    spec_extensions::{self, ExtensionError, SpecificationExtensions},
+    Server,
+};
 use crate::Map;
 
 /// The Link object represents a possible design-time link for a response.
@@ -126,4 +129,17 @@ pub enum Link {
         #[serde(flatten, with = "spec_extensions")]
         extensions: Map<String, serde_json::Value>,
     },
+}
+
+impl SpecificationExtensions for Link {
+    fn extension_as<'de, T>(&'de self, name: &str) -> Result<Option<T>, ExtensionError>
+    where
+        T: serde::Deserialize<'de>,
+    {
+        let extensions = match self {
+            Self::Ref { extensions, .. } | Self::Id { extensions, .. } => extensions,
+        };
+
+        spec_extensions::deserialize_extension(extensions, name)
+    }
 }
