@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.12.0...satay-codegen-v0.12.1) - 2026-08-05
+
+### Added
+
+- *(codegen)* clarify generated action builders
+- *(codegen)* generate tag-grouped API namespaces
+
 ### Added
 
 - *(codegen)* generate namespaced API views from OpenAPI operation tags and organize low-level helpers under `operations`
