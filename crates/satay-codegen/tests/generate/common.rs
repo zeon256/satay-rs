@@ -25,6 +25,24 @@ paths:
       operationId: getBusArrival
       description: Get the next arrival.
       tags: [bus, realtime]
+      parameters:
+        - name: busStopCode
+          in: query
+          required: true
+          description: Bus stop reference code.
+          schema:
+            type: integer
+            format: uint32
+        - name: serviceNo
+          in: query
+          description: Optional bus service number filter.
+          schema:
+            type: string
+        - name: includeMetadata
+          in: query
+          description: Include response metadata.
+          schema:
+            type: boolean
       responses:
         '204':
           description: No content

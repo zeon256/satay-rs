@@ -1,7 +1,7 @@
 use syn::{Item, parse_quote};
 
 use crate::ident::type_ident;
-use crate::model::{Api, ApiGroup, GroupOperation, Operation, TypeRef};
+use crate::model::{Api, ApiGroup, Field, GroupOperation, Operation, TypeRef};
 
 pub(super) fn render_group_file(api: &Api, group: &ApiGroup) -> syn::File {
     let mut items = vec![];
@@ -66,6 +66,7 @@ fn render_group_impl(api: &Api, group: &ApiGroup) -> syn::ItemImpl {
         .map(|group_operation| {
             render_group_operation_method(
                 &api.operations[group_operation.operation_index],
+                group,
                 group_operation,
             )
         })
@@ -80,15 +81,27 @@ fn render_group_impl(api: &Api, group: &ApiGroup) -> syn::ItemImpl {
 
 fn render_group_operation_method(
     operation: &Operation,
+    group: &ApiGroup,
     group_operation: &GroupOperation,
 ) -> proc_macro2::TokenStream {
     let method = super::ident(&group_operation.method_name);
     let action = super::ident(&format!("{}Action", type_ident(&operation.fn_name)));
-    let docs = super::doc_attrs(operation.description.as_deref());
-    let required_fields = super::input_fields(operation)
-        .into_iter()
+    let fields = super::input_fields(operation);
+    let required_fields = fields
+        .iter()
         .filter(|field| field.required)
         .collect::<Vec<_>>();
+    let optional_fields = fields
+        .iter()
+        .filter(|field| !field.required)
+        .collect::<Vec<_>>();
+    let docs = render_group_operation_docs(
+        operation,
+        group,
+        group_operation,
+        &required_fields,
+        &optional_fields,
+    );
     let args = required_fields.iter().map(|field| {
         let name = super::ident(&field.rust_name);
         let ty = super::input_builder_arg_type(&field.ty);
@@ -103,6 +116,88 @@ fn render_group_operation_method(
         pub fn #method(&self #(, #args)*) -> #action<'a> {
             #action::new(self.api #(, #arg_names)*)
         }
+    )
+}
+
+fn render_group_operation_docs(
+    operation: &Operation,
+    group: &ApiGroup,
+    group_operation: &GroupOperation,
+    required_fields: &[&Field],
+    optional_fields: &[&Field],
+) -> Vec<syn::Attribute> {
+    let mut sections = operation
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|description| !description.is_empty())
+        .map(str::to_owned)
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    if !required_fields.is_empty() {
+        let arguments = required_fields
+            .iter()
+            .map(|field| render_field_doc_item(&format!("`{}`", field.rust_name), field))
+            .collect::<Vec<_>>()
+            .join("\n");
+        sections.push(format!("# Arguments\n\n{arguments}"));
+    }
+
+    if !optional_fields.is_empty() {
+        let action = format!("{}Action", type_ident(&operation.fn_name));
+        let links = optional_fields
+            .iter()
+            .map(|field| {
+                let setter = super::input_setter_name(field);
+                render_field_doc_item(&format!("[`{setter}`]({action}::{setter})"), field)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        sections.push(format!("# Optional request settings\n\n{links}"));
+
+        let example = render_group_operation_example(
+            group,
+            group_operation,
+            required_fields,
+            optional_fields[0],
+        );
+        sections.push(format!("# Example\n\n```rust,ignore\n{example}\n```"));
+    }
+
+    let docs = sections.join("\n\n");
+    super::doc_attrs(Some(&docs))
+}
+
+fn render_field_doc_item(label: &str, field: &Field) -> String {
+    let Some(description) = field
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|description| !description.is_empty())
+    else {
+        return format!("- {label}");
+    };
+    let description = description.replace('\n', "\n  ");
+    format!("- {label}: {description}")
+}
+
+fn render_group_operation_example(
+    group: &ApiGroup,
+    group_operation: &GroupOperation,
+    required_fields: &[&Field],
+    optional_field: &Field,
+) -> String {
+    let args = required_fields
+        .iter()
+        .map(|field| field.rust_name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let setter = super::input_setter_name(optional_field);
+
+    format!(
+        "let request = api\n    .{}()\n    .{}({args})\n    .{}({})\n    .request()?;",
+        group.rust_name, group_operation.method_name, setter, optional_field.rust_name,
     )
 }
 
