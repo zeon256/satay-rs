@@ -22,7 +22,9 @@ mod tests {
 
     #[test]
     fn constructs_request_parts_without_io() {
-        let parts = get_user_parts(GetUserInput::new("user/42").include_details(true))
+        let parts = operations::get_user::get_user_parts(
+            GetUserInput::new("user/42").include_details(true),
+        )
         .expect("request parts");
 
         assert_eq!(parts.method, http::Method::GET);
@@ -34,6 +36,7 @@ mod tests {
     #[test]
     fn action_builder_constructs_json_request_without_io() {
         let request = Api::new()
+            .users()
             .get_user("user/42")
             .include_details(true)
             .request()
@@ -46,7 +49,7 @@ mod tests {
 
     #[test]
     fn encodes_json_request_body() {
-        let request = encode_update_user(
+        let request = operations::update_user::encode_update_user(
             UpdateUserInput::new("42")
             .notify(false)
             .body(UpdateUserRequest {
@@ -66,7 +69,7 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(request.body()).unwrap();
         assert_eq!(body, serde_json::json!({ "name": "Ada" }));
 
-        let empty_request = encode_update_user(UpdateUserInput::new("42"))
+        let empty_request = operations::update_user::encode_update_user(UpdateUserInput::new("42"))
         .expect("encoded request without body");
         assert_eq!(empty_request.uri(), "/users/42");
         assert!(empty_request
@@ -83,7 +86,8 @@ mod tests {
             headers: http::HeaderMap::new(),
             body: br#"{"id":"42","name":"Ada","status":"active","age":36,"tags":["admin"]}"#.to_vec(),
         };
-        let decoded = GetUserAction::decode(response).expect("decoded response");
+        let decoded = operations::get_user::GetUserAction::decode(response)
+            .expect("decoded response");
 
         match decoded {
             GetUserResponse::Ok(user) => {
@@ -104,7 +108,8 @@ mod tests {
             headers: http::HeaderMap::new(),
             body: b"server exploded".to_vec(),
         };
-        let decoded = decode_get_user_response(response).expect("decoded response");
+        let decoded = operations::get_user::decode_get_user_response(response)
+            .expect("decoded response");
 
         match decoded {
             GetUserResponse::UnexpectedStatus(status, body) => {
@@ -119,6 +124,41 @@ mod tests {
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(crate_dir, "test", &[], "generated crate tests");
+}
+
+#[test]
+fn generated_group_views_compile_and_share_actions() {
+    let files = satay_codegen::generate(GROUPED).expect("generate grouped fixture");
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+
+    write_manifest(crate_dir, &runtime_path_toml(), false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r#"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::*;
+
+    #[test]
+    fn constructs_actions_through_each_group() {
+        let api = Api::new();
+
+        let bus = api.bus().get_arrival().request().unwrap();
+        assert_eq!(bus.uri(), "/arrival");
+
+        let realtime = api.realtime().get_bus_arrival().request().unwrap();
+        assert_eq!(realtime.uri(), "/arrival");
+
+        let health = api.untagged().health().request().unwrap();
+        assert_eq!(health.uri(), "/health");
+    }
+}
+"#;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    run_temp_cargo(crate_dir, "test", &[], "grouped generated crate tests");
 }
 
 #[test]
@@ -255,7 +295,7 @@ mod tests {
         let tag = GetUserTagsParameterItem::try_new("rs".to_owned()).unwrap();
         let tags = GetUserTagsParameter::try_new(vec![tag]).unwrap();
 
-        let parts = get_user_parts(GetUserInput {
+        let parts = operations::get_user::get_user_parts(GetUserInput {
             user_id,
             limit: Some(limit),
             tags: Some(tags),
@@ -274,7 +314,8 @@ mod tests {
             body: br#"{"id":"42","name":"Ada","nickname":null,"age":36,"score":0.5}"#.to_vec(),
         };
 
-        let decoded = decode_get_user_response(response).expect("nullable nickname accepted");
+        let decoded = operations::get_user::decode_get_user_response(response)
+            .expect("nullable nickname accepted");
         match decoded {
             GetUserResponse::Ok(user) => assert!(user.nickname.is_none()),
             other => panic!("unexpected response: {other:?}"),
@@ -288,7 +329,8 @@ mod tests {
             body: br#"{"id":"42","name":"Ada","nickname":null,"age":131,"score":0.5}"#.to_vec(),
         };
 
-        let err = decode_get_user_response(response).expect_err("invalid age rejected");
+        let err = operations::get_user::decode_get_user_response(response)
+            .expect_err("invalid age rejected");
         assert!(err.to_string().contains("JSON error"));
     }
 }

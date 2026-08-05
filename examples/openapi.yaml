@@ -7,6 +7,10 @@ info:
     OpenAPI schema for LTA DataMall bus APIs.
     Returns real-time bus arrival information, bus service details, and bus route details.
 
+tags:
+  - name: bus
+    description: Bus arrival, service, and route operations.
+
 servers:
   - url: https://datamall2.mytransport.sg/ltaodataservice
 
@@ -14,6 +18,7 @@ paths:
   /v3/BusArrival:
     get:
       operationId: getBusArrival
+      tags: [bus]
       summary: Get bus arrival timings for a bus stop
       description: >
         Returns real-time Bus Arrival information for bus services at a queried
@@ -108,6 +113,7 @@ paths:
   /BusServices:
     get:
       operationId: getBusServices
+      tags: [bus]
       summary: Get bus service details
       description: >
         Returns detailed service information for all buses currently in operation,
@@ -170,6 +176,7 @@ paths:
   /BusRoutes:
     get:
       operationId: getBusRoutes
+      tags: [bus]
       summary: Get bus route details
       description: >
         Returns detailed route information for all bus services currently in operation,

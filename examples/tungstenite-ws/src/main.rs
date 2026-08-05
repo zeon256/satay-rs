@@ -19,7 +19,8 @@ async fn main() -> Result<(), Error> {
         .account_key("local-dev-key");
 
     let response = api
-        .get_bus_arrival(83139)
+        .bus()
+        .get_arrival(83139)
         .service_no(BusServiceNumber::try_from("15".to_owned()).expect("valid bus service number"))
         .send_over_ws(&mut transport)
         .await?;

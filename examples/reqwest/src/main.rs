@@ -12,7 +12,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let client = reqwest::Client::new();
     let response = api
-        .get_bus_arrival(83139)
+        .bus()
+        .get_arrival(83139)
         .service_no(BusServiceNumber::try_new("15")?)
         .send_with(&client)
         .await?;
@@ -41,7 +42,8 @@ mod tests {
     fn tests_the_api_without_http() -> Result<(), Box<dyn Error>> {
         let api = Api::new().base_url("").account_key("test-key");
         let action = api
-            .get_bus_arrival(83139)
+            .bus()
+            .get_arrival(83139)
             .service_no(BusServiceNumber::try_new("15")?);
 
         let request = action.request()?;

@@ -127,6 +127,7 @@ fn validate_operation(
 
     Ok(ValidatedOperation {
         operation_id,
+        tags: operation.tags.clone(),
         description: optional_description(&operation.description),
         method,
         path: path.to_owned(),

@@ -4,6 +4,7 @@ pub(crate) struct Api {
     pub(crate) api_key_security_schemes: Vec<ApiKeySecurityScheme>,
     pub(crate) components: Vec<Component>,
     pub(crate) constrained_types: Vec<ConstrainedType>,
+    pub(crate) groups: Vec<ApiGroup>,
     pub(crate) operations: Vec<Operation>,
 }
 
@@ -13,6 +14,7 @@ impl Api {
         api_key_security_schemes: Vec<ApiKeySecurityScheme>,
         components: Vec<Component>,
         constrained_types: Vec<ConstrainedType>,
+        groups: Vec<ApiGroup>,
         operations: Vec<Operation>,
     ) -> Self {
         Self {
@@ -20,9 +22,25 @@ impl Api {
             api_key_security_schemes,
             components,
             constrained_types,
+            groups,
             operations,
         }
     }
+}
+
+#[derive(Debug)]
+pub(crate) struct ApiGroup {
+    /// Original OpenAPI tag. `None` identifies the generated untagged group.
+    pub(crate) wire_name: Option<String>,
+    pub(crate) rust_name: String,
+    pub(crate) description: Option<String>,
+    pub(crate) operations: Vec<GroupOperation>,
+}
+
+#[derive(Debug)]
+pub(crate) struct GroupOperation {
+    pub(crate) operation_index: usize,
+    pub(crate) method_name: String,
 }
 
 #[derive(Debug)]
@@ -230,6 +248,7 @@ pub(crate) enum ParseAs {
 #[derive(Debug)]
 pub(crate) struct Operation {
     pub(crate) fn_name: String,
+    pub(crate) tags: Vec<String>,
     pub(crate) description: Option<String>,
     pub(crate) input_name: String,
     pub(crate) response_name: String,

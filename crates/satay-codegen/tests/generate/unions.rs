@@ -732,7 +732,8 @@ mod tests {
             body: br#"{"id":"1","slug":"specific"}"#.to_vec(),
         };
 
-        let decoded = decode_get_entity_response(response).expect("decoded response");
+        let decoded = operations::get_entity::decode_get_entity_response(response)
+            .expect("decoded response");
         match decoded {
             GetEntityResponse::Ok(Entity::Loose(value)) => {
                 assert_eq!(value.id, "1");
@@ -836,7 +837,8 @@ mod tests {
             body: br#"{"tools":[{"type":"function","function":"lookup"}]}"#.to_vec(),
         };
 
-        let decoded = decode_get_assistant_response(response).expect("decoded response");
+        let decoded = operations::get_assistant::decode_get_assistant_response(response)
+            .expect("decoded response");
         match decoded {
             GetAssistantResponse::Ok(value) => match &value.tools[0] {
                 AssistantObjectToolsItem::AssistantToolsFunction(tool) => {
@@ -1010,7 +1012,8 @@ mod tests {
             body: br#""auto""#.to_vec(),
         };
 
-        let decoded = decode_get_format_response(response).expect("decoded response");
+        let decoded = operations::get_format::decode_get_format_response(response)
+            .expect("decoded response");
         match decoded {
             GetFormatResponse::Ok(AssistantsApiResponseFormatOption::Auto(value)) => {
                 assert_eq!(value, AssistantsApiResponseFormatOptionAuto::Auto);
@@ -1027,7 +1030,8 @@ mod tests {
             body: br#"{"type":"json_object"}"#.to_vec(),
         };
 
-        let decoded = decode_get_format_response(response).expect("decoded response");
+        let decoded = operations::get_format::decode_get_format_response(response)
+            .expect("decoded response");
         match decoded {
             GetFormatResponse::Ok(AssistantsApiResponseFormatOption::ResponseFormatJsonObject(value)) => {
                 assert_eq!(value.r#type, ResponseFormatJsonObjectType::JsonObject);
@@ -1130,7 +1134,8 @@ mod tests {
             body: br#""auto""#.to_vec(),
         };
 
-        let decoded = decode_get_tool_choice_response(response).expect("decoded response");
+        let decoded = operations::get_tool_choice::decode_get_tool_choice_response(response)
+            .expect("decoded response");
         match decoded {
             GetToolChoiceResponse::Ok(AssistantsApiToolChoiceOption::Enum(value)) => {
                 assert_eq!(value, AssistantsApiToolChoiceOptionEnum::Auto);
@@ -1147,7 +1152,8 @@ mod tests {
             body: br#"{"type":"function","function":{"name":"my_function"}}"#.to_vec(),
         };
 
-        let decoded = decode_get_tool_choice_response(response).expect("decoded response");
+        let decoded = operations::get_tool_choice::decode_get_tool_choice_response(response)
+            .expect("decoded response");
         match decoded {
             GetToolChoiceResponse::Ok(
                 AssistantsApiToolChoiceOption::AssistantsNamedToolChoice(value),
@@ -1258,7 +1264,8 @@ mod tests {
             body: br#"{"kind":"cat","name":"Milo","lives":9}"#.to_vec(),
         };
 
-        let decoded = decode_get_pet_response(response).expect("decoded response");
+        let decoded = operations::get_pet::decode_get_pet_response(response)
+            .expect("decoded response");
         match decoded {
             GetPetResponse::Ok(Pet::Cat(value)) => {
                 assert_eq!(value.name, "Milo");
@@ -1382,7 +1389,8 @@ mod tests {
             body: br#"{"id":"call_1","type":"custom","custom":"payload"}"#.to_vec(),
         };
 
-        let decoded = decode_get_tool_response(response).expect("decoded response");
+        let decoded = operations::get_tool::decode_get_tool_response(response)
+            .expect("decoded response");
         match decoded {
             GetToolResponse::Ok(ToolCall::CustomToolCall(value)) => {
                 assert_eq!(value.id, "call_1");
@@ -1505,7 +1513,8 @@ mod tests {
             body: br#"{"id":"call_1","type":"custom","custom":"payload"}"#.to_vec(),
         };
 
-        let decoded = decode_get_tool_response(response).expect("decoded response");
+        let decoded = operations::get_tool::decode_get_tool_response(response)
+            .expect("decoded response");
         match decoded {
             GetToolResponse::Ok(ToolCall::CustomToolCall(value)) => {
                 assert_eq!(value.id, "call_1");

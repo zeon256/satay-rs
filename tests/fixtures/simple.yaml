@@ -2,6 +2,9 @@ openapi: 3.1.0
 info:
   title: Simple Users API
   version: 1.0.0
+tags:
+  - name: users
+    description: User management operations.
 paths:
   /users/{userId}:
     parameters:
@@ -12,6 +15,7 @@ paths:
           type: string
     get:
       operationId: getUser
+      tags: [users]
       parameters:
         - name: includeDetails
           in: query
@@ -33,6 +37,7 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
     put:
       operationId: updateUser
+      tags: [users]
       parameters:
         - name: notify
           in: query

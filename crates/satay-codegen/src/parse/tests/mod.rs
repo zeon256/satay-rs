@@ -16,6 +16,7 @@ mod all_of;
 mod constraints;
 mod errors;
 mod extensions;
+mod groups;
 mod lowering;
 mod maps;
 mod naming;

@@ -288,7 +288,8 @@ mod tests {
 
     #[test]
     fn decodes_and_encodes_string_backed_values() {
-        let parts = get_reading_parts(GetReadingInput::new(42)).expect("request parts");
+        let parts = operations::get_reading::get_reading_parts(GetReadingInput::new(42))
+            .expect("request parts");
         assert_eq!(parts.uri, "/readings?readingId=42");
 
         let response = satay_runtime::ResponseParts {
@@ -297,7 +298,8 @@ mod tests {
             body: br#"{"id":"42","value":"1.25","count":"7","monitored":0,"seenAt":"2024-08-14T16:41:48+08:00","startsAt":"0620","noServiceAt":"","aliasId":"42","frequency":"14-17","tolerance":"1.5-2.75"}"#
                 .to_vec(),
         };
-        let decoded = decode_get_reading_response(response).expect("decoded response");
+        let decoded = operations::get_reading::decode_get_reading_response(response)
+            .expect("decoded response");
 
         match decoded {
             GetReadingResponse::Ok(reading) => {
@@ -547,7 +549,8 @@ mod tests {
     #[test]
     fn encodes_optional_date_query_parameter() {
         let day = satay_runtime::parse_date("2024-07-16").unwrap();
-        let parts = psi_parts(PsiInput::new().date(day)).expect("request parts");
+        let parts = operations::psi::psi_parts(PsiInput::new().date(day))
+            .expect("request parts");
         assert_eq!(parts.uri, "/psi?date=2024-07-16");
     }
 }
@@ -616,7 +619,8 @@ mod tests {
     #[test]
     fn encodes_optional_naive_datetime_query_parameter() {
         let at = satay_runtime::parse_naive_datetime("2024-07-16T23:59:00").unwrap();
-        let parts = psi_parts(PsiInput::new().date(at)).expect("request parts");
+        let parts = operations::psi::psi_parts(PsiInput::new().date(at))
+            .expect("request parts");
         assert_eq!(parts.uri, "/psi?date=2024-07-16T23%3A59%3A00");
     }
 }
@@ -742,7 +746,8 @@ mod tests {
         let at = satay_runtime::OffsetDateTime::from_unix_timestamp(1_719_892_800).unwrap();
         let before_epoch = satay_runtime::OffsetDateTime::from_unix_timestamp(-1).unwrap();
 
-        let parts = get_events_parts(GetEventsInput::new(at)).expect("request parts");
+        let parts = operations::get_events::get_events_parts(GetEventsInput::new(at))
+            .expect("request parts");
         assert_eq!(parts.uri, "/events?at=1719892800");
 
         let event: Event = serde_json::from_value(serde_json::json!({

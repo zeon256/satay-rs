@@ -9,6 +9,39 @@ pub const SIMPLE: &str = include_str!("../../../../tests/fixtures/simple.yaml");
 pub const PETSTORE_MINIMAL: &str = include_str!("../../../../tests/fixtures/petstore-minimal.yaml");
 pub const CONSTRAINED: &str = include_str!("../../../../tests/fixtures/constrained.yaml");
 pub const INLINE_ENUM: &str = include_str!("../../../../tests/fixtures/inline-enum.yaml");
+pub const GROUPED: &str = r#"
+openapi: 3.1.0
+info:
+  title: Grouped API
+  version: 1.0.0
+tags:
+  - name: realtime
+    description: Realtime views.
+  - name: bus
+    description: Bus operations.
+paths:
+  /arrival:
+    get:
+      operationId: getBusArrival
+      description: Get the next arrival.
+      tags: [bus, realtime]
+      responses:
+        '204':
+          description: No content
+  /stops:
+    get:
+      operationId: listBusStops
+      tags: [bus]
+      responses:
+        '204':
+          description: No content
+  /health:
+    get:
+      operationId: health
+      responses:
+        '204':
+          description: No content
+"#;
 pub const RESPONSE_NAME_COLLISION: &str = r#"
 openapi: 3.1.0
 info:

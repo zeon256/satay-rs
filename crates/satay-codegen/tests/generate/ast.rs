@@ -148,6 +148,21 @@ pub fn find_method<'a>(file: &'a syn::File, self_ty: &str, name: &str) -> &'a sy
         .unwrap_or_else(|| panic!("no inherent method `{self_ty}::{name}` in generated file"))
 }
 
+pub fn has_method(file: &syn::File, self_ty: &str, name: &str) -> bool {
+    file.items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Impl(imp) if imp.trait_.is_none() => Some(imp),
+            _ => None,
+        })
+        .filter(|imp| type_base_name(&imp.self_ty).as_deref() == Some(self_ty))
+        .any(|imp| {
+            imp.items
+                .iter()
+                .any(|item| matches!(item, ImplItem::Fn(method) if method.sig.ident == name))
+        })
+}
+
 pub fn field<'a>(item: &'a syn::ItemStruct, name: &str) -> &'a syn::Field {
     item.fields
         .iter()
