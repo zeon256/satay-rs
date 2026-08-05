@@ -32,6 +32,7 @@ mod parameter;
 mod path_item;
 mod r#ref;
 mod request_body;
+mod resolver;
 mod response;
 mod schema;
 mod security_requirement;
@@ -61,6 +62,7 @@ pub use self::{
     path_item::*,
     r#ref::*,
     request_body::*,
+    resolver::*,
     response::*,
     schema::{
         BooleanSchema, Error as SchemaError, ObjectSchema, Schema, Type as SchemaType,
