@@ -6,16 +6,6 @@ use oas3::spec::{
 use crate::error::ValidationError;
 use crate::ident::type_ident;
 
-pub(super) fn schema_ref<'a>(
-    schema: &'a OasSchema,
-    _context: &str,
-) -> Result<Option<&'a str>, ValidationError> {
-    match schema {
-        OasSchema::Boolean(_) => Ok(None),
-        OasSchema::Object(schema) => Ok(schema.reference.as_deref()),
-    }
-}
-
 pub(super) fn schema_ref_type_name(reference: &str) -> Result<String, ValidationError> {
     let reference = schema_component_ref(reference)?;
     Ok(type_ident(reference.name()))
@@ -30,18 +20,6 @@ pub(super) fn schema_component_ref(
             section: "schemas",
         }
     })
-}
-
-pub(super) fn object_schema<'a>(
-    schema: &'a OasSchema,
-    context: &str,
-) -> Result<&'a OasObjectSchema, ValidationError> {
-    match schema {
-        OasSchema::Boolean(_) => Err(ValidationError::UnsupportedBooleanSchema {
-            context: context.to_owned(),
-        }),
-        OasSchema::Object(schema) => Ok(schema),
-    }
 }
 
 pub(super) fn schema_type_and_nullable(

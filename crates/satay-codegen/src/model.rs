@@ -353,46 +353,7 @@ impl TypeRef {
     }
 }
 
-impl ParseAs {
-    pub(crate) fn from_wire(value: &str) -> Option<Self> {
-        match value {
-            "u8" => Some(Self::U8),
-            "u16" => Some(Self::U16),
-            "u32" => Some(Self::U32),
-            "u64" => Some(Self::U64),
-            "i8" => Some(Self::I8),
-            "i16" => Some(Self::I16),
-            "i32" => Some(Self::I32),
-            "i64" => Some(Self::I64),
-            "f32" => Some(Self::F32),
-            "f64" => Some(Self::F64),
-            "bool" => Some(Self::Bool),
-            "date" => Some(Self::Date),
-            "naive-datetime" => Some(Self::NaiveDateTime),
-            "offset-datetime" => Some(Self::OffsetDateTime),
-            "time" => Some(Self::Time),
-            "integer-range" => Some(Self::IntegerRange),
-            "number-range" => Some(Self::NumberRange),
-            _ => None,
-        }
-    }
-}
-
 impl IntegerType {
-    pub(crate) fn from_wire(value: &str) -> Option<Self> {
-        match value {
-            "u8" => Some(Self::U8),
-            "u16" => Some(Self::U16),
-            "u32" => Some(Self::U32),
-            "u64" => Some(Self::U64),
-            "i8" => Some(Self::I8),
-            "i16" => Some(Self::I16),
-            "i32" => Some(Self::I32),
-            "i64" => Some(Self::I64),
-            _ => None,
-        }
-    }
-
     pub(crate) fn min_value(self) -> i128 {
         match self {
             Self::U8 | Self::U16 | Self::U32 | Self::U64 => 0,

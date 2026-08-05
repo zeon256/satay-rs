@@ -12,6 +12,15 @@ use crate::model::{
 };
 use crate::parse::{parse_api, parse_document};
 
+mod all_of;
+mod constraints;
+mod errors;
+mod extensions;
+mod lowering;
+mod maps;
+mod naming;
+mod unions;
+
 const INLINE_CONSTRAINED_ENUM_RANGE: &str =
     include_str!("../../../../../tests/fixtures/parse-inline-constrained-enum-range.yaml");
 
@@ -68,12 +77,3 @@ fn assert_parameter_segment(segment: &PathSegment, expected: &str) {
         other => panic!("expected parameter path segment {expected:?}, got {other:?}"),
     }
 }
-
-mod all_of;
-mod constraints;
-mod errors;
-mod extensions;
-mod lowering;
-mod maps;
-mod naming;
-mod unions;

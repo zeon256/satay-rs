@@ -1,9 +1,13 @@
+use std::collections::BTreeMap;
+
 use oas3::{
     Map as OasMap,
-    spec::{MediaType as OasMediaType, ObjectSchema as OasObjectSchema, Schema as OasSchema},
+    spec::{MediaType as OasMediaType, ObjectSchema as OasObjectSchema, SpecificationExtensions},
 };
+use serde::Deserialize;
 
 use crate::error::ValidationError;
+use crate::model::{IntegerType, ParseAs};
 
 pub(super) fn optional_description(description: &Option<String>) -> Option<String> {
     description
@@ -12,27 +16,131 @@ pub(super) fn optional_description(description: &Option<String>) -> Option<Strin
         .map(str::to_owned)
 }
 
-pub(super) fn schema_description(schema: &OasSchema) -> Option<String> {
-    match schema {
-        OasSchema::Boolean(_) => None,
-        OasSchema::Object(schema) => optional_description(&schema.description),
+/// Typed `x-satay` schema extension options deserialized via [`SpecificationExtensions`].
+///
+/// Satay codegen policy is layered on top of this raw parse: cross-field rules
+/// (parse-as + integer-type compatibility, none-if applicability) live in
+/// `parse/validate/satay.rs`. This struct only mirrors the wire shape; unknown
+/// keys are rejected via `deny_unknown_fields`.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct SataySchemaOptions {
+    pub(crate) parse_as: Option<SatayParseAsWire>,
+    pub(crate) integer_type: Option<SatayIntegerTypeWire>,
+    pub(crate) treat_error_as_none: Option<bool>,
+    pub(crate) none_if: Option<Vec<String>>,
+    pub(crate) enum_variants: Option<BTreeMap<String, String>>,
+}
+
+impl SataySchemaOptions {
+    pub(crate) fn parse_as(&self) -> Option<ParseAs> {
+        self.parse_as.map(SatayParseAsWire::into_parse_as)
+    }
+
+    pub(crate) fn integer_type(&self) -> Option<IntegerType> {
+        match self.integer_type {
+            Some(SatayIntegerTypeWire::Auto) => None,
+            Some(wire) => Some(wire.into_integer_type()),
+            None => None,
+        }
     }
 }
 
-pub(super) fn satay_object<'a>(
-    schema: &'a OasObjectSchema,
+/// Wire values for `x-satay.parse-as`. Mirrors the strings accepted by the
+/// `parse-as` field's wire contract so unrecognized values surface as
+/// deserialization errors instead of a separate validation variant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum SatayParseAsWire {
+    U8,
+    U16,
+    U32,
+    U64,
+    I8,
+    I16,
+    I32,
+    I64,
+    F32,
+    F64,
+    Bool,
+    Date,
+    NaiveDatetime,
+    OffsetDatetime,
+    Time,
+    IntegerRange,
+    NumberRange,
+}
+
+impl SatayParseAsWire {
+    fn into_parse_as(self) -> ParseAs {
+        match self {
+            Self::U8 => ParseAs::U8,
+            Self::U16 => ParseAs::U16,
+            Self::U32 => ParseAs::U32,
+            Self::U64 => ParseAs::U64,
+            Self::I8 => ParseAs::I8,
+            Self::I16 => ParseAs::I16,
+            Self::I32 => ParseAs::I32,
+            Self::I64 => ParseAs::I64,
+            Self::F32 => ParseAs::F32,
+            Self::F64 => ParseAs::F64,
+            Self::Bool => ParseAs::Bool,
+            Self::Date => ParseAs::Date,
+            Self::NaiveDatetime => ParseAs::NaiveDateTime,
+            Self::OffsetDatetime => ParseAs::OffsetDateTime,
+            Self::Time => ParseAs::Time,
+            Self::IntegerRange => ParseAs::IntegerRange,
+            Self::NumberRange => ParseAs::NumberRange,
+        }
+    }
+}
+
+/// Wire values for `x-satay.integer-type`. `Auto` is the sentinel for
+/// "infer from the schema's own integer format" and resolves to `None` at the
+/// codegen layer; see [`SataySchemaOptions::integer_type`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum SatayIntegerTypeWire {
+    U8,
+    U16,
+    U32,
+    U64,
+    I8,
+    I16,
+    I32,
+    I64,
+    Auto,
+}
+
+impl SatayIntegerTypeWire {
+    fn into_integer_type(self) -> IntegerType {
+        match self {
+            Self::U8 => IntegerType::U8,
+            Self::U16 => IntegerType::U16,
+            Self::U32 => IntegerType::U32,
+            Self::U64 => IntegerType::U64,
+            Self::I8 => IntegerType::I8,
+            Self::I16 => IntegerType::I16,
+            Self::I32 => IntegerType::I32,
+            Self::I64 => IntegerType::I64,
+            Self::Auto => {
+                unreachable!("`auto` is handled before reaching `into_integer_type`")
+            }
+        }
+    }
+}
+
+/// Reads the `x-satay` extension from an [`OasObjectSchema`] as a typed
+/// [`SataySchemaOptions`]. Returns `None` when the extension is absent. The
+/// `context` string is folded into any resulting [`ValidationError`] so the
+/// caller's schema path (e.g. `property \`User.id\``) is preserved.
+pub(crate) fn schema_options(
+    schema: &OasObjectSchema,
     context: &str,
-) -> Result<Option<&'a serde_json::Map<String, serde_json::Value>>, ValidationError> {
-    let Some(value) = schema.extensions.get("satay") else {
-        return Ok(None);
-    };
-    value
-        .as_object()
-        .map(Some)
-        .ok_or_else(|| ValidationError::ExpectedObjectField {
-            context: context.to_owned(),
-            field: "x-satay",
-        })
+) -> Result<Option<SataySchemaOptions>, ValidationError> {
+    schema
+        .extension_as::<SataySchemaOptions>("x-satay")
+        .map_err(|source| ValidationError::extension_error(context, source))
 }
 
 pub(super) fn json_media_type(

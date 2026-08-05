@@ -222,7 +222,7 @@ pub(super) fn reject_keyword(
     if present {
         return Err(ValidationError::UnsupportedKeyword {
             context: context.to_owned(),
-            keyword,
+            keyword: keyword.to_owned(),
         });
     }
     Ok(())
@@ -687,8 +687,8 @@ mod tests {
             error,
             ValidationError::UnsupportedKeyword {
                 context,
-                keyword: "multipleOf",
-            } if context == "User.count"
+                keyword,
+            } if context == "User.count" && keyword == "multipleOf"
         ));
     }
 

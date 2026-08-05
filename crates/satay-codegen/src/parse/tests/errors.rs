@@ -113,6 +113,51 @@ components:
 }
 
 #[test]
+fn validates_references_in_every_subschema_keyword() {
+    for schema in [
+        r#"
+      type: array
+      prefixItems:
+        - $ref: '#/components/schemas/Missing'
+"#,
+        r#"
+      type: object
+      additionalProperties:
+        $ref: '#/components/schemas/Missing'
+"#,
+    ] {
+        let spec = format!(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {{}}
+components:
+  schemas:
+    Broken:{schema}
+"#
+        );
+
+        match parse_invalid(&spec) {
+            ValidationError::ResolveReference {
+                reference,
+                context,
+                source,
+            } => {
+                assert_eq!(reference, "#/components/schemas/Missing");
+                assert_eq!(context, "schema `Broken`.subschemas[0]");
+                assert!(matches!(
+                    *source,
+                    ValidationError::MissingJsonPointerToken { ref token } if token == "Missing"
+                ));
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+}
+
+#[test]
 fn reports_the_failing_reference_in_a_component_chain() {
     let err = parse_invalid(
         r##"
@@ -237,6 +282,43 @@ components:
             assert_eq!(context, "schema `Broken`");
         }
         other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_preserved_unknown_schema_keywords_in_inline_trees() {
+    for schema in [
+        r#"
+      type: string
+      contentEncoding: base64
+"#,
+        r#"
+      type: object
+      additionalProperties:
+        type: string
+        contentEncoding: base64
+"#,
+    ] {
+        let spec = format!(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {{}}
+components:
+  schemas:
+    Broken:{schema}
+"#
+        );
+
+        match parse_invalid(&spec) {
+            ValidationError::UnsupportedKeyword { context, keyword } => {
+                assert_eq!(context, "schema `Broken`");
+                assert_eq!(keyword, "contentEncoding");
+            }
+            other => panic!("unexpected error: {other}"),
+        }
     }
 }
 

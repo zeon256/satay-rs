@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use oas3::spec::{ObjectSchema as OasObjectSchema, SchemaType as OasSchemaType};
 
-use super::helpers::satay_object;
+use super::helpers::SataySchemaOptions;
 use super::reference::schema_type_wire;
 use super::validate::constraint::parse_integer_type;
 use crate::error::ValidationError;
@@ -10,28 +10,18 @@ use crate::ident::variant_ident;
 use crate::model::{IntegerType, ParseAs, RangeScalar};
 
 pub(super) fn parse_satay_enum_variants(
-    schema: &OasObjectSchema,
+    options: &SataySchemaOptions,
     context: &str,
     enum_values: &BTreeSet<String>,
 ) -> Result<BTreeMap<String, String>, ValidationError> {
-    let Some(satay) = satay_object(schema, context)? else {
+    let Some(mappings) = options.enum_variants.as_ref() else {
         return Ok(BTreeMap::new());
     };
 
-    let Some(value) = satay.get("enum-variants") else {
-        return Ok(BTreeMap::new());
-    };
-
-    let Some(value) = value.as_object() else {
-        return Err(ValidationError::InvalidSatayEnumVariants {
-            context: context.to_owned(),
-        });
-    };
-
-    let mut mappings = BTreeMap::new();
+    let mut explicit = BTreeMap::new();
     let mut explicit_names = BTreeSet::new();
 
-    for (wire_name, rust_name) in value {
+    for (wire_name, rust_name) in mappings {
         if !enum_values.contains(wire_name) {
             return Err(ValidationError::UnknownSatayEnumVariantValue {
                 context: context.to_owned(),
@@ -39,12 +29,6 @@ pub(super) fn parse_satay_enum_variants(
             });
         }
 
-        let Some(rust_name) = rust_name.as_str() else {
-            return Err(ValidationError::InvalidSatayEnumVariantName {
-                context: context.to_owned(),
-                wire_name: wire_name.clone(),
-            });
-        };
         let rust_name = variant_ident(rust_name);
         if !explicit_names.insert(rust_name.clone()) {
             return Err(ValidationError::DuplicateSatayEnumVariantName {
@@ -52,66 +36,18 @@ pub(super) fn parse_satay_enum_variants(
                 rust_name,
             });
         }
-        mappings.insert(wire_name.clone(), rust_name);
+        explicit.insert(wire_name.clone(), rust_name);
     }
 
-    Ok(mappings)
+    Ok(explicit)
 }
 
-pub(super) fn parse_satay_parse_as(
-    schema: &OasObjectSchema,
-    context: &str,
-) -> Result<Option<ParseAs>, ValidationError> {
-    let Some(satay) = satay_object(schema, context)? else {
-        return Ok(None);
-    };
-
-    let Some(value) = satay.get("parse-as") else {
-        return Ok(None);
-    };
-
-    let Some(value) = value.as_str() else {
-        return Err(ValidationError::InvalidSatayParseAs {
-            context: context.to_owned(),
-        });
-    };
-
-    ParseAs::from_wire(value)
-        .map(Some)
-        .ok_or_else(|| ValidationError::UnsupportedSatayParseAs {
-            context: context.to_owned(),
-            parse_as: value.to_owned(),
-        })
+pub(super) fn parse_satay_parse_as(options: &SataySchemaOptions) -> Option<ParseAs> {
+    options.parse_as()
 }
 
-pub(super) fn parse_satay_integer_type(
-    schema: &OasObjectSchema,
-    context: &str,
-) -> Result<Option<IntegerType>, ValidationError> {
-    let Some(satay) = satay_object(schema, context)? else {
-        return Ok(None);
-    };
-
-    let Some(value) = satay.get("integer-type") else {
-        return Ok(None);
-    };
-
-    let Some(value) = value.as_str() else {
-        return Err(ValidationError::InvalidSatayIntegerType {
-            context: context.to_owned(),
-        });
-    };
-
-    if value == "auto" {
-        return Ok(None);
-    }
-
-    IntegerType::from_wire(value).map(Some).ok_or_else(|| {
-        ValidationError::UnsupportedSatayIntegerType {
-            context: context.to_owned(),
-            integer_type: value.to_owned(),
-        }
-    })
+pub(super) fn parse_satay_integer_type(options: &SataySchemaOptions) -> Option<IntegerType> {
+    options.integer_type()
 }
 
 pub(super) fn validate_satay_integer_type(

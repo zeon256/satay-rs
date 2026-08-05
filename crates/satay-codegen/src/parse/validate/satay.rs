@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use oas3::spec::{ObjectSchema as OasObjectSchema, SchemaType as OasSchemaType};
 use serde_json::Value as JsonValue;
 
-use super::super::helpers::satay_object;
+use super::super::helpers::schema_options;
 use super::super::reference::schema_type_wire;
 use super::super::satay::{
     parse_range_scalar, parse_satay_enum_variants, parse_satay_integer_type, parse_satay_parse_as,
@@ -45,11 +45,20 @@ pub(super) fn validate_type_satay(
     context: &str,
     allow_treat_error_as_none: bool,
 ) -> Result<ValidatedSataySchema, ValidationError> {
-    let parse_as = parse_satay_parse_as(schema, context)?;
-    let explicit_integer_type = parse_satay_integer_type(schema, context)?;
-    let none_if = validate_none_if(schema, context)?;
+    let options = schema_options(schema, context)?.unwrap_or_default();
+    let parse_as = parse_satay_parse_as(&options);
+    let explicit_integer_type = parse_satay_integer_type(&options);
+    let none_if = match options.none_if.as_ref() {
+        Some(values) if values.is_empty() => {
+            return Err(ValidationError::EmptySatayNoneIf {
+                context: context.to_owned(),
+            });
+        }
+        Some(values) => values.clone(),
+        None => vec![],
+    };
     let treat_error_as_none =
-        allow_treat_error_as_none && validate_treat_error_as_none(schema, context)?;
+        allow_treat_error_as_none && options.treat_error_as_none.unwrap_or(false);
 
     validate_satay_integer_type(schema_type, parse_as, explicit_integer_type, context)?;
 
@@ -134,68 +143,13 @@ fn validate_enum_variants(
         wire_names.insert(value.to_owned());
     }
 
-    parse_satay_enum_variants(schema, context, &wire_names)
-}
-
-fn validate_treat_error_as_none(
-    schema: &OasObjectSchema,
-    context: &str,
-) -> Result<bool, ValidationError> {
-    let Some(satay) = satay_object(schema, context)? else {
-        return Ok(false);
-    };
-
-    let Some(value) = satay.get("treat-error-as-none") else {
-        return Ok(false);
-    };
-
-    let value = value
-        .as_bool()
-        .ok_or_else(|| ValidationError::InvalidBooleanKeyword {
-            context: context.to_owned(),
-            keyword: "treat-error-as-none",
-        })?;
-
-    Ok(value)
-}
-
-fn validate_none_if(
-    schema: &OasObjectSchema,
-    context: &str,
-) -> Result<Vec<String>, ValidationError> {
-    let Some(satay) = satay_object(schema, context)? else {
-        return Ok(vec![]);
-    };
-
-    let Some(value) = satay.get("none-if") else {
-        return Ok(vec![]);
-    };
-
-    let Some(values) = value.as_array() else {
-        return Err(ValidationError::InvalidSatayNoneIf {
-            context: context.to_owned(),
-        });
-    };
-    if values.is_empty() {
-        return Err(ValidationError::EmptySatayNoneIf {
-            context: context.to_owned(),
-        });
-    }
-
-    values
-        .iter()
-        .map(|value| {
-            value.as_str().map(ToOwned::to_owned).ok_or_else(|| {
-                ValidationError::InvalidSatayNoneIfValue {
-                    context: context.to_owned(),
-                }
-            })
-        })
-        .collect()
+    let options = schema_options(schema, context)?.unwrap_or_default();
+    parse_satay_enum_variants(&options, context, &wire_names)
 }
 
 #[cfg(test)]
 mod tests {
+    use oas3::spec::ObjectSchema as OasObjectSchema;
     use serde_json::{Value, json};
 
     use super::*;
@@ -420,10 +374,11 @@ mod tests {
 
         assert!(matches!(
             error,
-            ValidationError::InvalidBooleanKeyword {
+            ValidationError::InvalidExtension {
                 context,
-                keyword: "treat-error-as-none",
-            } if context == "User.nickname"
+                path,
+                source: _,
+            } if context == "User.nickname" && path == "x-satay.treat-error-as-none"
         ));
     }
 }
