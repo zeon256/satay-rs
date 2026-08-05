@@ -589,9 +589,29 @@ impl Schema {
     fn new_object(schema: ObjectSchema) -> Self {
         Schema::Object(Box::new(schema))
     }
-}
 
-impl Schema {
+    /// Returns the object schema, or `None` for a boolean schema.
+    pub fn as_object(&self) -> Option<&ObjectSchema> {
+        match self {
+            Self::Boolean(_) => None,
+            Self::Object(schema) => Some(schema.as_ref()),
+        }
+    }
+
+    /// Returns the Schema Object `$ref`, if present.
+    ///
+    /// Boolean schemas and inline object schemas return `None`.
+    pub fn reference(&self) -> Option<&str> {
+        self.as_object()?.reference.as_deref()
+    }
+
+    /// Returns the Schema Object description, if present.
+    ///
+    /// Boolean schemas and object schemas without a description return `None`.
+    pub fn description(&self) -> Option<&str> {
+        self.as_object()?.description.as_deref()
+    }
+
     /// Resolves the schema (if needed) from the given `spec` and returns a schema document.
     ///
     /// If the schema is a reference, references are followed recursively until the result is either
@@ -636,6 +656,37 @@ where
     D: Deserializer<'de>,
 {
     T::deserialize(de).map(Some)
+}
+
+#[cfg(test)]
+mod inspection_tests {
+    use super::*;
+
+    #[test]
+    fn object_schema_inspection_borrows_object_values() {
+        let schema = Schema::new_object(ObjectSchema {
+            reference: Some("#/components/schemas/User".to_owned()),
+            description: Some("A user account.".to_owned()),
+            ..ObjectSchema::default()
+        });
+
+        let object = schema.as_object().expect("object schema");
+        assert_eq!(
+            object.reference.as_deref(),
+            Some("#/components/schemas/User")
+        );
+        assert_eq!(schema.reference(), Some("#/components/schemas/User"));
+        assert_eq!(schema.description(), Some("A user account."));
+    }
+
+    #[test]
+    fn boolean_schema_inspection_returns_none() {
+        let schema = Schema::Boolean(BooleanSchema(true));
+
+        assert!(schema.as_object().is_none());
+        assert_eq!(schema.reference(), None);
+        assert_eq!(schema.description(), None);
+    }
 }
 
 #[cfg(all(test, feature = "yaml-spec"))]
