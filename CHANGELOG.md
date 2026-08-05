@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0](https://github.com/zeon256/satay-rs/compare/satay-oas3-v0.11.0...satay-oas3-v0.12.0) - 2026-08-05
+
+### Added
+
+- *(oas3)* add borrowed component resolver ([#99](https://github.com/zeon256/satay-rs/pull/99))
+- *(oas3)* parse typed local component references ([#98](https://github.com/zeon256/satay-rs/pull/98))
+- *(oas3)* preserve unknown schema keywords ([#103](https://github.com/zeon256/satay-rs/pull/103))
+- *(oas3)* centralize Schema traversal ([#101](https://github.com/zeon256/satay-rs/pull/101))
+- *(oas3)* add typed specification extension access ([#102](https://github.com/zeon256/satay-rs/pull/102))
+- *(oas3)* add Schema inspection helpers ([#100](https://github.com/zeon256/satay-rs/pull/100))
+
 ## [0.11.0](https://github.com/zeon256/satay-rs/compare/satay-oas3-v0.10.0...satay-oas3-v0.11.0) - 2026-08-04
 
 ### Other
