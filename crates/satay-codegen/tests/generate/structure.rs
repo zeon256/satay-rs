@@ -92,15 +92,60 @@ fn operation_tags_generate_namespaced_api_groups() {
     }
     assert!(!has_method(&api, "Api", "get_bus_arrival"));
     assert!(!has_method(&api, "Api", "list_bus_stops"));
-    find_struct(&api, "GetBusArrivalAction");
+    let action = find_struct(&api, "GetBusArrivalAction");
+    assert_doc(
+        &action.attrs,
+        "Use the chainable methods to configure optional request settings, then call [`Self::request`] or use a transport adapter.",
+    );
+    assert_attr_contains(
+        &action.attrs,
+        "must_use",
+        r#""configure this action and execute it or call `.request()`""#,
+    );
+    let service_no = find_method(&api, "GetBusArrivalAction", "service_no");
+    assert_doc(&service_no.attrs, "Optional bus service number filter.");
+    assert_attr_contains(
+        &service_no.attrs,
+        "must_use",
+        r#""builder methods return the configured action""#,
+    );
+    let include_metadata = find_method(&api, "GetBusArrivalAction", "include_metadata");
+    assert_doc(&include_metadata.attrs, "Include response metadata.");
 
     let bus = parse_rust(find_file(&files, "bus.rs"));
     find_struct(&bus, "Api");
     assert_doc(&find_struct(&bus, "Api").attrs, "Bus operations.");
-    assert_doc(
-        &find_method(&bus, "Api", "get_arrival").attrs,
-        "Get the next arrival.",
+    let get_arrival = find_method(&bus, "Api", "get_arrival");
+    assert_eq!(
+        norm(&get_arrival.sig),
+        norm_str("fn get_arrival(&self, bus_stop_code: u32) -> GetBusArrivalAction<'a>",),
     );
+    assert_doc(&get_arrival.attrs, "Get the next arrival.");
+    assert_doc(&get_arrival.attrs, "# Arguments");
+    assert_doc(
+        &get_arrival.attrs,
+        "- `bus_stop_code`: Bus stop reference code.",
+    );
+    assert_doc(&get_arrival.attrs, "# Optional request settings");
+    assert_doc(
+        &get_arrival.attrs,
+        "- [`service_no`](GetBusArrivalAction::service_no): Optional bus service number filter.",
+    );
+    assert_doc(
+        &get_arrival.attrs,
+        "- [`include_metadata`](GetBusArrivalAction::include_metadata): Include response metadata.",
+    );
+    let get_arrival_docs = doc_lines(&get_arrival.attrs);
+    let example = get_arrival_docs
+        .iter()
+        .skip_while(|line| *line != "# Example")
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(example.contains(".bus()"));
+    assert!(example.contains(".get_arrival(bus_stop_code)"));
+    assert!(example.contains(".service_no(service_no)"));
+    assert!(!example.contains(".include_metadata(include_metadata)"));
     find_method(&bus, "Api", "list_stops");
 
     let realtime = parse_rust(find_file(&files, "realtime.rs"));

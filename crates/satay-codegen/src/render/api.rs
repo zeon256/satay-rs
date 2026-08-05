@@ -258,10 +258,11 @@ fn render_apply_api_keys_body(api: &Api) -> TokenStream {
 fn render_action_struct(operation: &Operation) -> syn::ItemStruct {
     let action = action_ident(operation);
     let input = super::ident(&operation.input_name);
-    let docs = super::doc_attrs(operation.description.as_deref());
+    let docs = render_action_docs(operation);
 
     parse_quote!(
         #(#docs)*
+        #[must_use = "configure this action and execute it or call `.request()`"]
         #[derive(Debug, Clone)]
         pub struct #action<'a> {
             api: &'a Api,
@@ -330,8 +331,11 @@ fn render_action_setter(field: Field) -> TokenStream {
     let setter = super::input_setter_name(&field);
     let name = super::ident(&field.rust_name);
     let ty = super::input_builder_arg_type(&field.ty);
+    let docs = super::doc_attrs(field.description.as_deref());
 
     quote!(
+        #(#docs)*
+        #[must_use = "builder methods return the configured action"]
         pub fn #setter(mut self, #name: #ty) -> Self {
             self.input = self.input.#setter(#name);
             self
@@ -341,6 +345,33 @@ fn render_action_setter(field: Field) -> TokenStream {
 
 fn action_ident(operation: &Operation) -> Ident {
     super::ident(&format!("{}Action", type_ident(&operation.fn_name)))
+}
+
+fn render_action_docs(operation: &Operation) -> Vec<syn::Attribute> {
+    let has_optional_fields = super::input_fields(operation)
+        .iter()
+        .any(|field| !field.required);
+    let mut sections = operation
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|description| !description.is_empty())
+        .map(str::to_owned)
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    if has_optional_fields {
+        sections.push(
+            "Use the chainable methods to configure optional request settings, then call \
+             [`Self::request`] or use a transport adapter."
+                .to_owned(),
+        );
+    } else {
+        sections.push("Call [`Self::request`] or use a transport adapter.".to_owned());
+    }
+
+    let docs = sections.join("\n\n");
+    super::doc_attrs(Some(&docs))
 }
 
 fn collect_type_refs(ty: &TypeRef, names: &mut Vec<Ident>) {
