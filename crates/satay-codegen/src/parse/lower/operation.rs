@@ -1,17 +1,17 @@
 use std::collections::BTreeSet;
 
-use oas3::spec::SecurityScheme as OasSecurityScheme;
+use oas3::spec::{SecurityScheme as OasSecurityScheme, Spec as OasSpec};
 
 use super::super::resolve::ResolvedDocument;
 use super::schema::SchemaLowerer;
 use crate::error::ValidationError;
 use crate::ident::{
-    field_ident, function_ident, response_range_variant_ident, response_variant_ident, type_ident,
-    unique_ident,
+    field_ident, function_ident, group_ident, response_range_variant_ident, response_variant_ident,
+    type_ident, unique_ident,
 };
 use crate::model::{
-    ApiKeyLocation, ApiKeySecurityScheme, Operation as SatayOperation, Parameter,
-    ParameterLocation, RequestBody, ResponseCase, ResponseStatus, is_array_type,
+    ApiGroup, ApiKeyLocation, ApiKeySecurityScheme, GroupOperation, Operation as SatayOperation,
+    Parameter, ParameterLocation, RequestBody, ResponseCase, ResponseStatus, is_array_type,
 };
 use crate::parse::registry::TypeRegistry;
 use crate::parse::validate::{
@@ -71,6 +71,157 @@ pub(super) fn parse_operations(
         .collect()
 }
 
+pub(super) fn parse_api_groups(
+    spec: &OasSpec,
+    api_key_security_schemes: &[ApiKeySecurityScheme],
+    operations: &[SatayOperation],
+) -> Vec<ApiGroup> {
+    let used_tags = operations
+        .iter()
+        .flat_map(|operation| operation.tags.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    let mut ordered_tags = vec![];
+    let mut seen_tags = BTreeSet::new();
+
+    // Root tag order is meaningful in OpenAPI. Undeclared tags follow in
+    // first-operation order so generation stays deterministic.
+    for tag in &spec.tags {
+        if used_tags.contains(&tag.name) && seen_tags.insert(tag.name.clone()) {
+            ordered_tags.push(tag.name.clone());
+        }
+    }
+    for operation in operations {
+        for tag in &operation.tags {
+            if seen_tags.insert(tag.clone()) {
+                ordered_tags.push(tag.clone());
+            }
+        }
+    }
+
+    let mut used_modules = BTreeSet::from(["api".to_owned(), "types".to_owned()]);
+    used_modules.extend(operations.iter().map(|operation| operation.fn_name.clone()));
+
+    let mut used_accessors =
+        BTreeSet::from(["apply".to_owned(), "base_url".to_owned(), "new".to_owned()]);
+    used_accessors.extend(
+        api_key_security_schemes
+            .iter()
+            .map(|scheme| scheme.rust_name.clone()),
+    );
+
+    let mut groups = ordered_tags
+        .into_iter()
+        .map(|tag_name| {
+            let base_name = group_ident(&tag_name);
+            let rust_name = unique_group_ident(&base_name, &mut used_modules, &mut used_accessors);
+            let description = spec
+                .tags
+                .iter()
+                .find(|tag| tag.name == tag_name)
+                .and_then(|tag| tag.description.clone());
+            build_group(
+                Some(tag_name),
+                rust_name,
+                description,
+                Some(&base_name),
+                operations,
+            )
+        })
+        .collect::<Vec<_>>();
+
+    if operations.iter().any(|operation| operation.tags.is_empty()) {
+        let rust_name = unique_group_ident("untagged", &mut used_modules, &mut used_accessors);
+        groups.push(build_group(
+            None,
+            rust_name,
+            Some("Operations without an OpenAPI tag.".to_owned()),
+            None,
+            operations,
+        ));
+    }
+
+    groups
+}
+
+fn build_group(
+    wire_name: Option<String>,
+    rust_name: String,
+    description: Option<String>,
+    group_base_name: Option<&str>,
+    operations: &[SatayOperation],
+) -> ApiGroup {
+    let mut used_methods = BTreeSet::new();
+    let operations = operations
+        .iter()
+        .enumerate()
+        .filter(|(_, operation)| match &wire_name {
+            Some(tag) => operation.tags.contains(tag),
+            None => operation.tags.is_empty(),
+        })
+        .map(|(operation_index, operation)| {
+            let candidate = group_base_name
+                .and_then(|group| strip_group_from_operation(&operation.fn_name, group))
+                .unwrap_or_else(|| operation.fn_name.clone());
+            GroupOperation {
+                operation_index,
+                method_name: unique_ident(candidate, &mut used_methods),
+            }
+        })
+        .collect();
+
+    ApiGroup {
+        wire_name,
+        rust_name,
+        description,
+        operations,
+    }
+}
+
+fn strip_group_from_operation(operation: &str, group: &str) -> Option<String> {
+    let operation_parts = operation
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let group_parts = group
+        .split('_')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if group_parts.is_empty() || group_parts.len() >= operation_parts.len() {
+        return None;
+    }
+
+    let start = operation_parts
+        .windows(group_parts.len())
+        .position(|window| window == group_parts)?;
+    let shortened = operation_parts[..start]
+        .iter()
+        .chain(&operation_parts[start + group_parts.len()..])
+        .copied()
+        .collect::<Vec<_>>()
+        .join("_");
+    (!shortened.is_empty()).then(|| function_ident(&shortened))
+}
+
+fn unique_group_ident(
+    candidate: &str,
+    used_modules: &mut BTreeSet<String>,
+    used_accessors: &mut BTreeSet<String>,
+) -> String {
+    for suffix in 1.. {
+        let next = if suffix == 1 {
+            candidate.to_owned()
+        } else {
+            format!("{candidate}_{suffix}")
+        };
+        if !used_modules.contains(&next) && !used_accessors.contains(&next) {
+            used_modules.insert(next.clone());
+            used_accessors.insert(next.clone());
+            return next;
+        }
+    }
+    unreachable!()
+}
+
 fn parse_operation(
     operation: &ValidatedOperation,
     registry: &mut TypeRegistry,
@@ -107,6 +258,7 @@ fn parse_operation(
 
     Ok(SatayOperation {
         fn_name,
+        tags: operation.tags.clone(),
         description: operation.description.clone(),
         input_name,
         response_name,

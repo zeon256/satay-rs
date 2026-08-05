@@ -3,7 +3,9 @@ use quote::quote;
 use syn::{Ident, Item, parse_quote};
 
 use crate::ident::type_ident;
-use crate::model::{Api, ApiKeyLocation, ApiKeySecurityScheme, Field, Operation, TypeRef};
+use crate::model::{
+    Api, ApiGroup, ApiKeyLocation, ApiKeySecurityScheme, Field, Operation, TypeRef,
+};
 
 pub(super) fn render_api_file(api: &Api) -> syn::File {
     let mut items = vec![];
@@ -20,6 +22,11 @@ pub(super) fn render_api_file(api: &Api) -> syn::File {
     if let Some(operation_use) = build_api_operation_use(api) {
         items.push(Item::Use(operation_use));
     }
+    items.extend(
+        build_api_operation_module_uses(api)
+            .into_iter()
+            .map(Item::Use),
+    );
     items.push(Item::Struct(render_api_struct(api)));
     items.push(Item::Impl(render_api_default_impl()));
     items.push(Item::Impl(render_api_impl(api)));
@@ -46,11 +53,6 @@ fn build_api_operation_use(api: &Api) -> Option<syn::ItemUse> {
     for operation in &api.operations {
         names.push(super::ident(&operation.input_name));
         names.push(super::ident(&operation.response_name));
-        names.push(super::ident(&format!("{}_parts", operation.fn_name)));
-        names.push(super::ident(&format!(
-            "decode_{}_response",
-            operation.fn_name
-        )));
         for field in super::input_fields(operation) {
             collect_type_refs(&field.ty, &mut names);
         }
@@ -59,6 +61,18 @@ fn build_api_operation_use(api: &Api) -> Option<syn::ItemUse> {
     names.dedup();
 
     Some(parse_quote!(use super::{#(#names),*};))
+}
+
+fn build_api_operation_module_uses(api: &Api) -> Vec<syn::ItemUse> {
+    api.operations
+        .iter()
+        .map(|operation| {
+            let module = super::ident(&operation.fn_name);
+            let parts = super::ident(&format!("{}_parts", operation.fn_name));
+            let decode = super::ident(&format!("decode_{}_response", operation.fn_name));
+            parse_quote!(use super::#module::{#decode, #parts};)
+        })
+        .collect()
 }
 
 fn render_api_struct(api: &Api) -> syn::ItemStruct {
@@ -96,10 +110,10 @@ fn render_api_impl(api: &Api) -> syn::ItemImpl {
         .iter()
         .map(render_api_key_setter)
         .collect::<Vec<_>>();
-    let operation_methods = api
-        .operations
+    let group_accessors = api
+        .groups
         .iter()
-        .map(render_api_operation_method)
+        .map(render_group_accessor)
         .collect::<Vec<_>>();
     let apply_api_keys = render_apply_api_keys_body(api);
 
@@ -119,7 +133,7 @@ fn render_api_impl(api: &Api) -> syn::ItemImpl {
 
             #(#auth_setters)*
 
-            #(#operation_methods)*
+            #(#group_accessors)*
 
             fn apply<B>(&self, parts: &mut satay_runtime::RequestParts<B>) -> Result<(), satay_runtime::Error> {
                 #apply_api_keys
@@ -132,6 +146,22 @@ fn render_api_impl(api: &Api) -> syn::ItemImpl {
                 parts.uri = format!("{base_url}{separator}{path_and_query}");
                 Ok(())
             }
+        }
+    )
+}
+
+fn render_group_accessor(group: &ApiGroup) -> TokenStream {
+    let method = super::ident(&group.rust_name);
+    let module = super::ident(&group.rust_name);
+    let docs = match &group.wire_name {
+        Some(tag) => super::doc_attrs(Some(&format!("Access operations tagged `{tag}`."))),
+        None => super::doc_attrs(Some("Access operations without an OpenAPI tag.")),
+    };
+
+    quote!(
+        #(#docs)*
+        pub fn #method(&self) -> super::#module::Api<'_> {
+            super::#module::Api { api: self }
         }
     )
 }
@@ -152,11 +182,8 @@ fn render_api_key_setter(scheme: &ApiKeySecurityScheme) -> TokenStream {
     )
 }
 
-fn render_api_operation_method(operation: &Operation) -> TokenStream {
-    let method = super::ident(&operation.fn_name);
-    let action = action_ident(operation);
+fn render_action_constructor(operation: &Operation) -> TokenStream {
     let input = super::ident(&operation.input_name);
-    let docs = super::doc_attrs(operation.description.as_deref());
     let required_fields = super::input_fields(operation)
         .into_iter()
         .filter(|field| field.required)
@@ -171,10 +198,9 @@ fn render_api_operation_method(operation: &Operation) -> TokenStream {
         .map(|field| super::ident(&field.rust_name));
 
     quote!(
-        #(#docs)*
-        pub fn #method(&self #(, #new_args)*) -> #action<'_> {
-            #action {
-                api: self,
+        pub(crate) fn new(api: &'a Api #(, #new_args)*) -> Self {
+            Self {
+                api,
                 input: #input::new(#(#new_arg_names),*),
             }
         }
@@ -276,9 +302,12 @@ fn render_action_impl(operation: &Operation) -> syn::ItemImpl {
         .filter(|field| !field.required)
         .map(render_action_setter)
         .collect::<Vec<_>>();
+    let constructor = render_action_constructor(operation);
 
     parse_quote!(
-        impl #action<'_> {
+        impl<'a> #action<'a> {
+            #constructor
+
             #(#setters)*
 
             pub fn request(self) -> Result<http::Request<Vec<u8>>, satay_runtime::Error> {

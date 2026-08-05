@@ -54,6 +54,11 @@ pub(crate) fn function_ident(value: &str) -> String {
     sanitize_ident(&ident, "operation", IdentKind::Value)
 }
 
+pub(crate) fn group_ident(value: &str) -> String {
+    let ident = value.to_snake_case();
+    sanitize_ident(&ident, "group", IdentKind::Value)
+}
+
 #[derive(Debug, Clone, Copy)]
 enum IdentKind {
     Type,
@@ -186,6 +191,7 @@ mod tests {
         assert_eq!(field_ident("type"), "r#type");
         assert_eq!(field_ident("self"), "self_");
         assert_eq!(function_ident("async"), "async_");
+        assert_eq!(group_ident("Bus Service"), "bus_service");
         assert_eq!(variant_ident("Self"), "Self_");
     }
 
@@ -218,6 +224,7 @@ mod tests {
         assert_eq!(type_ident("123 status"), "GeneratedType123Status");
         assert_eq!(field_ident("123 status"), "_123_status");
         assert_eq!(function_ident("404"), "_404");
+        assert_eq!(group_ident("404"), "_404");
     }
 
     #[test]
@@ -227,6 +234,7 @@ mod tests {
         assert_eq!(field_ident(" user--id "), "user_id");
         assert_eq!(field_ident(""), "field");
         assert_eq!(type_ident(""), "GeneratedType");
+        assert_eq!(group_ident(""), "group");
         assert_eq!(variant_ident(""), "Value");
     }
 

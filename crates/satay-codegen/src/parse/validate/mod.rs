@@ -203,6 +203,7 @@ pub(crate) enum ValidatedUnionVariantKind {
 #[derive(Debug)]
 pub(crate) struct ValidatedOperation {
     pub(crate) operation_id: String,
+    pub(crate) tags: Vec<String>,
     pub(crate) description: Option<String>,
     pub(crate) method: HttpMethod,
     pub(crate) path: String,

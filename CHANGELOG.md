@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- *(codegen)* generate namespaced API views from OpenAPI operation tags and organize low-level helpers under `operations`
+
 ## [0.12.0](https://github.com/zeon256/satay-rs/compare/satay-oas3-v0.11.0...satay-oas3-v0.12.0) - 2026-08-05
 
 ### Added

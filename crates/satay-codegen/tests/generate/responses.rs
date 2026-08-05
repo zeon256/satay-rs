@@ -104,7 +104,8 @@ mod tests {
             headers: http::HeaderMap::new(),
             body: br#"{"message":"slow down"}"#.to_vec(),
         };
-        let decoded = decode_get_user_response(response).expect("decoded response");
+        let decoded = operations::get_user::decode_get_user_response(response)
+            .expect("decoded response");
 
         match decoded {
             GetUserResponse::ClientError(status, error) => {
@@ -122,7 +123,8 @@ mod tests {
             headers: http::HeaderMap::new(),
             body: Vec::new(),
         };
-        let decoded = decode_get_user_response(response).expect("decoded response");
+        let decoded = operations::get_user::decode_get_user_response(response)
+            .expect("decoded response");
 
         assert!(matches!(decoded, GetUserResponse::NotFound));
     }
@@ -134,7 +136,8 @@ mod tests {
             headers: http::HeaderMap::new(),
             body: b"boom".to_vec(),
         };
-        let decoded = decode_get_user_response(response).expect("decoded response");
+        let decoded = operations::get_user::decode_get_user_response(response)
+            .expect("decoded response");
 
         match decoded {
             GetUserResponse::UnexpectedStatus(status, body) => {

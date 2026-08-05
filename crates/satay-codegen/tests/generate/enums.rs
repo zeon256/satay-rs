@@ -329,7 +329,8 @@ mod tests {
             headers: http::HeaderMap::new(),
             body: json,
         };
-        let decoded = decode_get_item_response(response).expect("decoded response");
+        let decoded = operations::get_item::decode_get_item_response(response)
+            .expect("decoded response");
         match decoded {
             GetItemResponse::Ok(item) => {
                 assert_eq!(item.id, "1");
@@ -351,7 +352,7 @@ mod tests {
             headers: http::HeaderMap::new(),
             body: json,
         };
-        assert!(decode_get_item_response(response).is_err());
+        assert!(operations::get_item::decode_get_item_response(response).is_err());
     }
 }
 "##;
@@ -418,7 +419,8 @@ mod tests {
             body: br#"{"model":"gpt-4o-transcribe"}"#.to_vec(),
         };
 
-        let decoded = decode_get_transcription_response(response).expect("decoded response");
+        let decoded = operations::get_transcription::decode_get_transcription_response(response)
+            .expect("decoded response");
         match decoded {
             GetTranscriptionResponse::Ok(value) => {
                 assert_eq!(
@@ -438,7 +440,8 @@ mod tests {
             body: br#"{"model":"gpt-custom-transcribe"}"#.to_vec(),
         };
 
-        let decoded = decode_get_transcription_response(response).expect("decoded response");
+        let decoded = operations::get_transcription::decode_get_transcription_response(response)
+            .expect("decoded response");
         match decoded {
             GetTranscriptionResponse::Ok(value) => {
                 assert_eq!(

@@ -70,7 +70,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let client = reqwest::Client::new();
     let response = api
-        .get_bus_arrival(83139)
+        .bus()
+        .get_arrival(83139)
         .service_no(BusServiceNumber::try_new("15")?)
         .send_with(&client)
         .await?;

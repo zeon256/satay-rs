@@ -134,7 +134,8 @@ mod tests {
             body: br#"{"id":"base-1","name":"Ada","nickname":"ace"}"#.to_vec(),
         };
 
-        let decoded = decode_get_child_response(response).expect("decoded response");
+        let decoded = operations::get_child::decode_get_child_response(response)
+            .expect("decoded response");
         match decoded {
             GetChildResponse::Ok(child) => {
                 assert_eq!(child.id, "base-1");
@@ -382,7 +383,8 @@ mod tests {
             body: br#"{"object":"list","data":[{"role":"user","content":"hello","id":"chatcmpl-1-0","content_parts":[{"type":"text","text":"hello"}]}],"first_id":"chatcmpl-1-0","last_id":"chatcmpl-1-0","has_more":false}"#.to_vec(),
         };
 
-        let decoded = decode_list_messages_response(response).expect("decoded response");
+        let decoded = operations::list_messages::decode_list_messages_response(response)
+            .expect("decoded response");
         match decoded {
             ListMessagesResponse::Ok(list) => {
                 assert_eq!(list.data.len(), 1);
