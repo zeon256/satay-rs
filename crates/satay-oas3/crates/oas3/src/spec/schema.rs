@@ -589,7 +589,6 @@ impl Schema {
     fn new_object(schema: ObjectSchema) -> Self {
         Schema::Object(Box::new(schema))
     }
-
     /// Returns the object schema, or `None` for a boolean schema.
     pub fn as_object(&self) -> Option<&ObjectSchema> {
         match self {
@@ -612,6 +611,36 @@ impl Schema {
         self.as_object()?.description.as_deref()
     }
 
+    /// Returns the schemas directly contained by this schema.
+    ///
+    /// Children are yielded in Schema Object keyword order: `allOf`, `anyOf`, `oneOf`, `items`,
+    /// `prefixItems`, `properties`, then `additionalProperties`. This iterator does not recurse.
+    /// Boolean schemas have no children.
+    pub fn subschemas(&self) -> impl Iterator<Item = &Schema> {
+        self.as_object().into_iter().flat_map(|schema| {
+            schema
+                .all_of
+                .iter()
+                .chain(&schema.any_of)
+                .chain(&schema.one_of)
+                .chain(schema.items.as_deref())
+                .chain(&schema.prefix_items)
+                .chain(schema.properties.values())
+                .chain(schema.additional_properties.as_ref())
+        })
+    }
+
+    /// Returns the `$ref` values in this schema and its inline descendants.
+    ///
+    /// References are yielded in depth-first Schema Object keyword order. The referenced targets
+    /// are not resolved or traversed.
+    pub fn references(&self) -> impl Iterator<Item = &str> {
+        SchemaReferences {
+            pending: vec![self],
+            children: vec![],
+        }
+    }
+
     /// Resolves the schema (if needed) from the given `spec` and returns a schema document.
     ///
     /// If the schema is a reference, references are followed recursively until the result is either
@@ -629,6 +658,30 @@ impl Schema {
                 None => Ok(Schema::new_object((**schema).clone())),
             },
         }
+    }
+}
+
+struct SchemaReferences<'a> {
+    pending: Vec<&'a Schema>,
+    children: Vec<&'a Schema>,
+}
+
+impl<'a> Iterator for SchemaReferences<'a> {
+    type Item = &'a str;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(schema) = self.pending.pop() {
+            self.children.extend(schema.subschemas());
+            self.pending.extend(self.children.drain(..).rev());
+
+            if let Schema::Object(object) = schema {
+                if let Some(reference) = object.reference.as_deref() {
+                    return Some(reference);
+                }
+            }
+        }
+
+        None
     }
 }
 
@@ -686,6 +739,97 @@ mod inspection_tests {
         assert!(schema.as_object().is_none());
         assert_eq!(schema.reference(), None);
         assert_eq!(schema.description(), None);
+    }
+}
+
+#[cfg(test)]
+mod traversal_tests {
+    use super::*;
+
+    fn reference_schema(name: &str) -> Schema {
+        Schema::new_object(ObjectSchema {
+            reference: Some(format!("#/components/schemas/{name}")),
+            ..ObjectSchema::default()
+        })
+    }
+
+    fn reference(schema: &Schema) -> &str {
+        let Schema::Object(object) = schema else {
+            panic!("expected object schema");
+        };
+
+        object.reference.as_deref().expect("schema reference")
+    }
+
+    #[test]
+    fn subschemas_yields_every_direct_child_in_keyword_order() {
+        let mut properties = Map::new();
+        properties.insert("first".to_owned(), reference_schema("PropertyOne"));
+        properties.insert("second".to_owned(), reference_schema("PropertyTwo"));
+
+        let schema = Schema::new_object(ObjectSchema {
+            all_of: vec![reference_schema("AllOf")],
+            any_of: vec![reference_schema("AnyOf")],
+            one_of: vec![reference_schema("OneOf")],
+            items: Some(Box::new(reference_schema("Items"))),
+            prefix_items: vec![reference_schema("PrefixOne"), reference_schema("PrefixTwo")],
+            properties,
+            additional_properties: Some(reference_schema("AdditionalProperties")),
+            ..ObjectSchema::default()
+        });
+
+        let references = schema.subschemas().map(reference).collect::<Vec<_>>();
+
+        assert_eq!(
+            references,
+            [
+                "#/components/schemas/AllOf",
+                "#/components/schemas/AnyOf",
+                "#/components/schemas/OneOf",
+                "#/components/schemas/Items",
+                "#/components/schemas/PrefixOne",
+                "#/components/schemas/PrefixTwo",
+                "#/components/schemas/PropertyOne",
+                "#/components/schemas/PropertyTwo",
+                "#/components/schemas/AdditionalProperties",
+            ]
+        );
+    }
+
+    #[test]
+    fn boolean_schemas_have_no_children_or_references() {
+        let schema = Schema::Boolean(BooleanSchema(true));
+
+        assert_eq!(schema.subschemas().count(), 0);
+        assert_eq!(schema.references().count(), 0);
+    }
+
+    #[test]
+    fn references_walks_inline_schemas_depth_first_without_resolving() {
+        let nested = Schema::new_object(ObjectSchema {
+            one_of: vec![reference_schema("Nested")],
+            ..ObjectSchema::default()
+        });
+
+        let mut properties = Map::new();
+        properties.insert("property".to_owned(), reference_schema("Property"));
+
+        let schema = Schema::new_object(ObjectSchema {
+            reference: Some("#/components/schemas/Root".to_owned()),
+            all_of: vec![reference_schema("AllOf"), nested],
+            properties,
+            ..ObjectSchema::default()
+        });
+
+        assert_eq!(
+            schema.references().collect::<Vec<_>>(),
+            [
+                "#/components/schemas/Root",
+                "#/components/schemas/AllOf",
+                "#/components/schemas/Nested",
+                "#/components/schemas/Property",
+            ]
+        );
     }
 }
 
