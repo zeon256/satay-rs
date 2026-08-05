@@ -69,6 +69,7 @@ pub use self::{
     security_requirement::*,
     security_scheme::*,
     server::*,
+    spec_extensions::{ExtensionError, SpecificationExtensions},
     tag::*,
 };
 
