@@ -1,11 +1,8 @@
 use oas3::spec::{
-    ObjectOrReference, ObjectSchema as OasObjectSchema, Parameter as OasParameter,
-    PathItem as OasPathItem, RequestBody as OasRequestBody, Response as OasResponse,
-    Schema as OasSchema, SchemaType as OasSchemaType, SchemaTypeSet as OasSchemaTypeSet,
-    SecurityScheme as OasSecurityScheme,
+    LocalComponentRef, ObjectSchema as OasObjectSchema, Schema as OasSchema,
+    SchemaType as OasSchemaType, SchemaTypeSet as OasSchemaTypeSet,
 };
 
-use super::resolve::{ResolvedDocument, refs::local_ref_name};
 use crate::error::ValidationError;
 use crate::ident::type_ident;
 
@@ -20,8 +17,19 @@ pub(super) fn schema_ref<'a>(
 }
 
 pub(super) fn schema_ref_type_name(reference: &str) -> Result<String, ValidationError> {
-    let name = local_ref_name(reference, "schemas")?;
-    Ok(type_ident(&name))
+    let reference = schema_component_ref(reference)?;
+    Ok(type_ident(reference.name()))
+}
+
+pub(super) fn schema_component_ref(
+    reference: &str,
+) -> Result<LocalComponentRef<'_, OasSchema>, ValidationError> {
+    LocalComponentRef::parse(reference).map_err(|source| {
+        ValidationError::InvalidComponentReference {
+            reference: source.reference().to_owned(),
+            section: "schemas",
+        }
+    })
 }
 
 pub(super) fn object_schema<'a>(
@@ -104,224 +112,4 @@ pub(super) fn reject_one_of(
         });
     }
     Ok(())
-}
-
-pub(super) fn resolve_security_scheme<'a>(
-    document: &ResolvedDocument<'a>,
-    scheme: &'a ObjectOrReference<OasSecurityScheme>,
-    context: &str,
-) -> Result<&'a OasSecurityScheme, ValidationError> {
-    match scheme {
-        ObjectOrReference::Object(scheme) => Ok(scheme),
-        ObjectOrReference::Ref { ref_path, .. } => {
-            let reference = ref_path.clone();
-            resolve_security_scheme_ref(document, ref_path, context).map_err(|source| {
-                ValidationError::ResolveReference {
-                    reference,
-                    context: context.to_owned(),
-                    source: Box::new(source),
-                }
-            })
-        }
-    }
-}
-
-fn resolve_security_scheme_ref<'a>(
-    document: &ResolvedDocument<'a>,
-    reference: &str,
-    context: &str,
-) -> Result<&'a OasSecurityScheme, ValidationError> {
-    let name = local_ref_name(reference, "securitySchemes")?;
-
-    let target = document
-        .spec
-        .components
-        .as_ref()
-        .and_then(|components| components.security_schemes.get(&name))
-        .ok_or_else(|| ValidationError::MissingJsonPointerToken {
-            token: name.clone(),
-        })?;
-
-    resolve_security_scheme(document, target, context)
-}
-
-pub(super) fn resolve_parameter<'a>(
-    document: &ResolvedDocument<'a>,
-    parameter: &'a ObjectOrReference<OasParameter>,
-    context: &str,
-) -> Result<&'a OasParameter, ValidationError> {
-    match parameter {
-        ObjectOrReference::Object(parameter) => Ok(parameter),
-        ObjectOrReference::Ref { ref_path, .. } => {
-            let reference = ref_path.clone();
-            resolve_parameter_ref(document, ref_path, context).map_err(|source| {
-                ValidationError::ResolveReference {
-                    reference,
-                    context: context.to_owned(),
-                    source: Box::new(source),
-                }
-            })
-        }
-    }
-}
-
-fn resolve_parameter_ref<'a>(
-    document: &ResolvedDocument<'a>,
-    reference: &str,
-    context: &str,
-) -> Result<&'a OasParameter, ValidationError> {
-    let name = local_ref_name(reference, "parameters")?;
-
-    let target = document
-        .spec
-        .components
-        .as_ref()
-        .and_then(|components| components.parameters.get(&name))
-        .ok_or_else(|| ValidationError::MissingJsonPointerToken {
-            token: name.clone(),
-        })?;
-
-    resolve_parameter(document, target, context)
-}
-
-pub(super) fn resolve_request_body<'a>(
-    document: &ResolvedDocument<'a>,
-    request_body: &'a ObjectOrReference<OasRequestBody>,
-    context: &str,
-) -> Result<&'a OasRequestBody, ValidationError> {
-    match request_body {
-        ObjectOrReference::Object(request_body) => Ok(request_body),
-        ObjectOrReference::Ref { ref_path, .. } => {
-            let reference = ref_path.clone();
-            resolve_request_body_ref(document, ref_path, context).map_err(|source| {
-                ValidationError::ResolveReference {
-                    reference,
-                    context: context.to_owned(),
-                    source: Box::new(source),
-                }
-            })
-        }
-    }
-}
-
-fn resolve_request_body_ref<'a>(
-    document: &ResolvedDocument<'a>,
-    reference: &str,
-    context: &str,
-) -> Result<&'a OasRequestBody, ValidationError> {
-    let name = local_ref_name(reference, "requestBodies")?;
-
-    let target = document
-        .spec
-        .components
-        .as_ref()
-        .and_then(|components| components.request_bodies.get(&name))
-        .ok_or_else(|| ValidationError::MissingJsonPointerToken {
-            token: name.clone(),
-        })?;
-
-    resolve_request_body(document, target, context)
-}
-
-pub(super) fn resolve_response<'a>(
-    document: &ResolvedDocument<'a>,
-    response: &'a ObjectOrReference<OasResponse>,
-    context: &str,
-) -> Result<&'a OasResponse, ValidationError> {
-    match response {
-        ObjectOrReference::Object(response) => Ok(response),
-        ObjectOrReference::Ref { ref_path, .. } => {
-            let reference = ref_path.clone();
-            resolve_response_ref(document, ref_path, context).map_err(|source| {
-                ValidationError::ResolveReference {
-                    reference,
-                    context: context.to_owned(),
-                    source: Box::new(source),
-                }
-            })
-        }
-    }
-}
-
-fn resolve_response_ref<'a>(
-    document: &ResolvedDocument<'a>,
-    reference: &str,
-    context: &str,
-) -> Result<&'a OasResponse, ValidationError> {
-    let name = local_ref_name(reference, "responses")?;
-
-    let target = document
-        .spec
-        .components
-        .as_ref()
-        .and_then(|components| components.responses.get(&name))
-        .ok_or_else(|| ValidationError::MissingJsonPointerToken {
-            token: name.clone(),
-        })?;
-
-    resolve_response(document, target, context)
-}
-
-pub(super) fn resolve_path_item<'a>(
-    document: &ResolvedDocument<'a>,
-    path_item: &'a OasPathItem,
-    context: &str,
-) -> Result<&'a OasPathItem, ValidationError> {
-    let Some(reference) = path_item.reference.as_deref() else {
-        return Ok(path_item);
-    };
-
-    let name = local_ref_name(reference, "pathItems").map_err(|source| {
-        ValidationError::ResolveReference {
-            reference: reference.to_owned(),
-            context: context.to_owned(),
-            source: Box::new(source),
-        }
-    })?;
-
-    let target = document
-        .spec
-        .components
-        .as_ref()
-        .and_then(|components| components.path_items.get(&name))
-        .ok_or_else(|| ValidationError::ResolveReference {
-            reference: reference.to_owned(),
-            context: context.to_owned(),
-            source: Box::new(ValidationError::MissingJsonPointerToken {
-                token: name.clone(),
-            }),
-        })?;
-
-    resolve_path_item_reference(document, target, context, reference)
-}
-
-fn resolve_path_item_reference<'a>(
-    document: &ResolvedDocument<'a>,
-    path_item: &'a ObjectOrReference<OasPathItem>,
-    context: &str,
-    reference: &str,
-) -> Result<&'a OasPathItem, ValidationError> {
-    match path_item {
-        ObjectOrReference::Object(path_item) => resolve_path_item(document, path_item, context),
-        ObjectOrReference::Ref { ref_path, .. } => {
-            let name = local_ref_name(ref_path, "pathItems").map_err(|source| {
-                ValidationError::ResolveReference {
-                    reference: reference.to_owned(),
-                    context: context.to_owned(),
-                    source: Box::new(source),
-                }
-            })?;
-            let target = document
-                .spec
-                .components
-                .as_ref()
-                .and_then(|components| components.path_items.get(&name))
-                .ok_or_else(|| ValidationError::ResolveReference {
-                    reference: reference.to_owned(),
-                    context: context.to_owned(),
-                    source: Box::new(ValidationError::MissingJsonPointerToken { token: name }),
-                })?;
-            resolve_path_item_reference(document, target, context, reference)
-        }
-    }
 }

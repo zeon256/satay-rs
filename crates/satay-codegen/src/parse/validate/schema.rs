@@ -11,10 +11,10 @@ use serde_json::Value as JsonValue;
 
 use super::super::helpers::{optional_description, schema_description};
 use super::super::reference::{
-    object_schema, reject_one_of, schema_ref, schema_ref_type_name, schema_type_and_nullable,
-    schema_type_wire,
+    object_schema, reject_one_of, schema_component_ref, schema_ref, schema_ref_type_name,
+    schema_type_and_nullable, schema_type_wire,
 };
-use super::super::resolve::{ResolvedDocument, refs::local_ref_name};
+use super::super::resolve::ResolvedDocument;
 use super::constraint::{parse_integer_type, parse_validation, reject_keyword};
 use super::satay::{
     ValidatedParseAs, ValidatedSataySchema, validate_component_enum_satay,
@@ -278,20 +278,14 @@ fn schema_uses_any_of_inner(
     schema: &OasSchema,
     visited: &mut BTreeSet<String>,
 ) -> Result<bool, ValidationError> {
-    if let Some(reference) = schema_ref(schema, "anyOf parameter validation")? {
-        let name = local_ref_name(reference, "schemas")?;
-        if !visited.insert(name.clone()) {
+    if let Some(reference) = schema.reference() {
+        let name = schema_component_ref(reference)?.name().to_owned();
+        if !visited.insert(name) {
             return Ok(false);
         }
-        let target = document
-            .spec
-            .components
-            .as_ref()
-            .and_then(|components| components.schemas.get(&name))
-            .ok_or(ValidationError::MissingJsonPointerToken { token: name })?;
-        return schema_uses_any_of_inner(document, target, visited);
     }
 
+    let schema = document.resolve_schema(schema, "anyOf parameter validation")?;
     let schema = object_schema(schema, "anyOf parameter validation")?;
     if !schema.any_of.is_empty() || !schema.one_of.is_empty() || schema.discriminator.is_some() {
         return Ok(true);
@@ -311,20 +305,14 @@ fn schema_uses_all_of_inner(
     schema: &OasSchema,
     visited: &mut BTreeSet<String>,
 ) -> Result<bool, ValidationError> {
-    if let Some(reference) = schema_ref(schema, "allOf parameter validation")? {
-        let name = local_ref_name(reference, "schemas")?;
-        if !visited.insert(name.clone()) {
+    if let Some(reference) = schema.reference() {
+        let name = schema_component_ref(reference)?.name().to_owned();
+        if !visited.insert(name) {
             return Ok(false);
         }
-        let target = document
-            .spec
-            .components
-            .as_ref()
-            .and_then(|components| components.schemas.get(&name))
-            .ok_or(ValidationError::MissingJsonPointerToken { token: name })?;
-        return schema_uses_all_of_inner(document, target, visited);
     }
 
+    let schema = document.resolve_schema(schema, "allOf parameter validation")?;
     let schema = object_schema(schema, "allOf parameter validation")?;
     if !schema.all_of.is_empty() {
         return Ok(true);
@@ -1008,7 +996,7 @@ fn validate_plain_union_branch(
     stack: &mut Vec<String>,
 ) -> Result<PlainUnionBranch, ValidationError> {
     if let Some(reference) = schema_ref(branch, context)? {
-        let schema_name = local_ref_name(reference, "schemas")?;
+        let schema_name = schema_component_ref(reference)?.name().to_owned();
         let type_name = schema_ref_type_name(reference)?;
         return Ok(PlainUnionBranch::Variant(Box::new(ValidatedUnionVariant {
             rust_name: unique_ident(type_name.clone(), used),
@@ -1027,7 +1015,7 @@ fn validate_plain_union_branch(
     }
 
     if let Some(reference) = annotation_only_all_of_ref_wrapper(schema) {
-        let schema_name = local_ref_name(reference, "schemas")?;
+        let schema_name = schema_component_ref(reference)?.name().to_owned();
         let type_name = schema_ref_type_name(reference)?;
         return Ok(PlainUnionBranch::Variant(Box::new(ValidatedUnionVariant {
             rust_name: unique_ident(type_name.clone(), used),
@@ -1609,13 +1597,14 @@ fn validate_discriminator_branch_refs(
                 index,
             });
         };
-        let schema_name = local_ref_name(reference, "schemas").map_err(|_| {
+        let schema_name = schema_component_ref(reference).map_err(|_| {
             ValidationError::UnsupportedDiscriminatorBranch {
                 context: context.to_owned(),
                 keyword,
                 index,
             }
         })?;
+        let schema_name = schema_name.name().to_owned();
         if !used_targets.insert(schema_name.clone()) {
             return Err(ValidationError::InvalidDiscriminatorUnion {
                 context: context.to_owned(),
@@ -1756,7 +1745,7 @@ fn discriminator_mapping_schema_name(
     branch_names: &BTreeSet<String>,
 ) -> Option<String> {
     let schema_name = if target.starts_with("#/") {
-        local_ref_name(target, "schemas").ok()?
+        schema_component_ref(target).ok()?.name().to_owned()
     } else if target.contains("://") || target.starts_with('/') {
         return None;
     } else {
@@ -2007,12 +1996,13 @@ impl<'a, 'doc> AllOfFieldCollector<'a, 'doc> {
         context: &str,
     ) -> Result<(), ValidationError> {
         if let Some(reference) = schema_ref(branch, context)? {
-            let branch_schema_name = local_ref_name(reference, "schemas").map_err(|_| {
+            let branch_schema_name = schema_component_ref(reference).map_err(|_| {
                 ValidationError::UnsupportedAllOfBranch {
                     context: context.to_owned(),
                     index,
                 }
             })?;
+            let branch_schema_name = branch_schema_name.name().to_owned();
             return self.collect_component_fields(&branch_schema_name, context, index);
         }
 
@@ -2049,12 +2039,13 @@ impl<'a, 'doc> AllOfFieldCollector<'a, 'doc> {
         index: usize,
     ) -> Result<(), ValidationError> {
         if let Some(reference) = schema_ref(schema, context)? {
-            let target_schema_name = local_ref_name(reference, "schemas").map_err(|_| {
+            let target_schema_name = schema_component_ref(reference).map_err(|_| {
                 ValidationError::UnsupportedAllOfBranch {
                     context: context.to_owned(),
                     index,
                 }
             })?;
+            let target_schema_name = target_schema_name.name().to_owned();
             return self.collect_component_fields(&target_schema_name, context, index);
         }
 
@@ -2165,7 +2156,7 @@ fn all_of_ref_wrapper_unwraps(
     document: &ResolvedDocument<'_>,
     reference: &str,
 ) -> Result<bool, ValidationError> {
-    let name = local_ref_name(reference, "schemas")?;
+    let name = schema_component_ref(reference)?.name().to_owned();
     let target = component_schema(document, &name)?;
     if schema_ref(target, "")?.is_some() {
         return Ok(true);
@@ -2891,7 +2882,7 @@ fn referenced_schema_description_inner(
         return Ok(None);
     }
 
-    let name = local_ref_name(reference, "schemas")?;
+    let name = schema_component_ref(reference)?.name().to_owned();
     let target = document
         .spec
         .components
