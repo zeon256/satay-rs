@@ -10,10 +10,7 @@ use oas3::{
 };
 
 use super::super::helpers::{json_media_type, optional_description};
-use super::super::reference::{
-    object_schema, resolve_parameter, resolve_path_item, resolve_request_body, resolve_response,
-    schema_ref,
-};
+use super::super::reference::{object_schema, schema_ref};
 use super::super::resolve::ResolvedDocument;
 use super::schema::{
     inline_union_null_branch, reject_any_of_sibling_keywords, reject_plain_one_of_sibling_keywords,
@@ -35,7 +32,7 @@ pub(super) fn validate_operations(
     let mut operations = vec![];
 
     for (path, path_item) in paths {
-        let path_item = resolve_path_item(document, path_item, &format!("path item `{path}`"))?;
+        let path_item = document.resolve_path_item(path_item, &format!("path item `{path}`"))?;
 
         let mut present = 0usize;
         let mut retained: Vec<(HttpMethod, &OasOperation, String)> = vec![];
@@ -191,7 +188,7 @@ fn validate_parameter(
     parameter: &ObjectOrReference<OasParameter>,
     context: &str,
 ) -> Result<ValidatedParameter, ValidationError> {
-    let parameter = resolve_parameter(document, parameter, context)?;
+    let parameter = document.resolve(parameter, context)?;
     let wire_name = parameter.name.clone();
 
     let location = match parameter.location {
@@ -360,7 +357,7 @@ fn validate_request_body(
         return Ok(None);
     };
 
-    let request_body = resolve_request_body(document, request_body, context)?;
+    let request_body = document.resolve(request_body, context)?;
 
     if request_body.content.is_empty() {
         return Err(ValidationError::MissingContent {
@@ -397,7 +394,7 @@ fn validate_responses(
 
     for (status, response) in responses {
         if status == "default" {
-            let response = resolve_response(document, response, &format!("{context} default"))?;
+            let response = document.resolve(response, &format!("{context} default"))?;
             if !response.content.is_empty() {
                 return Err(ValidationError::DefaultResponseBodyUnsupported {
                     context: context.to_owned(),
@@ -425,7 +422,7 @@ fn validate_responses(
             ResponseStatus::Exact(status_code)
         };
 
-        let response = resolve_response(document, response, &format!("{context} {status}"))?;
+        let response = document.resolve(response, &format!("{context} {status}"))?;
 
         let body = if response.content.is_empty() {
             None

@@ -113,6 +113,43 @@ components:
 }
 
 #[test]
+fn reports_the_failing_reference_in_a_component_chain() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  parameters:
+    A:
+      $ref: '#/components/parameters/B'
+    B:
+      $ref: '#/components/parameters/Missing'
+"##,
+    );
+
+    match err {
+        ValidationError::ResolveReference {
+            reference,
+            context,
+            source,
+        } => {
+            assert_eq!(reference, "#/components/parameters/Missing");
+            assert_eq!(context, "parameter `A`");
+            match *source {
+                ValidationError::MissingJsonPointerToken { token } => {
+                    assert_eq!(token, "Missing");
+                }
+                other => panic!("unexpected reference source: {other}"),
+            }
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
 fn rejects_circular_component_references_during_resolution() {
     let err = parse_invalid(
         r##"

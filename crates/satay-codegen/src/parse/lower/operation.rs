@@ -2,7 +2,6 @@ use std::collections::BTreeSet;
 
 use oas3::spec::SecurityScheme as OasSecurityScheme;
 
-use super::super::reference::resolve_security_scheme;
 use super::super::resolve::ResolvedDocument;
 use super::schema::SchemaLowerer;
 use crate::error::ValidationError;
@@ -38,7 +37,7 @@ pub(super) fn parse_api_key_security_schemes(
 
     for (scheme_name, scheme) in &components.security_schemes {
         let context = format!("security scheme `{scheme_name}`");
-        let scheme = resolve_security_scheme(document, scheme, &context)?;
+        let scheme = document.resolve(scheme, &context)?;
         let OasSecurityScheme::ApiKey { name, location, .. } = scheme else {
             continue;
         };

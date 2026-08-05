@@ -17,10 +17,8 @@ use oas3::spec::{
 };
 
 use super::super::helpers::json_media_type;
-use super::super::reference::{
-    resolve_parameter, resolve_path_item, resolve_request_body, resolve_response,
-};
-use super::super::resolve::{ResolvedDocument, refs::local_ref_name};
+use super::super::reference::schema_component_ref;
+use super::super::resolve::ResolvedDocument;
 use super::operation::{inferred_operation_id, operation_satay_skip};
 use crate::error::ValidationError;
 use crate::model::HttpMethod;
@@ -61,7 +59,8 @@ pub(super) fn excluded_component_schemas(
 
     if let Some(paths) = document.spec.paths.as_ref() {
         for (path, path_item) in paths {
-            let path_item = resolve_path_item(document, path_item, &format!("path item `{path}`"))?;
+            let path_item =
+                document.resolve_path_item(path_item, &format!("path item `{path}`"))?;
 
             let mut has_present = false;
             let mut has_retained = false;
@@ -164,9 +163,9 @@ fn collect_schema_ref_names(schema: &OasSchema, out: &mut BTreeSet<String>) {
         OasSchema::Boolean(_) => {}
         OasSchema::Object(object) => {
             if let Some(reference) = object.reference.as_deref()
-                && let Ok(name) = local_ref_name(reference, "schemas")
+                && let Ok(reference) = schema_component_ref(reference)
             {
-                out.insert(name);
+                out.insert(reference.name().to_owned());
             }
             for property in object.properties.values() {
                 collect_schema_ref_names(property, out);
@@ -229,7 +228,7 @@ fn collect_parameter_schema_refs<'a>(
     scope: MediaScope,
     out: &mut BTreeSet<String>,
 ) -> Result<(), ValidationError> {
-    let parameter = resolve_parameter(document, parameter, "reachability parameter")?;
+    let parameter = document.resolve(parameter, "reachability parameter")?;
     if let Some(schema) = parameter.schema.as_ref() {
         collect_schema_ref_names(schema, out);
     }
@@ -276,8 +275,7 @@ fn collect_operation_schema_refs<'a>(
     }
 
     if let Some(request_body) = operation.request_body.as_ref() {
-        let request_body =
-            resolve_request_body(document, request_body, "reachability requestBody")?;
+        let request_body = document.resolve(request_body, "reachability requestBody")?;
         collect_content_schema_refs(&request_body.content, scope, out);
     }
 
@@ -288,7 +286,7 @@ fn collect_operation_schema_refs<'a>(
             if matches!(scope, MediaScope::Json) && status == "default" {
                 continue;
             }
-            let response = resolve_response(document, response, "reachability response")?;
+            let response = document.resolve(response, "reachability response")?;
             collect_content_schema_refs(&response.content, scope, out);
         }
     }
