@@ -1,3 +1,5 @@
+use std::fmt::{self, Display};
+
 #[derive(Debug)]
 pub(crate) struct Api {
     pub(crate) server_url: String,
@@ -315,8 +317,8 @@ pub(crate) enum ResponseStatus {
     Range(u8),
 }
 
-impl std::fmt::Display for ResponseStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Display for ResponseStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Exact(code) => write!(f, "{code}"),
             Self::Range(class) => write!(f, "{class}XX"),

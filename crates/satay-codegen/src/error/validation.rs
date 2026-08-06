@@ -1,3 +1,6 @@
+use oas3::spec::ExtensionError;
+use serde::de::Error as SerdeError;
+
 /// Errors that can occur while validating an OpenAPI document.
 ///
 /// This enum is [`non_exhaustive`](https://doc.rust-lang.org/reference/attributes/type_system.html)
@@ -730,9 +733,9 @@ pub enum ValidationError {
 impl ValidationError {
     /// Wraps an [`ExtensionError`] with a codegen context string such as a schema
     /// or operation identifier.
-    pub(crate) fn extension_error(context: &str, source: oas3::spec::ExtensionError) -> Self {
+    pub(crate) fn extension_error(context: &str, source: ExtensionError) -> Self {
         match source {
-            oas3::spec::ExtensionError::InvalidValue { path, source, .. } => {
+            ExtensionError::InvalidValue { path, source, .. } => {
                 ValidationError::InvalidExtension {
                     context: context.to_owned(),
                     path,
@@ -745,7 +748,7 @@ impl ValidationError {
             other => ValidationError::InvalidExtension {
                 context: context.to_owned(),
                 path: name_or_other_path(other),
-                source: serde::de::Error::custom("invalid specification extension"),
+                source: SerdeError::custom("invalid specification extension"),
             },
         }
     }
@@ -753,7 +756,7 @@ impl ValidationError {
 
 fn name_or_other_path(error: oas3::spec::ExtensionError) -> String {
     match error {
-        oas3::spec::ExtensionError::InvalidName { name } => name,
+        ExtensionError::InvalidName { name } => name,
         _ => "x-satay".to_owned(),
     }
 }

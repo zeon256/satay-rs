@@ -876,11 +876,11 @@ components:
     let second = component(&api, "ChoiceEnum2");
     match &second.kind {
         ComponentKind::Enum(enum_) => {
-            let wire: Vec<_> = enum_
+            let wire = enum_
                 .variants
                 .iter()
                 .map(|variant| variant.wire_name.as_str())
-                .collect();
+                .collect::<Vec<_>>();
             assert_eq!(wire, ["b", "c"]);
             assert_eq!(enum_.fallback, EnumFallback::None);
         }

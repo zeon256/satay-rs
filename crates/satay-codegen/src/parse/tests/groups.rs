@@ -1,3 +1,5 @@
+use crate::model::ApiGroup;
+
 use super::*;
 
 #[test]
@@ -142,14 +144,14 @@ paths:
     assert_eq!(group_methods(group(&api, "get")), ["type_"]);
 }
 
-fn group<'a>(api: &'a Api, rust_name: &str) -> &'a crate::model::ApiGroup {
+fn group<'a>(api: &'a Api, rust_name: &str) -> &'a ApiGroup {
     api.groups
         .iter()
         .find(|group| group.rust_name == rust_name)
         .unwrap_or_else(|| panic!("missing API group {rust_name}"))
 }
 
-fn group_methods(group: &crate::model::ApiGroup) -> Vec<&str> {
+fn group_methods(group: &ApiGroup) -> Vec<&str> {
     group
         .operations
         .iter()
