@@ -1,9 +1,11 @@
+use std::collections::BTreeSet;
+
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Ident, Item, parse_quote};
 
 use crate::RootModule;
-use crate::ident::type_ident;
+use crate::ident::{type_ident, unique_ident};
 use crate::model::{
     Api, ApiGroup, ApiKeyLocation, ApiKeySecurityScheme, Field, Operation, TypeRef,
 };
@@ -212,6 +214,17 @@ fn render_action_constructor(operation: &Operation) -> TokenStream {
         .into_iter()
         .filter(|field| field.required)
         .collect::<Vec<_>>();
+    let mut used_arg_names = required_fields
+        .iter()
+        .map(|field| field.rust_name.clone())
+        .collect::<BTreeSet<_>>();
+    let root_api_arg_name = unique_ident("api".to_owned(), &mut used_arg_names);
+    let root_api_arg = super::ident(&root_api_arg_name);
+    let root_api_field = if root_api_arg_name == "api" {
+        quote!(api)
+    } else {
+        quote!(api: #root_api_arg)
+    };
     let new_args = required_fields.iter().map(|field| {
         let name = super::ident(&field.rust_name);
         let ty = super::input_builder_arg_type(&field.ty);
@@ -222,9 +235,9 @@ fn render_action_constructor(operation: &Operation) -> TokenStream {
         .map(|field| super::ident(&field.rust_name));
 
     quote!(
-        pub(crate) fn new(api: &'a Api #(, #new_args)*) -> Self {
+        pub(crate) fn new(#root_api_arg: &'a Api #(, #new_args)*) -> Self {
             Self {
-                api,
+                #root_api_field,
                 input: #input::new(#(#new_arg_names),*),
             }
         }
