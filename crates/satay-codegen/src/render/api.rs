@@ -2,31 +2,42 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Ident, Item, parse_quote};
 
+use crate::RootModule;
 use crate::ident::type_ident;
 use crate::model::{
     Api, ApiGroup, ApiKeyLocation, ApiKeySecurityScheme, Field, Operation, TypeRef,
 };
 
-pub(super) fn render_api_file(api: &Api) -> syn::File {
+pub(super) fn render_api_file(api: &Api, root_module: RootModule) -> syn::File {
     let mut items = vec![];
     let has_map_input = api.operations.iter().any(|operation| {
         super::input_fields(operation)
             .iter()
             .any(|field| field.ty.contains_map())
     });
+
     if has_map_input {
         items.push(Item::Use(parse_quote!(
             use std::collections::BTreeMap;
         )));
     }
+
+    items.extend(
+        build_api_group_module_uses(api, root_module)
+            .into_iter()
+            .map(Item::Use),
+    );
+
     if let Some(operation_use) = build_api_operation_use(api) {
         items.push(Item::Use(operation_use));
     }
+
     items.extend(
         build_api_operation_module_uses(api)
             .into_iter()
             .map(Item::Use),
     );
+
     items.push(Item::Struct(render_api_struct(api)));
     items.push(Item::Impl(render_api_default_impl()));
     items.push(Item::Impl(render_api_impl(api)));
@@ -42,6 +53,19 @@ pub(super) fn render_api_file(api: &Api) -> syn::File {
         attrs: vec![],
         items,
     }
+}
+
+fn build_api_group_module_uses(api: &Api, root_module: RootModule) -> Vec<syn::ItemUse> {
+    api.groups
+        .iter()
+        .map(|group| {
+            let module = super::ident(&group.rust_name);
+            match root_module {
+                RootModule::ModRs => parse_quote!(use super::#module;),
+                RootModule::LibRs => parse_quote!(use crate::#module;),
+            }
+        })
+        .collect()
 }
 
 fn build_api_operation_use(api: &Api) -> Option<syn::ItemUse> {
@@ -160,8 +184,8 @@ fn render_group_accessor(group: &ApiGroup) -> TokenStream {
 
     quote!(
         #(#docs)*
-        pub fn #method(&self) -> super::#module::Api<'_> {
-            super::#module::Api { api: self }
+        pub fn #method(&self) -> #module::Api<'_> {
+            #module::Api { api: self }
         }
     )
 }

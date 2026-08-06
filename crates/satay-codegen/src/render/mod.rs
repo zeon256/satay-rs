@@ -3,6 +3,7 @@ use quote::quote;
 use syn::{Ident, LitStr, parse_quote};
 use tracing::info;
 
+use crate::ident::type_ident;
 use crate::model::{Api, Field, IntegerType, Operation, ParseAs, RangeScalar, TypeRef};
 use crate::{GenerateOptions, RootModule};
 
@@ -51,7 +52,7 @@ pub(crate) fn render_api(api: &Api, options: GenerateOptions) -> Vec<GeneratedFi
         });
     }
 
-    let api_file = api::render_api_file(api);
+    let api_file = api::render_api_file(api, options.root_module);
     files.push(GeneratedFile {
         relative_path: "api.rs".to_owned(),
         contents: format_file(api_file),
@@ -101,13 +102,18 @@ fn format_file(file: syn::File) -> String {
 fn render_top_mod(api: &Api) -> syn::File {
     let mut items: Vec<syn::Item> = vec![];
     let server_url = lit_str(&api.server_url);
-    items.push(parse_quote!(pub const SERVER_URL: &str = #server_url;));
+    items.push(parse_quote!(
+        /// Default Upstream URL
+        pub const SERVER_URL: &str = #server_url;
+    ));
 
     let has_types = !api.components.is_empty() || !api.constrained_types.is_empty();
     if has_types {
         items.push(parse_quote!(
+            /// Where all types, structs and enums are
             pub mod types;
         ));
+
         items.push(parse_quote!(
             pub use types::*;
         ));
@@ -117,6 +123,7 @@ fn render_top_mod(api: &Api) -> syn::File {
         #[cfg(feature = "json")]
         mod api;
     ));
+
     items.push(parse_quote!(
         #[cfg(feature = "json")]
         pub use api::*;
@@ -157,10 +164,7 @@ fn render_operations_mod(api: &Api) -> syn::ItemMod {
         .iter()
         .map(|operation| -> syn::ItemMod {
             let module = ident(&operation.fn_name);
-            let action = ident(&format!(
-                "{}Action",
-                crate::ident::type_ident(&operation.fn_name)
-            ));
+            let action = ident(&format!("{}Action", type_ident(&operation.fn_name)));
             let docs = doc_attrs(operation.description.as_deref());
             parse_quote!(
                 #(#docs)*
@@ -424,10 +428,10 @@ mod types;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::PathSegment;
     use crate::model::{
         ApiGroup, Component, ComponentKind, GroupOperation, HttpMethod, RequestBody, ResponseCase,
     };
+    use crate::model::{PathSegment, ResponseStatus};
     use quote::{ToTokens, quote};
     use syn::{Fields, GenericArgument, Item, PathArguments, Type};
 
@@ -523,7 +527,7 @@ mod tests {
                     required: true,
                 }),
                 responses: vec![ResponseCase {
-                    status: crate::model::ResponseStatus::Exact(201),
+                    status: ResponseStatus::Exact(201),
                     variant_name: "Created".to_owned(),
                     description: None,
                     body: Some(TypeRef::Named("Pet".to_owned())),

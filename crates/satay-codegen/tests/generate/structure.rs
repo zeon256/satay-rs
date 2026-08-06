@@ -88,7 +88,17 @@ fn operation_tags_generate_namespaced_api_groups() {
 
     let api = parse_rust(find_file(&files, "api.rs"));
     for group in ["realtime", "bus", "untagged"] {
-        find_method(&api, "Api", group);
+        assert!(
+            api.items
+                .iter()
+                .any(|item| norm(item) == norm_str(&format!("use super::{group};"))),
+            "missing group module import for `{group}`",
+        );
+        let method = find_method(&api, "Api", group);
+        assert_eq!(
+            norm(&method.sig),
+            norm_str(&format!("fn {group}(&self) -> {group}::Api<'_>")),
+        );
     }
     assert!(!has_method(&api, "Api", "get_bus_arrival"));
     assert!(!has_method(&api, "Api", "list_bus_stops"));
@@ -165,6 +175,18 @@ fn lib_root_module_option_emits_lib_rs_instead_of_mod_rs() {
 
     let lib_rs = parse_rust(find_file(&files, "lib.rs"));
     assert!(is_pub(&find_const(&lib_rs, "SERVER_URL").vis));
+    let api_rs = parse_rust(find_file(&files, "api.rs"));
+    assert!(
+        api_rs
+            .items
+            .iter()
+            .any(|item| norm(item) == norm_str("use crate::users;")),
+        "crate-root generation should import group modules from `crate`",
+    );
+    assert_eq!(
+        norm(&find_method(&api_rs, "Api", "users").sig),
+        norm_str("fn users(&self) -> users::Api<'_>"),
+    );
     assert!(!files.iter().any(|file| file.relative_path == "mod.rs"));
     assert!(
         files
@@ -317,9 +339,13 @@ components:
     .expect("generate secured fixture");
 
     let mod_rs = parse_rust(find_file(&files, "mod.rs"));
+    let server_url = find_const(&mod_rs, "SERVER_URL");
+    assert!(is_pub(&server_url.vis));
+    assert_doc(&server_url.attrs, "Default Upstream URL");
+    assert_eq!(norm(&server_url.ty), norm_str("&str"));
     assert_eq!(
-        norm(find_const(&mod_rs, "SERVER_URL")),
-        norm_str(r#"pub const SERVER_URL: &str = "https://api.example.test/v1";"#)
+        norm(&server_url.expr),
+        norm_str(r#""https://api.example.test/v1""#)
     );
 
     let api_rs = parse_rust(find_file(&files, "api.rs"));

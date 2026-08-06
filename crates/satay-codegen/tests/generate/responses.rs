@@ -1,5 +1,7 @@
 use std::fs;
 
+use syn::Fields;
+
 use crate::ast::*;
 use crate::common::*;
 
@@ -64,10 +66,7 @@ fn wildcard_range_generates_status_carrying_variant_after_exact_arms() {
         norm_str("(http::StatusCode, ErrorResponse)")
     );
     assert_eq!(norm(&variant(response, "Ok").fields), norm_str("(User)"));
-    assert!(matches!(
-        variant(response, "NotFound").fields,
-        syn::Fields::Unit
-    ));
+    assert!(matches!(variant(response, "NotFound").fields, Fields::Unit));
 
     // Exact-status arms must precede the covering range arm so 404 shadows
     // 400..=499; UnexpectedStatus stays last.
