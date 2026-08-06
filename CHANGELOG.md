@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.2](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.12.1...satay-codegen-v0.12.2) - 2026-08-06
+
+### Added
+
+- *(codegen)* make sure that imports for group APIs dont have >= 3 segments
+
+### Fixed
+
+- *(codegen)* avoid action constructor parameter collisions
+
 ## [0.12.1](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.12.0...satay-codegen-v0.12.1) - 2026-08-05
 
 ### Added
