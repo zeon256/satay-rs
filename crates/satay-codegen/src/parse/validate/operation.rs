@@ -5,13 +5,13 @@ use oas3::{
     spec::{
         ObjectOrReference, Operation as OasOperation, Parameter as OasParameter,
         ParameterIn as OasParameterIn, RequestBody as OasRequestBody, Response as OasResponse,
-        Schema as OasSchema, SpecificationExtensions,
+        Schema as OasSchema,
     },
 };
-use serde::Deserialize;
 
 use super::super::helpers::{json_media_type, optional_description};
 use super::super::resolve::ResolvedDocument;
+use super::super::satay::operation_options;
 use super::schema::{
     inline_union_null_branch, reject_any_of_sibling_keywords, reject_plain_one_of_sibling_keywords,
     schema_uses_all_of, schema_uses_any_of, validate_type_schema,
@@ -138,26 +138,14 @@ fn validate_operation(
     })
 }
 
-/// Reads the operation-level `x-satay` extension; only `skip: bool` is supported.
+/// Reads whether the operation-level `x-satay` extension skips this operation.
 pub(super) fn operation_satay_skip(
     operation: &OasOperation,
     operation_id: &str,
 ) -> Result<bool, ValidationError> {
     let context = format!("operation `{operation_id}`");
-    let options = operation
-        .extension_as::<SatayOperationOptions>("x-satay")
-        .map_err(|source| ValidationError::extension_error(&context, source))?
-        .unwrap_or_default();
+    let options = operation_options(operation, &context)?.unwrap_or_default();
     Ok(options.skip)
-}
-
-/// Typed `x-satay` operation options. Currently only [`skip`](Self::skip) is
-/// permitted; unknown keys are rejected at deserialization via
-/// `deny_unknown_fields`.
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-struct SatayOperationOptions {
-    skip: bool,
 }
 
 fn validate_parameter_list(
