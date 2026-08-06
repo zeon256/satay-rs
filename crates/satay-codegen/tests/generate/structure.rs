@@ -102,6 +102,19 @@ fn operation_tags_generate_namespaced_api_groups() {
     }
     assert!(!has_method(&api, "Api", "get_bus_arrival"));
     assert!(!has_method(&api, "Api", "list_bus_stops"));
+    let list_stops_new = find_method(&api, "ListBusStopsAction", "new");
+    assert_eq!(
+        norm(&list_stops_new.sig),
+        norm_str("fn new(api_2: &'a Api, api: impl Into<String>) -> Self"),
+    );
+    assert!(contains_tokens(list_stops_new, "api: api_2"));
+    assert!(contains_tokens(
+        list_stops_new,
+        "ListBusStopsInput::new(api)"
+    ));
+    let get_arrival_new = find_method(&api, "GetBusArrivalAction", "new");
+    assert!(contains_tokens(get_arrival_new, "api,"));
+    assert!(!contains_tokens(get_arrival_new, "api: api"));
     let action = find_struct(&api, "GetBusArrivalAction");
     assert_doc(
         &action.attrs,

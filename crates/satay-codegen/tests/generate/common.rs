@@ -50,6 +50,12 @@ paths:
     get:
       operationId: listBusStops
       tags: [bus]
+      parameters:
+        - name: api
+          in: query
+          required: true
+          schema:
+            type: string
       responses:
         '204':
           description: No content
