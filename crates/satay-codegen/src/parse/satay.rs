@@ -1,13 +1,201 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use oas3::spec::{ObjectSchema as OasObjectSchema, SchemaType as OasSchemaType};
+use oas3::spec::{
+    ObjectSchema as OasObjectSchema, Operation as OasOperation, SchemaType as OasSchemaType,
+    SpecificationExtensions,
+};
+use serde::Deserialize;
 
-use super::helpers::SataySchemaOptions;
 use super::reference::schema_type_wire;
 use super::validate::constraint::parse_integer_type;
 use crate::error::ValidationError;
 use crate::ident::variant_ident;
 use crate::model::{IntegerType, ParseAs, RangeScalar};
+
+/// Typed schema-level `x-satay` wire options.
+///
+/// Compatibility between these fields and the surrounding OpenAPI schema is
+/// validated in `parse/validate/satay.rs`. This type only defines the wire
+/// contract and rejects unknown fields.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct SataySchemaOptions {
+    pub(crate) parse_as: Option<SatayParseAsWire>,
+    pub(crate) integer_type: Option<SatayIntegerTypeWire>,
+    pub(crate) treat_error_as_none: Option<bool>,
+    pub(crate) none_if: Option<Vec<String>>,
+    pub(crate) enum_variants: Option<BTreeMap<String, String>>,
+}
+
+impl SataySchemaOptions {
+    pub(crate) fn parse_as(&self) -> Option<ParseAs> {
+        self.parse_as.map(SatayParseAsWire::into_parse_as)
+    }
+
+    pub(crate) fn integer_type(&self) -> Option<IntegerType> {
+        match self.integer_type {
+            Some(SatayIntegerTypeWire::Auto) => None,
+            Some(wire) => Some(wire.into_integer_type()),
+            None => None,
+        }
+    }
+}
+
+/// Typed operation-level `x-satay` wire options.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct SatayOperationOptions {
+    pub(crate) skip: bool,
+    #[allow(
+        dead_code,
+        reason = "centralized wire contract for response projection consumers"
+    )]
+    pub(crate) output: Option<SatayOutputOptions>,
+}
+
+/// Wire selectors for projecting an operation response.
+#[allow(
+    dead_code,
+    reason = "centralized wire contract for response projection consumers"
+)]
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+pub(crate) struct SatayOutputOptions {
+    pub(crate) unwrap_field: SatayFieldName,
+    pub(crate) map_field: Option<SatayFieldName>,
+}
+
+/// A non-empty JSON field selector used by Satay operation extensions.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub(crate) struct SatayFieldName(String);
+
+#[allow(
+    dead_code,
+    reason = "centralized wire contract for response projection consumers"
+)]
+impl SatayFieldName {
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for SatayFieldName {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.is_empty() {
+            Err("field selector must not be empty")
+        } else {
+            Ok(Self(value))
+        }
+    }
+}
+
+/// Wire values for `x-satay.parse-as`. Mirrors the strings accepted by the
+/// `parse-as` field's wire contract so unrecognized values surface as typed
+/// deserialization errors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum SatayParseAsWire {
+    U8,
+    U16,
+    U32,
+    U64,
+    I8,
+    I16,
+    I32,
+    I64,
+    F32,
+    F64,
+    Bool,
+    Date,
+    NaiveDatetime,
+    OffsetDatetime,
+    Time,
+    IntegerRange,
+    NumberRange,
+}
+
+impl SatayParseAsWire {
+    fn into_parse_as(self) -> ParseAs {
+        match self {
+            Self::U8 => ParseAs::U8,
+            Self::U16 => ParseAs::U16,
+            Self::U32 => ParseAs::U32,
+            Self::U64 => ParseAs::U64,
+            Self::I8 => ParseAs::I8,
+            Self::I16 => ParseAs::I16,
+            Self::I32 => ParseAs::I32,
+            Self::I64 => ParseAs::I64,
+            Self::F32 => ParseAs::F32,
+            Self::F64 => ParseAs::F64,
+            Self::Bool => ParseAs::Bool,
+            Self::Date => ParseAs::Date,
+            Self::NaiveDatetime => ParseAs::NaiveDateTime,
+            Self::OffsetDatetime => ParseAs::OffsetDateTime,
+            Self::Time => ParseAs::Time,
+            Self::IntegerRange => ParseAs::IntegerRange,
+            Self::NumberRange => ParseAs::NumberRange,
+        }
+    }
+}
+
+/// Wire values for `x-satay.integer-type`. `Auto` asks codegen to infer the
+/// integer type from the schema.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum SatayIntegerTypeWire {
+    U8,
+    U16,
+    U32,
+    U64,
+    I8,
+    I16,
+    I32,
+    I64,
+    Auto,
+}
+
+impl SatayIntegerTypeWire {
+    fn into_integer_type(self) -> IntegerType {
+        match self {
+            Self::U8 => IntegerType::U8,
+            Self::U16 => IntegerType::U16,
+            Self::U32 => IntegerType::U32,
+            Self::U64 => IntegerType::U64,
+            Self::I8 => IntegerType::I8,
+            Self::I16 => IntegerType::I16,
+            Self::I32 => IntegerType::I32,
+            Self::I64 => IntegerType::I64,
+            Self::Auto => {
+                unreachable!("`auto` is handled before reaching `into_integer_type`")
+            }
+        }
+    }
+}
+
+/// Reads a schema-level `x-satay` extension through the vendor-neutral typed
+/// extension API.
+pub(crate) fn schema_options(
+    schema: &OasObjectSchema,
+    context: &str,
+) -> Result<Option<SataySchemaOptions>, ValidationError> {
+    schema
+        .extension_as::<SataySchemaOptions>("x-satay")
+        .map_err(|source| ValidationError::extension_error(context, source))
+}
+
+/// Reads an operation-level `x-satay` extension through the vendor-neutral
+/// typed extension API.
+pub(crate) fn operation_options(
+    operation: &OasOperation,
+    context: &str,
+) -> Result<Option<SatayOperationOptions>, ValidationError> {
+    operation
+        .extension_as::<SatayOperationOptions>("x-satay")
+        .map_err(|source| ValidationError::extension_error(context, source))
+}
 
 pub(super) fn parse_satay_enum_variants(
     options: &SataySchemaOptions,
@@ -137,5 +325,139 @@ fn satay_integer_type_wire(integer_type: IntegerType) -> &'static str {
         IntegerType::I16 => "i16",
         IntegerType::I32 => "i32",
         IntegerType::I64 => "i64",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use oas3::spec::{ObjectSchema as OasObjectSchema, Operation as OasOperation};
+    use serde_json::{Value as JsonValue, json};
+
+    use super::*;
+
+    fn schema_with_satay(value: JsonValue) -> OasObjectSchema {
+        let mut schema = OasObjectSchema::default();
+        schema.extensions.insert("satay".to_owned(), value);
+        schema
+    }
+
+    fn operation_with_satay(value: JsonValue) -> OasOperation {
+        let mut operation = OasOperation::default();
+        operation.extensions.insert("satay".to_owned(), value);
+        operation
+    }
+
+    fn invalid_extension_path<T>(result: Result<T, ValidationError>) -> String {
+        match result {
+            Err(ValidationError::InvalidExtension { path, .. }) => path,
+            Err(error) => panic!("unexpected error: {error}"),
+            Ok(_) => panic!("extension must be rejected"),
+        }
+    }
+
+    #[test]
+    fn reads_all_schema_options_from_the_central_wire_type() {
+        let schema = schema_with_satay(json!({
+            "parse-as": "u32",
+            "integer-type": "u16",
+            "treat-error-as-none": true,
+            "none-if": ["", "-"],
+            "enum-variants": { "A": "Available" },
+        }));
+
+        let options = schema_options(&schema, "property `Status.value`")
+            .expect("valid extension")
+            .expect("present extension");
+
+        assert_eq!(options.parse_as(), Some(ParseAs::U32));
+        assert_eq!(options.integer_type(), Some(IntegerType::U16));
+        assert_eq!(options.treat_error_as_none, Some(true));
+        assert_eq!(options.none_if, Some(vec![String::new(), "-".to_owned()]));
+        assert_eq!(
+            options.enum_variants,
+            Some(BTreeMap::from([("A".to_owned(), "Available".to_owned())]))
+        );
+    }
+
+    #[test]
+    fn missing_schema_and_operation_extensions_return_none() {
+        assert!(
+            schema_options(&OasObjectSchema::default(), "schema `Status`")
+                .expect("missing extension is valid")
+                .is_none()
+        );
+        assert!(
+            operation_options(&OasOperation::default(), "operation `status`")
+                .expect("missing extension is valid")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn reads_operation_and_nested_output_options() {
+        let operation = operation_with_satay(json!({
+            "skip": true,
+            "output": {
+                "unwrap-field": "value",
+                "map-field": "Link",
+            },
+        }));
+
+        let options = operation_options(&operation, "operation `links`")
+            .expect("valid extension")
+            .expect("present extension");
+        let output = options.output.expect("output options");
+
+        assert!(options.skip);
+        assert_eq!(output.unwrap_field.as_str(), "value");
+        assert_eq!(
+            output.map_field.as_ref().map(SatayFieldName::as_str),
+            Some("Link")
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_schema_and_operation_fields_with_precise_paths() {
+        let schema = schema_with_satay(json!({ "unknown": true }));
+        assert_eq!(
+            invalid_extension_path(schema_options(&schema, "schema `Status`")),
+            "x-satay.unknown"
+        );
+
+        let operation = operation_with_satay(json!({ "unknown": true }));
+        assert_eq!(
+            invalid_extension_path(operation_options(&operation, "operation `status`")),
+            "x-satay.unknown"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_schema_values_with_precise_paths() {
+        let schema = schema_with_satay(json!({ "parse-as": "uuid" }));
+        assert_eq!(
+            invalid_extension_path(schema_options(&schema, "schema `Status`")),
+            "x-satay.parse-as"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_and_unknown_output_fields_with_precise_paths() {
+        for (output, expected_path) in [
+            (json!({ "unwrap-field": "" }), "x-satay.output.unwrap-field"),
+            (
+                json!({ "unwrap-field": "value", "map-field": "" }),
+                "x-satay.output.map-field",
+            ),
+            (
+                json!({ "unwrap-field": "value", "unknown": true }),
+                "x-satay.output.unknown",
+            ),
+        ] {
+            let operation = operation_with_satay(json!({ "output": output }));
+            assert_eq!(
+                invalid_extension_path(operation_options(&operation, "operation `status`")),
+                expected_path
+            );
+        }
     }
 }

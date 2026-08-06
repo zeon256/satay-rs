@@ -3,11 +3,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use oas3::spec::{ObjectSchema as OasObjectSchema, SchemaType as OasSchemaType};
 use serde_json::Value as JsonValue;
 
-use super::super::helpers::schema_options;
 use super::super::reference::schema_type_wire;
 use super::super::satay::{
     parse_range_scalar, parse_satay_enum_variants, parse_satay_integer_type, parse_satay_parse_as,
-    satay_parse_as_wire, validate_satay_integer_type,
+    satay_parse_as_wire, schema_options, validate_satay_integer_type,
 };
 use crate::error::ValidationError;
 use crate::model::{IntegerType, ParseAs, RangeScalar};

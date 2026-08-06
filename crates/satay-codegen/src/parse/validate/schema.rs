@@ -9,12 +9,13 @@ use oas3::spec::{
 };
 use serde_json::Value as JsonValue;
 
-use super::super::helpers::{optional_description, schema_options};
+use super::super::helpers::optional_description;
 use super::super::reference::{
     reject_one_of, schema_component_ref, schema_ref_type_name, schema_type_and_nullable,
     schema_type_wire,
 };
 use super::super::resolve::ResolvedDocument;
+use super::super::satay::schema_options;
 use super::constraint::{parse_integer_type, parse_validation, reject_keyword};
 use super::satay::{
     ValidatedParseAs, ValidatedSataySchema, validate_component_enum_satay,

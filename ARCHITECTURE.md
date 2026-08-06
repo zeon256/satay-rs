@@ -55,12 +55,12 @@ flowchart LR
 
         resolve["resolve/<br/>local ref validation"] --> refs
         refs["resolve/refs.rs<br/>local JSON pointer parsing"]
-        helpers["helpers.rs<br/>descriptions, JSON media types, x-satay object access"]
+        helpers["helpers.rs<br/>descriptions, JSON media types"]
         reference["reference.rs<br/>on-demand ref helpers"]
         validate["validate/<br/>supported subset -> ValidatedDocument"]
         lower["lower/<br/>ValidatedDocument -> model::Api"]
         registry["registry.rs<br/>generated type names"]
-        satay["satay.rs<br/>x-satay parsing"]
+        satay["satay.rs<br/>typed x-satay wire contracts + accessors"]
     end
 
     subgraph render["render/"]
@@ -130,8 +130,34 @@ Validation responsibilities are split by file:
 - `validate/schema.rs` validates component schemas and inline type schemas, rejects unsupported schema shapes, validates enum shape, validates references, and records constraints on `ValidatedType`.
 - `validate/operation.rs` validates paths, operation parameters, request bodies, responses, status codes, path placeholders, and JSON media-type requirements.
 - `validate/constraint.rs` parses and normalizes string, integer, number, and array constraints for `nutype` rendering. It also infers integer types from bounds when no explicit `x-satay.integer-type` is provided.
-- `validate/satay.rs` validates Satay vendor extensions such as `parse-as`, `none-if`, `integer-type`, `enum-variants`, and `treat-error-as-none`.
-- `parse/satay.rs` contains lower-level `x-satay` parsing helpers shared by validation.
+- `parse/satay.rs` is the authoritative home for typed schema and operation `x-satay` wire contracts, their `schema_options` and `operation_options` accessors, and lower-level parsing helpers shared by validation. The wire types use owned strings so validation does not need to carry extension-value lifetimes.
+- `validate/satay.rs` applies schema-extension compatibility rules such as `parse-as`, `none-if`, `integer-type`, `enum-variants`, and `treat-error-as-none`.
+- `validate/operation.rs` applies operation semantics and resolves names from operation extensions against validated operation data.
+
+The wire layer uses `#[serde(deny_unknown_fields)]` and validated newtypes for values with local invariants. It is intentionally separate from the vendor-neutral `satay-oas3::SpecificationExtensions::extension_as<T>()` API: `satay-oas3` provides typed extension deserialization and nested error paths, while `satay-codegen` owns Satay-specific contracts and policy. Validation and lowering must use the centralized accessors rather than traversing raw extension JSON.
+
+A future parameter-group extension, for example:
+
+```yaml
+x-satay:
+  parameter-groups:
+    - at-most-one-of: [Date, $skip]
+```
+
+would extend only the centralized operation wire contract:
+
+```rust
+pub(crate) struct SatayOperationOptions {
+    // Existing fields.
+    pub(crate) parameter_groups: Vec<SatayParameterGroup>,
+}
+
+pub(crate) struct SatayParameterGroup {
+    pub(crate) at_most_one_of: Vec<SatayParameterName>,
+}
+```
+
+`validate/operation.rs` would resolve those wire names to validated parameter indices. Lowering and rendering would consume only those resolved values and would not parse extension JSON directly. This documents the intended extension path; parameter-group behavior is not implemented yet.
 
 Unsupported OpenAPI features are rejected with `ValidationError` instead of being ignored. Lowering and rendering rely on those validation guarantees and use `unreachable!` or `expect` for states that validation should have made impossible.
 
