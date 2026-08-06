@@ -332,6 +332,13 @@ pub(crate) struct ResponseCase {
     pub(crate) variant_name: String,
     pub(crate) description: Option<String>,
     pub(crate) body: Option<TypeRef>,
+    pub(crate) projection: Option<ResponseProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ResponseProjection {
+    pub(crate) unwrap_field: String,
+    pub(crate) map_field: Option<String>,
 }
 
 impl TypeRef {

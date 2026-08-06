@@ -3,20 +3,24 @@ use std::collections::BTreeSet;
 use oas3::{
     Map as OasMap,
     spec::{
-        ObjectOrReference, Operation as OasOperation, Parameter as OasParameter,
-        ParameterIn as OasParameterIn, RequestBody as OasRequestBody, Response as OasResponse,
-        Schema as OasSchema,
+        ObjectOrReference, ObjectSchema as OasObjectSchema, Operation as OasOperation,
+        Parameter as OasParameter, ParameterIn as OasParameterIn, RequestBody as OasRequestBody,
+        Response as OasResponse, Schema as OasSchema, SchemaType as OasSchemaType,
     },
 };
 
 use super::super::helpers::{json_media_type, optional_description};
+use super::super::reference::schema_type_and_nullable;
 use super::super::resolve::ResolvedDocument;
-use super::super::satay::operation_options;
+use super::super::satay::{SatayOperationOptions, SatayOutputOptions, operation_options};
 use super::schema::{
     inline_union_null_branch, reject_any_of_sibling_keywords, reject_plain_one_of_sibling_keywords,
     schema_uses_all_of, schema_uses_any_of, validate_type_schema,
 };
-use super::{ValidatedOperation, ValidatedParameter, ValidatedRequestBody, ValidatedResponse};
+use super::{
+    ValidatedOperation, ValidatedParameter, ValidatedRequestBody, ValidatedResponse,
+    ValidatedResponseProjection, ValidatedType, ValidatedTypeKind,
+};
 use crate::error::ValidationError;
 use crate::model::{HttpMethod, ParameterLocation, PathSegment, ResponseStatus};
 
@@ -35,7 +39,7 @@ pub(super) fn validate_operations(
         let path_item = document.resolve_path_item(path_item, &format!("path item `{path}`"))?;
 
         let mut present = 0usize;
-        let mut retained: Vec<(HttpMethod, &OasOperation, String)> = vec![];
+        let mut retained: Vec<(HttpMethod, &OasOperation, String, SatayOperationOptions)> = vec![];
 
         for (method, operation) in [
             (HttpMethod::Get, path_item.get.as_ref()),
@@ -55,10 +59,12 @@ pub(super) fn validate_operations(
                 .operation_id
                 .clone()
                 .unwrap_or_else(|| inferred_operation_id(method, path));
-            if operation_satay_skip(operation, &operation_id)? {
+            let context = format!("operation `{operation_id}`");
+            let options = operation_options(operation, &context)?.unwrap_or_default();
+            if options.skip {
                 continue;
             }
-            retained.push((method, operation, operation_id));
+            retained.push((method, operation, operation_id, options));
         }
 
         // Path has operations and every one is skipped: do not validate the
@@ -73,7 +79,7 @@ pub(super) fn validate_operations(
             &format!("path item `{path}` parameters"),
         )?;
 
-        for (method, operation, operation_id) in retained {
+        for (method, operation, operation_id, options) in retained {
             operations.push(validate_operation(
                 document,
                 method,
@@ -81,6 +87,7 @@ pub(super) fn validate_operations(
                 &path_parameters,
                 operation,
                 operation_id,
+                options,
             )?);
         }
     }
@@ -95,6 +102,7 @@ fn validate_operation(
     path_parameters: &[ValidatedParameter],
     operation: &OasOperation,
     operation_id: String,
+    options: SatayOperationOptions,
 ) -> Result<ValidatedOperation, ValidationError> {
     let mut parameters = path_parameters.to_vec();
 
@@ -123,7 +131,14 @@ fn validate_operation(
         document,
         responses,
         &format!("operation `{operation_id}` responses"),
+        options.output.as_ref(),
     )?;
+
+    if options.output.is_some() && responses.iter().all(|response| response.body.is_none()) {
+        return Err(ValidationError::SatayOutputRequiresResponseBody {
+            operation_id: operation_id.clone(),
+        });
+    }
 
     Ok(ValidatedOperation {
         operation_id,
@@ -368,6 +383,7 @@ fn validate_responses(
     document: &ResolvedDocument<'_>,
     responses: &OasMap<String, ObjectOrReference<OasResponse>>,
     context: &str,
+    output: Option<&SatayOutputOptions>,
 ) -> Result<Vec<ValidatedResponse>, ValidationError> {
     let mut parsed = vec![];
 
@@ -403,8 +419,8 @@ fn validate_responses(
 
         let response = document.resolve(response, &format!("{context} {status}"))?;
 
-        let body = if response.content.is_empty() {
-            None
+        let (body, projection) = if response.content.is_empty() {
+            (None, None)
         } else {
             let (_, media_type) = json_media_type(&response.content).ok_or_else(|| {
                 ValidationError::MissingResponseJsonContent {
@@ -412,29 +428,135 @@ fn validate_responses(
                     status: status.to_owned(),
                 }
             })?;
-            media_type
-                .schema
-                .as_ref()
-                .map(|schema| {
-                    validate_type_schema(
-                        document,
-                        schema,
-                        &format!("{context} {status} schema"),
-                        false,
-                    )
-                })
-                .transpose()?
+            match media_type.schema.as_ref() {
+                Some(schema) => {
+                    let context = format!("{context} {status} schema");
+                    let body = match output {
+                        Some(output) => {
+                            validate_projected_response_type(document, schema, output, &context)?
+                        }
+                        None => validate_type_schema(document, schema, &context, false)?,
+                    };
+                    let projection = output.map(|output| ValidatedResponseProjection {
+                        unwrap_field: output.unwrap_field.as_str().to_owned(),
+                        map_field: output
+                            .map_field
+                            .as_ref()
+                            .map(|field| field.as_str().to_owned()),
+                    });
+                    (Some(body), projection)
+                }
+                None => (None, None),
+            }
         };
 
         parsed.push(ValidatedResponse {
             status: parsed_status,
             description: optional_description(&response.description),
             body,
+            projection,
         });
     }
 
     parsed.sort_by_key(|response| response.status);
     Ok(parsed)
+}
+
+fn validate_projected_response_type(
+    document: &ResolvedDocument<'_>,
+    response_schema: &OasSchema,
+    output: &SatayOutputOptions,
+    context: &str,
+) -> Result<ValidatedType, ValidationError> {
+    let wrapper = projected_object_schema(document, response_schema, context, "unwrap-field")?;
+    let unwrap_field = output.unwrap_field.as_str();
+    let unwrapped = wrapper.properties.get(unwrap_field).ok_or_else(|| {
+        ValidationError::UnknownSatayOutputField {
+            context: context.to_owned(),
+            selector: "unwrap-field",
+            field: unwrap_field.to_owned(),
+        }
+    })?;
+    let unwrap_required = wrapper.required.iter().any(|field| field == unwrap_field);
+
+    let Some(map_field) = output.map_field.as_ref() else {
+        let mut ty = validate_type_schema(document, unwrapped, context, false)?;
+        if !unwrap_required {
+            ty.nullable = true;
+        }
+        return Ok(ty);
+    };
+
+    let array_schema = document.resolve_schema(unwrapped, context)?;
+    let array =
+        array_schema
+            .as_object()
+            .ok_or_else(|| ValidationError::SatayOutputMapRequiresArray {
+                context: context.to_owned(),
+                field: unwrap_field.to_owned(),
+            })?;
+    let (schema_type, _) = schema_type_and_nullable(array, context)?;
+    if schema_type != Some(OasSchemaType::Array) {
+        return Err(ValidationError::SatayOutputMapRequiresArray {
+            context: context.to_owned(),
+            field: unwrap_field.to_owned(),
+        });
+    }
+    let items = array
+        .items
+        .as_deref()
+        .ok_or_else(|| ValidationError::MissingArrayItems {
+            context: context.to_owned(),
+        })?;
+    let item = projected_object_schema(document, items, context, "map-field")?;
+    let map_field = map_field.as_str();
+    let mapped =
+        item.properties
+            .get(map_field)
+            .ok_or_else(|| ValidationError::UnknownSatayOutputField {
+                context: context.to_owned(),
+                selector: "map-field",
+                field: map_field.to_owned(),
+            })?;
+    let map_required = item.required.iter().any(|field| field == map_field);
+
+    let mut projected_array = array.clone();
+    projected_array.items = Some(Box::new(mapped.clone()));
+    let projected_array = OasSchema::Object(Box::new(projected_array));
+    let mut ty = validate_type_schema(document, &projected_array, context, false)?;
+    if !unwrap_required {
+        ty.nullable = true;
+    }
+    let ValidatedTypeKind::Array(item) = &mut ty.kind else {
+        unreachable!("projected array schema validates as an array")
+    };
+    if !map_required {
+        item.nullable = true;
+    }
+    Ok(ty)
+}
+
+fn projected_object_schema<'a>(
+    document: &'a ResolvedDocument<'_>,
+    schema: &'a OasSchema,
+    context: &str,
+    selector: &'static str,
+) -> Result<&'a OasObjectSchema, ValidationError> {
+    let schema = document.resolve_schema(schema, context)?;
+    let object = schema
+        .as_object()
+        .ok_or_else(|| ValidationError::SatayOutputExpectedObject {
+            context: context.to_owned(),
+            selector,
+        })?;
+    let (schema_type, _) = schema_type_and_nullable(object, context)?;
+    if !matches!(schema_type, Some(OasSchemaType::Object) | None) || object.properties.is_empty() {
+        return Err(ValidationError::SatayOutputExpectedObject {
+            context: context.to_owned(),
+            selector,
+        });
+    }
+    Ok(object)
 }
 
 /// Matches OpenAPI wildcard response keys `1XX`..`5XX` (uppercase only).

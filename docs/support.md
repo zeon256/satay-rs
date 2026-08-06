@@ -16,6 +16,7 @@ Satay targets OpenAPI 3.1.x and a small, typed subset.
 - `allOf` object schemas whose branches are local component object references or inline object branches, rendered by flattening branch fields into one Rust struct. Component `allOf` uses the component name; nested JSON schemas such as object properties, array items, request bodies, and response bodies generate named inline structs. Annotation-only `allOf` wrappers around a single local `$ref` (only `title`/`description`/examples/non-Satay vendor-extension siblings) unwrap to the referenced component in `anyOf`/`oneOf` branches (any target) and in nested type positions when the target is not a struct-shaped component; struct targets keep field flattening. Flattened object branches that declare `properties` ignore an `additionalProperties` allowance, matching plain component structs; propertyless object branches still reject it.
 - Operations for standard HTTP methods with explicit `operationId`, or inferred names from method + path.
 - Satay-specific operation-level `x-satay.skip` hints for excluding unsupported operations and their skipped-only component schemas from generation.
+- Satay-specific operation-level `x-satay.output` response projection, selecting a top-level `unwrap-field` and optionally mapping one field from every item of an unwrapped array.
 - Path, query, and header parameters declared with `schema`.
 - Path-level parameters with operation-level overrides.
 - JSON request bodies using `application/json` or structured JSON media types such as `application/problem+json`.

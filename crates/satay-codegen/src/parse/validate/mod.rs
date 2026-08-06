@@ -235,6 +235,13 @@ pub(crate) struct ValidatedResponse {
     pub(crate) status: ResponseStatus,
     pub(crate) description: Option<String>,
     pub(crate) body: Option<ValidatedType>,
+    pub(crate) projection: Option<ValidatedResponseProjection>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ValidatedResponseProjection {
+    pub(crate) unwrap_field: String,
+    pub(crate) map_field: Option<String>,
 }
 
 pub(crate) fn validate_document<'a>(

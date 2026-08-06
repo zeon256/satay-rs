@@ -531,6 +531,7 @@ mod tests {
                     variant_name: "Created".to_owned(),
                     description: None,
                     body: Some(TypeRef::Named("Pet".to_owned())),
+                    projection: None,
                 }],
             }],
         );

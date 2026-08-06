@@ -21,11 +21,56 @@ paths:
           description: Uploaded
 ```
 
-Skipped operations are not validated or generated. `skip: false` keeps normal behavior. The operation-level `x-satay` value must be an object containing only a boolean `skip` key.
+Skipped operations are not validated or generated. `skip: false` keeps normal behavior. The operation-level `x-satay` value must be an object containing supported operation keys such as `skip` and `output`.
 
 When every operation on a path is skipped, Satay also skips the path-level parameters. Component schemas reachable only from skipped operations are excluded from validation and generation, including transitive references. A schema remains included when a retained operation or an otherwise unreferenced component needs it, preventing dangling generated references.
 
 Skipping does not bypass OpenAPI parsing or the document's reference-resolution pass. The document must still be structurally valid.
+
+## `output`
+
+Use operation-level `x-satay.output` when the JSON response has a wire wrapper but the generated public response should contain a nested payload directly. `unwrap-field` selects one field from the top-level response object:
+
+```yaml
+paths:
+  /BusServices:
+    get:
+      operationId: getBusServices
+      x-satay:
+        output:
+          unwrap-field: value
+      responses:
+        "200":
+          description: Bus services
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BusServicesEnvelope"
+```
+
+For a wire response such as:
+
+```json
+{
+  "odata.metadata": "https://example.test/metadata",
+  "value": [{ "ServiceNo": "10" }]
+}
+```
+
+the generated success response carries the schema type of `value`, such as `Vec<BusService>`, rather than `BusServicesEnvelope`.
+
+Add `map-field` when the unwrapped field is an array of objects and the public payload should contain one field from every item:
+
+```yaml
+x-satay:
+  output:
+    unwrap-field: value
+    map-field: Link
+```
+
+This projects `{"value": [{"Link": "a"}, {"Link": "b"}]}` into `Vec<String>`. Both selectors must be non-empty and must match declared schema properties. `map-field` requires the unwrapped schema to be an array whose item schema is an object. Optional selected fields become `Option` at the corresponding level. The projection applies to every declared JSON response body for the operation; bodyless responses remain bodyless. An operation with `output` but no JSON response body is rejected.
+
+Generated JSON decoders validate the response's container shape before deserializing the projected payload. Missing selected fields become JSON `null`, so required projected types fail normal serde validation while optional projected types decode as `None`.
 
 ## Standard `unixtime` Format
 

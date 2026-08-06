@@ -231,6 +231,62 @@ where
     Ok(serde_json::from_slice(body)?)
 }
 
+/// Deserializes a projected JSON response body from bytes.
+///
+/// The top-level `unwrap_field` is selected first. When `map_field` is set, the
+/// unwrapped value must be an array of objects and that field is selected from
+/// every item. Missing fields become JSON `null`, allowing the projected Rust
+/// type's normal serde rules to distinguish optional and required values.
+///
+/// # Errors
+///
+/// Returns an error when the response does not have the configured container
+/// shape or when the projected JSON cannot be deserialized as `T`.
+#[cfg(feature = "json")]
+#[instrument(skip_all)]
+pub fn from_projected_json_slice<T>(
+    body: &[u8],
+    unwrap_field: &str,
+    map_field: Option<&str>,
+) -> Result<T, Error>
+where
+    T: de::DeserializeOwned,
+{
+    debug!(
+        unwrap_field,
+        map_field, "deserializing projected JSON response"
+    );
+    let mut value = serde_json::from_slice::<JsonValue>(body)?;
+    let object = value.as_object_mut().ok_or(Error::InvalidResponse(
+        "response projection expected a top-level JSON object",
+    ))?;
+    let mut projected = object.remove(unwrap_field).unwrap_or(JsonValue::Null);
+
+    if let Some(map_field) = map_field {
+        projected = match projected {
+            JsonValue::Null => JsonValue::Null,
+            JsonValue::Array(items) => JsonValue::Array(
+                items
+                    .into_iter()
+                    .map(|mut item| {
+                        let object = item.as_object_mut().ok_or(Error::InvalidResponse(
+                            "response projection expected array items to be JSON objects",
+                        ))?;
+                        Ok(object.remove(map_field).unwrap_or(JsonValue::Null))
+                    })
+                    .collect::<Result<Vec<_>, Error>>()?,
+            ),
+            _ => {
+                return Err(Error::InvalidResponse(
+                    "response projection expected the unwrapped field to be a JSON array",
+                ));
+            }
+        };
+    }
+
+    Ok(serde_json::from_value(projected)?)
+}
+
 pub fn append_path_segment(out: &mut String, value: &str) {
     append_percent_encoded(out, value.as_bytes());
 }
@@ -1854,6 +1910,63 @@ mod tests {
         assert_eq!(parts.status, http::StatusCode::OK);
         assert_eq!(parts.headers.get(CONTENT_TYPE).unwrap(), "application/json");
         assert_eq!(parts.body, br#"{"ok":true}"#);
+    }
+
+    #[cfg(feature = "json")]
+    #[test]
+    fn projected_json_unwraps_and_maps_fields() {
+        let body = br#"{
+            "odata.metadata": "https://example.test/metadata",
+            "value": [
+                {"Link": "https://example.test/a", "Name": "A"},
+                {"Link": "https://example.test/b", "Name": "B"}
+            ]
+        }"#;
+
+        let rows = from_projected_json_slice::<Vec<JsonValue>>(body, "value", None).unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["Name"], "A");
+
+        let links = from_projected_json_slice::<Vec<String>>(body, "value", Some("Link")).unwrap();
+        assert_eq!(
+            links,
+            vec![
+                "https://example.test/a".to_owned(),
+                "https://example.test/b".to_owned()
+            ]
+        );
+    }
+
+    #[cfg(feature = "json")]
+    #[test]
+    fn projected_json_preserves_optional_missing_fields_as_null() {
+        let missing = br#"{"metadata":"present"}"#;
+        let value = from_projected_json_slice::<Option<Vec<String>>>(missing, "value", None)
+            .expect("optional missing projection");
+        assert_eq!(value, None);
+
+        let rows = br#"{"value":[{}, {"Link":"present"}]}"#;
+        let links = from_projected_json_slice::<Vec<Option<String>>>(rows, "value", Some("Link"))
+            .expect("optional mapped field");
+        assert_eq!(links, vec![None, Some("present".to_owned())]);
+    }
+
+    #[cfg(feature = "json")]
+    #[test]
+    fn projected_json_rejects_invalid_container_shapes() {
+        let scalar = from_projected_json_slice::<Vec<String>>(
+            br#"{"value":"not-an-array"}"#,
+            "value",
+            Some("Link"),
+        );
+        assert!(matches!(scalar, Err(Error::InvalidResponse(_))));
+
+        let scalar_item = from_projected_json_slice::<Vec<String>>(
+            br#"{"value":["not-an-object"]}"#,
+            "value",
+            Some("Link"),
+        );
+        assert!(matches!(scalar_item, Err(Error::InvalidResponse(_))));
     }
 
     #[cfg(all(feature = "serde", feature = "json"))]

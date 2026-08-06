@@ -1066,6 +1066,213 @@ paths:
 }
 
 #[test]
+fn projects_operation_response_payload_types() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /services:
+    get:
+      operationId: getServices
+      x-satay:
+        output:
+          unwrap-field: value
+      responses:
+        '200':
+          description: Services
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceEnvelope'
+  /links:
+    get:
+      operationId: getLinks
+      x-satay:
+        output:
+          unwrap-field: value
+          map-field: Link
+      responses:
+        '200':
+          description: Links
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LinkEnvelope'
+components:
+  schemas:
+    ServiceEnvelope:
+      type: object
+      required: [value]
+      properties:
+        odata.metadata:
+          type: string
+        value:
+          type: array
+          items:
+            $ref: '#/components/schemas/Service'
+    Service:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+    LinkEnvelope:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: array
+          items:
+            $ref: '#/components/schemas/LinkRow'
+    LinkRow:
+      type: object
+      required: [Link]
+      properties:
+        Link:
+          type: string
+"#,
+    );
+
+    let services = api
+        .operations
+        .iter()
+        .find(|operation| operation.fn_name == "get_services")
+        .expect("services operation");
+    let response = &services.responses[0];
+    assert_eq!(
+        response.body,
+        Some(TypeRef::Array(Box::new(TypeRef::Named(
+            "Service".to_owned()
+        ))))
+    );
+    let projection = response.projection.as_ref().expect("projection");
+    assert_eq!(projection.unwrap_field, "value");
+    assert_eq!(projection.map_field, None);
+
+    let links = api
+        .operations
+        .iter()
+        .find(|operation| operation.fn_name == "get_links")
+        .expect("links operation");
+    let response = &links.responses[0];
+    assert_eq!(
+        response.body,
+        Some(TypeRef::Array(Box::new(TypeRef::String)))
+    );
+    let projection = response.projection.as_ref().expect("projection");
+    assert_eq!(projection.unwrap_field, "value");
+    assert_eq!(projection.map_field.as_deref(), Some("Link"));
+}
+
+#[test]
+fn rejects_unknown_x_satay_output_fields() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /services:
+    get:
+      operationId: getServices
+      x-satay:
+        output:
+          unwrap-field: missing
+      responses:
+        '200':
+          description: Services
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  value:
+                    type: array
+                    items:
+                      type: string
+"#,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::UnknownSatayOutputField {
+            context,
+            selector: "unwrap-field",
+            field,
+        } if context == "operation `getServices` responses 200 schema" && field == "missing"
+    ));
+}
+
+#[test]
+fn rejects_x_satay_output_map_field_for_non_array_payload() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /link:
+    get:
+      operationId: getLink
+      x-satay:
+        output:
+          unwrap-field: value
+          map-field: Link
+      responses:
+        '200':
+          description: Link
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [value]
+                properties:
+                  value:
+                    type: string
+"#,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::SatayOutputMapRequiresArray { context, field }
+            if context == "operation `getLink` responses 200 schema" && field == "value"
+    ));
+}
+
+#[test]
+fn rejects_x_satay_output_without_a_json_response_body() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /health:
+    get:
+      operationId: health
+      x-satay:
+        output:
+          unwrap-field: value
+      responses:
+        '204':
+          description: No content
+"#,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::SatayOutputRequiresResponseBody { operation_id }
+            if operation_id == "health"
+    ));
+}
+
+#[test]
 fn skips_component_schema_used_only_by_skipped_operation() {
     let api = parse_valid(
         r#"
