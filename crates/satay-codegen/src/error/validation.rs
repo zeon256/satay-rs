@@ -654,6 +654,41 @@ pub enum ValidationError {
     #[error("{context} {status} response must declare application/json content")]
     MissingResponseJsonContent { context: String, status: String },
 
+    /// `x-satay.output` was configured on an operation with no JSON response body.
+    ///
+    /// Error message: `operation `{operation_id}` uses x-satay.output but has no JSON response body`
+    #[error("operation `{operation_id}` uses x-satay.output but has no JSON response body")]
+    SatayOutputRequiresResponseBody { operation_id: String },
+
+    /// A response projection selector was applied to a schema that is not an object with fields.
+    ///
+    /// Error message: `{context} cannot apply x-satay.output.{selector}; expected an object schema with properties`
+    #[error(
+        "{context} cannot apply x-satay.output.{selector}; expected an object schema with properties"
+    )]
+    SatayOutputExpectedObject {
+        context: String,
+        selector: &'static str,
+    },
+
+    /// A response projection selector names a field absent from its object schema.
+    ///
+    /// Error message: `{context} x-satay.output.{selector} `{field}` does not match a declared property`
+    #[error("{context} x-satay.output.{selector} `{field}` does not match a declared property")]
+    UnknownSatayOutputField {
+        context: String,
+        selector: &'static str,
+        field: String,
+    },
+
+    /// `x-satay.output.map-field` follows an unwrapped value that is not an array.
+    ///
+    /// Error message: `{context} cannot apply x-satay.output.map-field after `{field}`; the unwrapped schema must be an array`
+    #[error(
+        "{context} cannot apply x-satay.output.map-field after `{field}`; the unwrapped schema must be an array"
+    )]
+    SatayOutputMapRequiresArray { context: String, field: String },
+
     /// A path template contains a parameter that is never closed.
     ///
     /// Error message: `path `{path}` contains an unclosed parameter`

@@ -52,10 +52,11 @@ fn render_decode_arm(response: &ResponseCase, response_name: &syn::Ident) -> syn
             match &response.body {
                 Some(body) => {
                     let body = rust_type(body);
+                    let decode = render_decode_body(response, &body);
                     parse_quote!(
                         #status => {
                             let body = response.body;
-                            let value = satay_runtime::from_json_slice::<#body>(body.as_ref())?;
+                            let value = #decode;
                             Ok(#response_name::#variant(value))
                         }
                     )
@@ -75,10 +76,11 @@ fn render_decode_arm(response: &ResponseCase, response_name: &syn::Ident) -> syn
             match &response.body {
                 Some(body) => {
                     let body = rust_type(body);
+                    let decode = render_decode_body(response, &body);
                     parse_quote!(
                         #lo..=#hi => {
                             let body = response.body;
-                            let value = satay_runtime::from_json_slice::<#body>(body.as_ref())?;
+                            let value = #decode;
                             Ok(#response_name::#variant(status, value))
                         }
                     )
@@ -91,4 +93,23 @@ fn render_decode_arm(response: &ResponseCase, response_name: &syn::Ident) -> syn
             }
         }
     }
+}
+
+fn render_decode_body(response: &ResponseCase, body: &syn::Type) -> syn::Expr {
+    let Some(projection) = response.projection.as_ref() else {
+        return parse_quote!(satay_runtime::from_json_slice::<#body>(body.as_ref())?);
+    };
+
+    let unwrap_field = &projection.unwrap_field;
+    let map_field: syn::Expr = match projection.map_field.as_ref() {
+        Some(map_field) => parse_quote!(Some(#map_field)),
+        None => parse_quote!(None),
+    };
+    parse_quote!(
+        satay_runtime::from_projected_json_slice::<#body>(
+            body.as_ref(),
+            #unwrap_field,
+            #map_field,
+        )?
+    )
 }

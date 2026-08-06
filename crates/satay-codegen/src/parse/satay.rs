@@ -45,19 +45,12 @@ impl SataySchemaOptions {
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) struct SatayOperationOptions {
+    #[serde(default)]
     pub(crate) skip: bool,
-    #[allow(
-        dead_code,
-        reason = "centralized wire contract for response projection consumers"
-    )]
     pub(crate) output: Option<SatayOutputOptions>,
 }
 
 /// Wire selectors for projecting an operation response.
-#[allow(
-    dead_code,
-    reason = "centralized wire contract for response projection consumers"
-)]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) struct SatayOutputOptions {
@@ -70,10 +63,6 @@ pub(crate) struct SatayOutputOptions {
 #[serde(try_from = "String")]
 pub(crate) struct SatayFieldName(String);
 
-#[allow(
-    dead_code,
-    reason = "centralized wire contract for response projection consumers"
-)]
 impl SatayFieldName {
     pub(crate) fn as_str(&self) -> &str {
         &self.0

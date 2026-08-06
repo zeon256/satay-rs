@@ -159,6 +159,8 @@ pub(crate) struct SatayParameterGroup {
 
 `validate/operation.rs` would resolve those wire names to validated parameter indices. Lowering and rendering would consume only those resolved values and would not parse extension JSON directly. This documents the intended extension path; parameter-group behavior is not implemented yet.
 
+Operation response projection follows the same boundary. `validate/operation.rs` resolves `x-satay.output` selectors against response schemas and records the projected `ValidatedType`; lowering carries only validated selector names and the projected payload type into `ResponseCase`. Generated JSON decoders call `satay_runtime::from_projected_json_slice` to select the wire payload before normal serde deserialization. Rendering never revisits the OpenAPI extension value.
+
 Unsupported OpenAPI features are rejected with `ValidationError` instead of being ignored. Lowering and rendering rely on those validation guarantees and use `unreachable!` or `expect` for states that validation should have made impossible.
 
 ## Lowering Stage

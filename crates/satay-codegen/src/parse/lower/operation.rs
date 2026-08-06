@@ -11,7 +11,8 @@ use crate::ident::{
 };
 use crate::model::{
     ApiGroup, ApiKeyLocation, ApiKeySecurityScheme, GroupOperation, Operation as SatayOperation,
-    Parameter, ParameterLocation, RequestBody, ResponseCase, ResponseStatus, is_array_type,
+    Parameter, ParameterLocation, RequestBody, ResponseCase, ResponseProjection, ResponseStatus,
+    is_array_type,
 };
 use crate::parse::registry::TypeRegistry;
 use crate::parse::validate::{
@@ -366,5 +367,12 @@ fn parse_response(
                 registry,
             )
         }),
+        projection: response
+            .projection
+            .as_ref()
+            .map(|projection| ResponseProjection {
+                unwrap_field: projection.unwrap_field.clone(),
+                map_field: projection.map_field.clone(),
+            }),
     }
 }
