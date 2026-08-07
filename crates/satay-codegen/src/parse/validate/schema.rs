@@ -18,8 +18,8 @@ use super::super::resolve::ResolvedDocument;
 use super::super::satay::schema_options;
 use super::constraint::{parse_integer_type, parse_validation, reject_keyword};
 use super::satay::{
-    ValidatedParseAs, ValidatedSataySchema, validate_component_enum_satay,
-    validate_type_enum_satay, validate_type_satay,
+    ValidatedParseAs, ValidatedSataySchema, reject_ignore_outside_object_property,
+    validate_component_enum_satay, validate_type_enum_satay, validate_type_satay,
 };
 use super::{
     ValidatedComponent, ValidatedComponentKind, ValidatedField, ValidatedType, ValidatedTypeKind,
@@ -76,23 +76,17 @@ pub(super) fn validate_type_schema(
     document: &ResolvedDocument<'_>,
     schema: &OasSchema,
     context: &str,
-    allow_treat_error_as_none: bool,
+    allow_field_options: bool,
 ) -> Result<ValidatedType, ValidationError> {
     let mut stack = vec![];
-    validate_type_schema_with_stack(
-        document,
-        schema,
-        context,
-        allow_treat_error_as_none,
-        &mut stack,
-    )
+    validate_type_schema_with_stack(document, schema, context, allow_field_options, &mut stack)
 }
 
 fn validate_type_schema_with_stack(
     document: &ResolvedDocument<'_>,
     schema: &OasSchema,
     context: &str,
-    allow_treat_error_as_none: bool,
+    allow_field_options: bool,
     stack: &mut Vec<String>,
 ) -> Result<ValidatedType, ValidationError> {
     reject_preserved_unknown_keywords(schema, context)?;
@@ -104,8 +98,7 @@ fn validate_type_schema_with_stack(
                 .ok_or_else(|| ValidationError::UnsupportedBooleanSchema {
                     context: context.to_owned(),
                 })?;
-        let validated_satay =
-            validate_reference_siblings(schema, context, allow_treat_error_as_none)?;
+        let validated_satay = validate_reference_siblings(schema, context, allow_field_options)?;
         let description = match optional_description(&schema.description) {
             Some(description) => Some(description),
             None => referenced_schema_description(document, reference)?,
@@ -113,6 +106,7 @@ fn validate_type_schema_with_stack(
         let mut ty = ValidatedType::named(schema_ref_type_name(reference)?);
         ty.description = description;
         ty.treat_error_as_none = validated_satay.treat_error_as_none;
+        ty.ignore = validated_satay.ignore;
         return Ok(ty);
     }
 
@@ -145,6 +139,7 @@ fn validate_type_schema_with_stack(
             description: optional_description(&schema.description),
             treat_error_as_none: false,
             none_if: vec![],
+            ignore: false,
         });
     }
     let (schema_type, nullable) = schema_type_and_nullable(schema, context)?;
@@ -155,7 +150,7 @@ fn validate_type_schema_with_stack(
         schema_type,
         nullable,
         context,
-        allow_treat_error_as_none,
+        allow_field_options,
         stack,
     )
 }
@@ -163,7 +158,7 @@ fn validate_type_schema_with_stack(
 fn validate_reference_siblings(
     schema: &OasObjectSchema,
     context: &str,
-    allow_treat_error_as_none: bool,
+    allow_field_options: bool,
 ) -> Result<ValidatedSataySchema, ValidationError> {
     if let Some(keyword) = unsupported_reference_schema_keyword(schema) {
         return Err(ValidationError::UnsupportedRefSiblingKeyword {
@@ -199,14 +194,14 @@ fn validate_reference_siblings(
             keyword: format!("x-satay.{keyword}"),
         });
     }
-    if options.treat_error_as_none.is_some() && !allow_treat_error_as_none {
+    if options.treat_error_as_none.is_some() && !allow_field_options {
         return Err(ValidationError::UnsupportedRefSiblingKeyword {
             context: context.to_owned(),
             keyword: "x-satay.treat-error-as-none".to_owned(),
         });
     }
 
-    validate_type_satay(schema, None, context, allow_treat_error_as_none)
+    validate_type_satay(schema, None, context, allow_field_options)
 }
 
 fn unsupported_reference_schema_keyword(schema: &OasObjectSchema) -> Option<&str> {
@@ -309,6 +304,9 @@ fn validate_component_schema(
 ) -> Result<ValidatedComponent, ValidationError> {
     let context = format!("schema `{schema_name}`");
     reject_preserved_unknown_keywords(schema, &context)?;
+    if let Some(schema) = schema.as_object() {
+        reject_ignore_outside_object_property(schema, &context)?;
+    }
     let kind = if let Some(reference) = schema.reference() {
         let schema =
             schema
@@ -356,6 +354,7 @@ fn validate_component_schema(
                     description: optional_description(&schema.description),
                     treat_error_as_none: false,
                     none_if: vec![],
+                    ignore: false,
                 })
             } else {
                 match schema_type {
@@ -484,6 +483,7 @@ fn validate_union_type_schema(
             description: optional_description(&schema.description),
             treat_error_as_none: false,
             none_if: vec![],
+            ignore: false,
         });
     }
 
@@ -517,6 +517,7 @@ fn validate_union_type_schema(
         description: optional_description(&schema.description),
         treat_error_as_none: false,
         none_if: vec![],
+        ignore: false,
     })
 }
 
@@ -646,6 +647,7 @@ fn validate_open_string_enum_any_of(
         description: optional_description(&schema.description).or(branch_description),
         treat_error_as_none: false,
         none_if: vec![],
+        ignore: false,
     }))
 }
 
@@ -1057,6 +1059,7 @@ fn validate_nested_discriminator_union_branch(
         description: optional_description(&schema.description),
         treat_error_as_none: false,
         none_if: vec![],
+        ignore: false,
     };
     Ok(PlainUnionBranch::Variant(Box::new(ValidatedUnionVariant {
         rust_name: unique_ident("Union".to_owned(), used),
@@ -1104,6 +1107,7 @@ fn validate_inline_plain_union_branch(
             description: optional_description(&schema.description),
             treat_error_as_none: false,
             none_if: vec![],
+            ignore: false,
         };
         let rust_name = inline_union_enum_variant_name(&ty)
             .expect("validated inline union enum branch has at least one variant");
@@ -1738,6 +1742,10 @@ fn embedded_discriminator_value(
     let Some(field) = fields.iter().find(|field| field.wire_name == property_name) else {
         return Ok(None);
     };
+
+    if field.ty.ignore {
+        return Ok(None);
+    }
 
     if !field.required
         || field.treat_error_as_none
@@ -2585,12 +2593,11 @@ fn validate_object_type_schema(
     schema_type: Option<OasSchemaType>,
     nullable: bool,
     context: &str,
-    allow_treat_error_as_none: bool,
+    allow_field_options: bool,
     stack: &mut Vec<String>,
 ) -> Result<ValidatedType, ValidationError> {
     let description = optional_description(&schema.description);
-    let validated_satay =
-        validate_type_satay(schema, schema_type, context, allow_treat_error_as_none)?;
+    let validated_satay = validate_type_satay(schema, schema_type, context, allow_field_options)?;
 
     if let Some(parse_as) = validated_satay.parse_as {
         return Ok(ValidatedType {
@@ -2600,6 +2607,7 @@ fn validate_object_type_schema(
             description,
             treat_error_as_none: validated_satay.treat_error_as_none,
             none_if: validated_satay.none_if,
+            ignore: validated_satay.ignore,
         });
     }
 
@@ -2619,6 +2627,7 @@ fn validate_object_type_schema(
             description,
             treat_error_as_none: validated_satay.treat_error_as_none,
             none_if: validated_satay.none_if,
+            ignore: validated_satay.ignore,
         });
     }
 
@@ -2642,6 +2651,7 @@ fn validate_object_type_schema(
         description,
         treat_error_as_none: validated_satay.treat_error_as_none,
         none_if: validated_satay.none_if,
+        ignore: validated_satay.ignore,
     })
 }
 
@@ -2710,6 +2720,7 @@ fn validate_inline_type_kind(
                     description: None,
                     treat_error_as_none: false,
                     none_if: vec![],
+                    ignore: false,
                 })))
             }
             Some(value @ OasSchema::Object(_)) => {

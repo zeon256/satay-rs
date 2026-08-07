@@ -5,8 +5,8 @@ use serde_json::Value as JsonValue;
 
 use super::super::reference::schema_type_wire;
 use super::super::satay::{
-    parse_range_scalar, parse_satay_enum_variants, parse_satay_integer_type, parse_satay_parse_as,
-    satay_parse_as_wire, schema_options, validate_satay_integer_type,
+    SataySchemaOptions, parse_range_scalar, parse_satay_enum_variants, parse_satay_integer_type,
+    parse_satay_parse_as, satay_parse_as_wire, schema_options, validate_satay_integer_type,
 };
 use crate::error::ValidationError;
 use crate::model::{IntegerType, ParseAs, RangeScalar};
@@ -25,6 +25,15 @@ pub(crate) struct ValidatedSataySchema {
     pub(crate) enum_variants: BTreeMap<String, String>,
     pub(crate) treat_error_as_none: bool,
     pub(crate) none_if: Vec<String>,
+    pub(crate) ignore: bool,
+}
+
+pub(super) fn reject_ignore_outside_object_property(
+    schema: &OasObjectSchema,
+    context: &str,
+) -> Result<(), ValidationError> {
+    let options = schema_options(schema, context)?.unwrap_or_default();
+    validate_ignore(&options, context, false).map(|_| ())
 }
 
 pub(super) fn validate_component_enum_satay(
@@ -42,7 +51,7 @@ pub(super) fn validate_type_satay(
     schema: &OasObjectSchema,
     schema_type: Option<OasSchemaType>,
     context: &str,
-    allow_treat_error_as_none: bool,
+    allow_field_options: bool,
 ) -> Result<ValidatedSataySchema, ValidationError> {
     let options = schema_options(schema, context)?.unwrap_or_default();
     let parse_as = parse_satay_parse_as(&options);
@@ -56,8 +65,8 @@ pub(super) fn validate_type_satay(
         Some(values) => values.clone(),
         None => vec![],
     };
-    let treat_error_as_none =
-        allow_treat_error_as_none && options.treat_error_as_none.unwrap_or(false);
+    let treat_error_as_none = allow_field_options && options.treat_error_as_none.unwrap_or(false);
+    let ignore = validate_ignore(&options, context, allow_field_options)?;
 
     validate_satay_integer_type(schema_type, parse_as, explicit_integer_type, context)?;
 
@@ -92,7 +101,7 @@ pub(super) fn validate_type_satay(
         None
     };
 
-    if !none_if.is_empty() && !allow_treat_error_as_none {
+    if !none_if.is_empty() && !allow_field_options {
         return Err(ValidationError::SatayNoneIfRequiresStructField {
             context: context.to_owned(),
         });
@@ -113,8 +122,23 @@ pub(super) fn validate_type_satay(
         explicit_integer_type,
         treat_error_as_none,
         none_if,
+        ignore,
         ..ValidatedSataySchema::default()
     })
+}
+
+fn validate_ignore(
+    options: &SataySchemaOptions,
+    context: &str,
+    allow_object_property: bool,
+) -> Result<bool, ValidationError> {
+    if options.ignore.is_some() && !allow_object_property {
+        return Err(ValidationError::SatayIgnoreRequiresObjectProperty {
+            context: context.to_owned(),
+        });
+    }
+
+    Ok(allow_object_property && options.ignore.unwrap_or(false))
 }
 
 pub(super) fn validate_type_enum_satay(
@@ -358,6 +382,28 @@ mod tests {
 
         assert!(allowed.treat_error_as_none);
         assert!(!ignored.treat_error_as_none);
+    }
+
+    #[test]
+    fn validates_ignore_only_on_object_properties() {
+        let schema = schema_with_satay(json!({ "ignore": true }));
+
+        let property =
+            validate_type_satay(&schema, Some(OasSchemaType::String), "User.metadata", true)
+                .unwrap();
+        assert!(property.ignore);
+
+        let error = validation_error(validate_type_satay(
+            &schema,
+            Some(OasSchemaType::String),
+            "schema `Metadata`",
+            false,
+        ));
+        assert!(matches!(
+            error,
+            ValidationError::SatayIgnoreRequiresObjectProperty { context }
+                if context == "schema `Metadata`"
+        ));
     }
 
     #[test]

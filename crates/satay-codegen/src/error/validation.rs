@@ -166,6 +166,12 @@ pub enum ValidationError {
     #[error("{context} cannot combine x-satay.none-if with x-satay.treat-error-as-none")]
     ConflictingSatayNoneHandling { context: String },
 
+    /// `x-satay.ignore` was applied outside an object property.
+    ///
+    /// Error message: `{context} uses x-satay.ignore outside an object property`
+    #[error("{context} uses x-satay.ignore outside an object property")]
+    SatayIgnoreRequiresObjectProperty { context: String },
+
     /// `x-satay.integer-type` was applied to a non-integer schema.
     ///
     /// Error message: `{context} uses x-satay.integer-type `{integer_type}` on `{kind}`; supported integer-type wire schemas are integer schemas and string schemas with x-satay.parse-as integer-range`

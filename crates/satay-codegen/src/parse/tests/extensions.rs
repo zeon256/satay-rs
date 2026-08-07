@@ -482,6 +482,138 @@ components:
 }
 
 #[test]
+fn omits_x_satay_ignored_object_properties() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    MetadataUri:
+      type: string
+      format: uri
+    BusArrivalResponse:
+      type: object
+      additionalProperties: false
+      required: [odata.metadata, nullableMetadata, referencedMetadata, BusStopCode]
+      properties:
+        odata.metadata:
+          type: string
+          format: uri
+          x-satay:
+            ignore: true
+        nullableMetadata:
+          type: [string, "null"]
+          x-satay:
+            ignore: true
+        referencedMetadata:
+          $ref: '#/components/schemas/MetadataUri'
+          x-satay:
+            ignore: true
+        retainedMetadata:
+          type: string
+          x-satay:
+            ignore: false
+        BusStopCode:
+          type: string
+"#,
+    );
+
+    let response = component(&api, "BusArrivalResponse");
+    let ComponentKind::Struct(fields) = &response.kind else {
+        panic!("expected BusArrivalResponse struct");
+    };
+    assert_eq!(fields.len(), 2);
+    assert_eq!(field(fields, "retainedMetadata").ty, TypeRef::String);
+    assert_eq!(field(fields, "BusStopCode").ty, TypeRef::String);
+}
+
+#[test]
+fn rejects_x_satay_ignore_outside_object_properties() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    MetadataUri:
+      type: string
+      x-satay:
+        ignore: true
+"#,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::SatayIgnoreRequiresObjectProperty { context }
+            if context == "schema `MetadataUri`"
+    ));
+}
+
+#[test]
+fn rejects_non_boolean_x_satay_ignore() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Response:
+      type: object
+      properties:
+        metadata:
+          type: string
+          x-satay:
+            ignore: yes
+"#,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::InvalidExtension { context, path, .. }
+            if context == "property `Response.metadata`" && path == "x-satay.ignore"
+    ));
+}
+
+#[test]
+fn validates_ignored_property_schemas() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Response:
+      type: object
+      properties:
+        metadata:
+          type: boolean
+          x-satay:
+            ignore: true
+            parse-as: u32
+"#,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::SatayParseAsRequiresString { context, .. }
+            if context == "property `Response.metadata`"
+    ));
+}
+
+#[test]
 fn rejects_unsupported_x_satay_reference_sibling() {
     let err = parse_invalid(
         r#"

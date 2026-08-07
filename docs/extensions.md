@@ -72,6 +72,44 @@ This projects `{"value": [{"Link": "a"}, {"Link": "b"}]}` into `Vec<String>`. Bo
 
 Generated JSON decoders validate the response's container shape before deserializing the projected payload. Missing selected fields become JSON `null`, so required projected types fail normal serde validation while optional projected types decode as `None`.
 
+## `ignore`
+
+Use `x-satay.ignore` on an object property that is present on the wire but should not be part of the generated public Rust model:
+
+```yaml
+BusArrivalResponse:
+  type: object
+  additionalProperties: false
+  required: [odata.metadata, BusStopCode, Services]
+  properties:
+    odata.metadata:
+      type: string
+      format: uri
+      x-satay:
+        ignore: true
+    BusStopCode:
+      type: string
+    Services:
+      type: array
+      items:
+        type: string
+```
+
+This generates a struct without an `odata_metadata` field:
+
+```rust
+pub struct BusArrivalResponse {
+    pub bus_stop_code: String,
+    pub services: Vec<String>,
+}
+```
+
+With the generated crate's `serde` feature, `odata.metadata` is accepted and discarded during deserialization. Whether the ignored property is required, optional, or nullable does not change the Rust struct, and missing ignored required properties do not cause deserialization to fail.
+
+Serialization is intentionally lossy: an ignored property can never be supplied through or emitted from the generated struct, so deserialize-then-serialize round trips remove it. Do not use `ignore` on a request model when the server requires that property to be sent.
+
+The property's schema and references are still validated. Unlike operation-level `x-satay.skip`, `ignore` does not bypass validation or remove the containing operation or schema; it only prevents the validated property from reaching the generated model. `ignore` is valid only directly on object properties, including beside a property `$ref`.
+
 ## Standard `unixtime` Format
 
 Satay supports the OpenAPI format registry's `unixtime` format on `type: integer` and `type: string` schemas. Both generate `satay_runtime::OffsetDateTime` and represent Unix timestamp seconds.
@@ -258,24 +296,4 @@ pub struct BusServiceArrival {
 
 This is useful for APIs that return empty or malformed values in nested objects when data is unavailable, rather than omitting the field or returning `null`. The `treat-error-as-none` extension requires the generated crate's `json` feature.
 
-For a referenced field, place `x-satay` directly beside `$ref` as shown above. Satay supports `description` and `x-satay.treat-error-as-none` beside a field `$ref`; other `$ref` siblings are rejected instead of being ignored. An `allOf` wrapper is not required or supported for this extension.
-
-## `skip`
-
-Use `x-satay.skip` on an operation to exclude it from generation entirely. The operation bypasses operation-level validation, and any `components.schemas` entry reachable only from skipped operations is excluded from validation and generation too, so this is useful for operations Satay cannot represent yet, such as multipart uploads or binary downloads. Component schemas that are also reachable from a non-skipped operation, and schemas not referenced by any operation, are still validated and generated. Every `$ref` in the document must still resolve to an existing component even when its only user is skipped. When every operation on a path is skipped, that path's shared parameters are not validated.
-
-```yaml
-paths:
-  /v1/files:
-    post:
-      operationId: upload_file
-      x-satay:
-        skip: true
-      requestBody:
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-```
-
-`skip: false` is equivalent to omitting the extension. `skip` is the only key Satay accepts in an operation-level `x-satay` object.
+For a referenced field, place `x-satay` directly beside `$ref` as shown above. Satay supports `description`, `x-satay.treat-error-as-none`, and `x-satay.ignore` beside a field `$ref`; other `$ref` siblings are rejected instead of being ignored. An `allOf` wrapper is not required or supported for these extensions.
