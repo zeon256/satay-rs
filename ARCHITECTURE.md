@@ -124,6 +124,7 @@ Schema decisions are carried by `ValidatedType`:
 - `description`: the OpenAPI description, filtered to `None` when blank.
 - `treat_error_as_none`: validated `x-satay.treat-error-as-none` metadata for struct fields.
 - `none_if`: ordered sentinel strings for strict optional decoding of parsed string fields.
+- `ignore`: validated `x-satay.ignore` metadata for object properties that lowering must omit.
 
 Validation responsibilities are split by file:
 
@@ -131,7 +132,7 @@ Validation responsibilities are split by file:
 - `validate/operation.rs` validates paths, operation parameters, request bodies, responses, status codes, path placeholders, and JSON media-type requirements.
 - `validate/constraint.rs` parses and normalizes string, integer, number, and array constraints for `nutype` rendering. It also infers integer types from bounds when no explicit `x-satay.integer-type` is provided.
 - `parse/satay.rs` is the authoritative home for typed schema and operation `x-satay` wire contracts, their `schema_options` and `operation_options` accessors, and lower-level parsing helpers shared by validation. The wire types use owned strings so validation does not need to carry extension-value lifetimes.
-- `validate/satay.rs` applies schema-extension compatibility rules such as `parse-as`, `none-if`, `integer-type`, `enum-variants`, and `treat-error-as-none`.
+- `validate/satay.rs` applies schema-extension compatibility rules such as `parse-as`, `none-if`, `integer-type`, `enum-variants`, `treat-error-as-none`, and `ignore`.
 - `validate/operation.rs` applies operation semantics and resolves names from operation extensions against validated operation data.
 
 The wire layer uses `#[serde(deny_unknown_fields)]` and validated newtypes for values with local invariants. It is intentionally separate from the vendor-neutral `satay-oas3::SpecificationExtensions::extension_as<T>()` API: `satay-oas3` provides typed extension deserialization and nested error paths, while `satay-codegen` owns Satay-specific contracts and policy. Validation and lowering must use the centralized accessors rather than traversing raw extension JSON.
@@ -284,6 +285,8 @@ Important IR conventions:
 - Optional fields are represented by `Field.required == false`; rendering decides whether to wrap in `Option<T>`.
 - `Field.treat_error_as_none` forces `Option<T>` plus custom serde handling even when a property is required in OpenAPI.
 - `Field.none_if` forces `Option<T>` and generated field-specific serde helpers that preserve the configured string parser while recognizing exact sentinel strings.
+
+Properties with `ValidatedType.ignore == true` are filtered out while lowering validated struct fields, before the codegen `Field` IR is built. Rendering therefore has no ignored-field branch and never revisits `x-satay` extension data.
 
 ## Rendering Stage
 

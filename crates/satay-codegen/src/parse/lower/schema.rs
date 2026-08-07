@@ -158,7 +158,7 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
         let mut used = BTreeSet::new();
         let mut parsed = Vec::with_capacity(fields.len());
 
-        for field in fields {
+        for field in fields.iter().filter(|field| !field.ty.ignore) {
             parsed.push(Field {
                 wire_name: field.wire_name.clone(),
                 rust_name: unique_ident(field_ident(&field.wire_name), &mut used),

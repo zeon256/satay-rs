@@ -25,6 +25,7 @@ pub(crate) struct SataySchemaOptions {
     pub(crate) treat_error_as_none: Option<bool>,
     pub(crate) none_if: Option<Vec<String>>,
     pub(crate) enum_variants: Option<BTreeMap<String, String>>,
+    pub(crate) ignore: Option<bool>,
 }
 
 impl SataySchemaOptions {
@@ -352,6 +353,7 @@ mod tests {
             "treat-error-as-none": true,
             "none-if": ["", "-"],
             "enum-variants": { "A": "Available" },
+            "ignore": true,
         }));
 
         let options = schema_options(&schema, "property `Status.value`")
@@ -362,6 +364,7 @@ mod tests {
         assert_eq!(options.integer_type(), Some(IntegerType::U16));
         assert_eq!(options.treat_error_as_none, Some(true));
         assert_eq!(options.none_if, Some(vec![String::new(), "-".to_owned()]));
+        assert_eq!(options.ignore, Some(true));
         assert_eq!(
             options.enum_variants,
             Some(BTreeMap::from([("A".to_owned(), "Available".to_owned())]))
@@ -422,11 +425,16 @@ mod tests {
 
     #[test]
     fn rejects_invalid_schema_values_with_precise_paths() {
-        let schema = schema_with_satay(json!({ "parse-as": "uuid" }));
-        assert_eq!(
-            invalid_extension_path(schema_options(&schema, "schema `Status`")),
-            "x-satay.parse-as"
-        );
+        for (value, expected_path) in [
+            (json!({ "parse-as": "uuid" }), "x-satay.parse-as"),
+            (json!({ "ignore": "yes" }), "x-satay.ignore"),
+        ] {
+            let schema = schema_with_satay(value);
+            assert_eq!(
+                invalid_extension_path(schema_options(&schema, "schema `Status`")),
+                expected_path
+            );
+        }
     }
 
     #[test]
