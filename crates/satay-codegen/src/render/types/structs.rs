@@ -1,3 +1,4 @@
+use crate::ident::field_ident;
 use crate::model::{Field, TypeRef};
 use syn::parse_quote;
 
@@ -39,7 +40,8 @@ fn struct_attrs(description: Option<&str>, serde: bool) -> Vec<syn::Attribute> {
 }
 
 fn render_struct_field(struct_name: &str, field: &Field, serde: bool) -> syn::Field {
-    let name = ident(&field.rust_name);
+    let rust_name = rust_field_name(field);
+    let name = ident(&rust_name);
     let ty = rust_field_type(
         &field.ty,
         field.required,
@@ -57,10 +59,8 @@ fn field_attrs(struct_name: &str, field: &Field, serde: bool) -> Vec<syn::Attrib
     }
 
     let mut serde_attrs = vec![];
-    let serde_default_name = field
-        .rust_name
-        .strip_prefix("r#")
-        .unwrap_or(&field.rust_name);
+    let rust_name = rust_field_name(field);
+    let serde_default_name = rust_name.strip_prefix("r#").unwrap_or(&rust_name);
     if serde_default_name != field.wire_name {
         let wire_name = lit_str(&field.wire_name);
         serde_attrs.push(quote::quote!(rename = #wire_name));
@@ -168,22 +168,25 @@ fn render_none_if_functions(field: &Field) -> [syn::ImplItemFn; 2] {
 }
 
 fn none_if_deserialize_name(field: &Field) -> String {
+    let rust_name = rust_field_name(field);
     format!(
         "__satay_deserialize_{}_none_if",
-        field
-            .rust_name
-            .strip_prefix("r#")
-            .unwrap_or(&field.rust_name)
+        rust_name.strip_prefix("r#").unwrap_or(&rust_name)
     )
 }
 
 fn none_if_serialize_name(field: &Field) -> String {
+    let rust_name = rust_field_name(field);
     format!(
         "__satay_serialize_{}_none_if",
-        field
-            .rust_name
-            .strip_prefix("r#")
-            .unwrap_or(&field.rust_name)
+        rust_name.strip_prefix("r#").unwrap_or(&rust_name)
+    )
+}
+
+fn rust_field_name(field: &Field) -> String {
+    field.identifier_words.as_ref().map_or_else(
+        || field.rust_name.clone(),
+        |words| field_ident(&words.join("-")),
     )
 }
 

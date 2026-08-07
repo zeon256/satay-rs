@@ -125,6 +125,7 @@ Schema decisions are carried by `ValidatedType`:
 - `treat_error_as_none`: validated `x-satay.treat-error-as-none` metadata for struct fields.
 - `none_if`: ordered sentinel strings for strict optional decoding of parsed string fields.
 - `ignore`: validated `x-satay.ignore` metadata for object properties that lowering must omit.
+- `identifier_words`: canonical target-neutral words from `x-satay.identifier`, retained independently of the OpenAPI wire key.
 
 Validation responsibilities are split by file:
 
@@ -132,7 +133,7 @@ Validation responsibilities are split by file:
 - `validate/operation.rs` validates paths, operation parameters, request bodies, responses, status codes, path placeholders, and JSON media-type requirements.
 - `validate/constraint.rs` parses and normalizes string, integer, number, and array constraints for `nutype` rendering. It also infers integer types from bounds when no explicit `x-satay.integer-type` is provided.
 - `parse/satay.rs` is the authoritative home for typed schema and operation `x-satay` wire contracts, their `schema_options` and `operation_options` accessors, and lower-level parsing helpers shared by validation. The wire types use owned strings so validation does not need to carry extension-value lifetimes.
-- `validate/satay.rs` applies schema-extension compatibility rules such as `parse-as`, `none-if`, `integer-type`, `enum-variants`, `treat-error-as-none`, and `ignore`.
+- `validate/satay.rs` applies schema-extension compatibility rules such as `parse-as`, `none-if`, `integer-type`, `enum-variants`, `treat-error-as-none`, `ignore`, and `identifier`.
 - `validate/operation.rs` applies operation semantics and resolves names from operation extensions against validated operation data.
 
 The wire layer uses `#[serde(deny_unknown_fields)]` and validated newtypes for values with local invariants. It is intentionally separate from the vendor-neutral `satay-oas3::SpecificationExtensions::extension_as<T>()` API: `satay-oas3` provides typed extension deserialization and nested error paths, while `satay-codegen` owns Satay-specific contracts and policy. Validation and lowering must use the centralized accessors rather than traversing raw extension JSON.
@@ -196,6 +197,8 @@ flowchart TD
 - `ComponentKind::Range` for non-null component-level string range schemas from `x-satay.parse-as`.
 - `ComponentKind::Alias` for reference aliases, primitive aliases, arrays, nullable types, parsed string/integer values, ranges, and named aliases without top-level component constraints.
 - `ComponentKind::Nutype` for non-null component schemas with validation constraints.
+
+Struct properties retain both `Field.wire_name` and optional canonical `Field.identifier_words` in the IR. Lowering allocates a collision-free Rust name, while the Rust renderer applies snake_case and keyword escaping to explicit identifier words. This keeps the extension spelling target-neutral and makes the original wire key available for Serde metadata.
 
 `lower/operation.rs` converts supported path operations into `Operation` values:
 
@@ -283,6 +286,7 @@ Important IR conventions:
 - `TypeRef::Constrained` points at an inline generated constrained type and keeps the inner type for request parameter serialization.
 - `TypeRef::Option` maps to `Option<T>` during rendering.
 - Optional fields are represented by `Field.required == false`; rendering decides whether to wrap in `Option<T>`.
+- Explicit property names are represented by `Field.identifier_words`; `Field.wire_name` always remains the OpenAPI property key used for wire metadata.
 - `Field.treat_error_as_none` forces `Option<T>` plus custom serde handling even when a property is required in OpenAPI.
 - `Field.none_if` forces `Option<T>` and generated field-specific serde helpers that preserve the configured string parser while recognizing exact sentinel strings.
 

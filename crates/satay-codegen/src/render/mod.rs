@@ -360,6 +360,7 @@ pub fn input_fields(operation: &Operation) -> Vec<Field> {
     );
     input_fields.extend(operation.parameters.iter().map(|parameter| Field {
         wire_name: parameter.wire_name.clone(),
+        identifier_words: None,
         rust_name: parameter.rust_name.clone(),
         description: parameter.description.clone(),
         ty: parameter.ty.clone(),
@@ -370,6 +371,7 @@ pub fn input_fields(operation: &Operation) -> Vec<Field> {
     if let Some(body) = &operation.request_body {
         input_fields.push(Field {
             wire_name: body.field_name.clone(),
+            identifier_words: None,
             rust_name: body.field_name.clone(),
             description: body.description.clone(),
             ty: body.ty.clone(),
@@ -446,6 +448,7 @@ mod tests {
                 kind: ComponentKind::Struct(vec![
                     Field {
                         wire_name: "id".to_owned(),
+                        identifier_words: None,
                         rust_name: "id".to_owned(),
                         description: None,
                         ty: TypeRef::String,
@@ -455,6 +458,7 @@ mod tests {
                     },
                     Field {
                         wire_name: "tag_count".to_owned(),
+                        identifier_words: None,
                         rust_name: "tag_count".to_owned(),
                         description: None,
                         ty: TypeRef::Integer(IntegerType::I32),

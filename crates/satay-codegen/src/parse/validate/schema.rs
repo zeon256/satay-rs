@@ -18,7 +18,7 @@ use super::super::resolve::ResolvedDocument;
 use super::super::satay::schema_options;
 use super::constraint::{parse_integer_type, parse_validation, reject_keyword};
 use super::satay::{
-    ValidatedParseAs, ValidatedSataySchema, reject_ignore_outside_object_property,
+    ValidatedParseAs, ValidatedSataySchema, reject_object_property_options_outside_object_property,
     validate_component_enum_satay, validate_type_enum_satay, validate_type_satay,
 };
 use super::{
@@ -27,7 +27,7 @@ use super::{
     ValidatedUnionVariantKind,
 };
 use crate::error::ValidationError;
-use crate::ident::{type_ident, unique_ident, variant_ident};
+use crate::ident::{field_ident, type_ident, unique_ident, variant_ident};
 use crate::model::{
     Enum, EnumFallback, EnumVariant, IntegerLimit, IntegerType, ParseAs, TypeRef, Validation,
 };
@@ -107,6 +107,7 @@ fn validate_type_schema_with_stack(
         ty.description = description;
         ty.treat_error_as_none = validated_satay.treat_error_as_none;
         ty.ignore = validated_satay.ignore;
+        ty.identifier_words = validated_satay.identifier_words;
         return Ok(ty);
     }
 
@@ -140,6 +141,7 @@ fn validate_type_schema_with_stack(
             treat_error_as_none: false,
             none_if: vec![],
             ignore: false,
+            identifier_words: None,
         });
     }
     let (schema_type, nullable) = schema_type_and_nullable(schema, context)?;
@@ -305,7 +307,7 @@ fn validate_component_schema(
     let context = format!("schema `{schema_name}`");
     reject_preserved_unknown_keywords(schema, &context)?;
     if let Some(schema) = schema.as_object() {
-        reject_ignore_outside_object_property(schema, &context)?;
+        reject_object_property_options_outside_object_property(schema, &context)?;
     }
     let kind = if let Some(reference) = schema.reference() {
         let schema =
@@ -336,26 +338,15 @@ fn validate_component_schema(
             )?)
         } else {
             let (schema_type, nullable) = schema_type_and_nullable(schema, &context)?;
-
             let enum_values = effective_enum_values(schema, schema_type, &context)?;
             if !enum_values.is_empty() {
                 validate_enum_shape(&enum_values, schema_type, &context)?;
-                let validated_satay =
-                    validate_component_enum_satay(schema, &enum_values, &context)?;
-                ValidatedComponentKind::Type(ValidatedType {
-                    kind: ValidatedTypeKind::Enum(validated_enum(
-                        &enum_values,
-                        &validated_satay.enum_variants,
-                        EnumFallback::None,
-                        &context,
-                    )?),
+                ValidatedComponentKind::Type(validated_component_enum_type(
+                    schema,
+                    &enum_values,
                     nullable,
-                    validation: None,
-                    description: optional_description(&schema.description),
-                    treat_error_as_none: false,
-                    none_if: vec![],
-                    ignore: false,
-                })
+                    &context,
+                )?)
             } else {
                 match schema_type {
                     Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => {
@@ -403,6 +394,30 @@ fn validate_component_schema(
         schema_name: schema_name.to_owned(),
         description,
         kind,
+    })
+}
+
+fn validated_component_enum_type(
+    schema: &OasObjectSchema,
+    enum_values: &[JsonValue],
+    nullable: bool,
+    context: &str,
+) -> Result<ValidatedType, ValidationError> {
+    let validated_satay = validate_component_enum_satay(schema, enum_values, context)?;
+    Ok(ValidatedType {
+        kind: ValidatedTypeKind::Enum(validated_enum(
+            enum_values,
+            &validated_satay.enum_variants,
+            EnumFallback::None,
+            context,
+        )?),
+        nullable,
+        validation: None,
+        description: optional_description(&schema.description),
+        treat_error_as_none: false,
+        none_if: vec![],
+        ignore: false,
+        identifier_words: None,
     })
 }
 
@@ -484,6 +499,7 @@ fn validate_union_type_schema(
             treat_error_as_none: false,
             none_if: vec![],
             ignore: false,
+            identifier_words: None,
         });
     }
 
@@ -518,6 +534,7 @@ fn validate_union_type_schema(
         treat_error_as_none: false,
         none_if: vec![],
         ignore: false,
+        identifier_words: None,
     })
 }
 
@@ -648,6 +665,7 @@ fn validate_open_string_enum_any_of(
         treat_error_as_none: false,
         none_if: vec![],
         ignore: false,
+        identifier_words: None,
     }))
 }
 
@@ -1060,6 +1078,7 @@ fn validate_nested_discriminator_union_branch(
         treat_error_as_none: false,
         none_if: vec![],
         ignore: false,
+        identifier_words: None,
     };
     Ok(PlainUnionBranch::Variant(Box::new(ValidatedUnionVariant {
         rust_name: unique_ident("Union".to_owned(), used),
@@ -1108,6 +1127,7 @@ fn validate_inline_plain_union_branch(
             treat_error_as_none: false,
             none_if: vec![],
             ignore: false,
+            identifier_words: None,
         };
         let rust_name = inline_union_enum_variant_name(&ty)
             .expect("validated inline union enum branch has at least one variant");
@@ -1940,7 +1960,9 @@ impl<'a, 'doc> AllOfFieldCollector<'a, 'doc> {
             self.collect_branch_fields(schema_name, branch, index, context)?;
         }
 
-        Ok(mem::take(&mut self.fields))
+        let fields = mem::take(&mut self.fields);
+        validate_rust_field_identifier_collisions(context, &fields)?;
+        Ok(fields)
     }
 
     fn pop_schema(&mut self) {
@@ -2608,6 +2630,7 @@ fn validate_object_type_schema(
             treat_error_as_none: validated_satay.treat_error_as_none,
             none_if: validated_satay.none_if,
             ignore: validated_satay.ignore,
+            identifier_words: validated_satay.identifier_words,
         });
     }
 
@@ -2628,6 +2651,7 @@ fn validate_object_type_schema(
             treat_error_as_none: validated_satay.treat_error_as_none,
             none_if: validated_satay.none_if,
             ignore: validated_satay.ignore,
+            identifier_words: validated_satay.identifier_words,
         });
     }
 
@@ -2652,6 +2676,7 @@ fn validate_object_type_schema(
         treat_error_as_none: validated_satay.treat_error_as_none,
         none_if: validated_satay.none_if,
         ignore: validated_satay.ignore,
+        identifier_words: validated_satay.identifier_words,
     })
 }
 
@@ -2721,6 +2746,7 @@ fn validate_inline_type_kind(
                     treat_error_as_none: false,
                     none_if: vec![],
                     ignore: false,
+                    identifier_words: None,
                 })))
             }
             Some(value @ OasSchema::Object(_)) => {
@@ -2824,7 +2850,61 @@ fn validate_struct_properties(
         });
     }
 
+    validate_rust_field_identifier_collisions(&context, &fields)?;
     Ok(fields)
+}
+
+fn validate_rust_field_identifier_collisions(
+    context: &str,
+    fields: &[ValidatedField],
+) -> Result<(), ValidationError> {
+    let mut normalized = BTreeMap::<String, (String, bool)>::new();
+    let mut generated = BTreeMap::<String, String>::new();
+    let mut used = BTreeSet::new();
+
+    for field in fields.iter().filter(|field| !field.ty.ignore) {
+        let explicit = field.ty.identifier_words.is_some();
+        let identifier = field
+            .ty
+            .identifier_words
+            .as_ref()
+            .map(|words| words.join("-"))
+            .unwrap_or_else(|| field.wire_name.clone());
+        let candidate = field_ident(&identifier);
+
+        if let Some((first_property, first_explicit)) = normalized.get(&candidate)
+            && (explicit || *first_explicit)
+        {
+            return Err(ValidationError::DuplicateSatayIdentifierRustField {
+                context: context.to_owned(),
+                first_property: first_property.clone(),
+                second_property: field.wire_name.clone(),
+                rust_name: candidate,
+            });
+        }
+
+        if explicit {
+            if let Some(first_property) = generated.get(&candidate) {
+                return Err(ValidationError::DuplicateSatayIdentifierRustField {
+                    context: context.to_owned(),
+                    first_property: first_property.clone(),
+                    second_property: field.wire_name.clone(),
+                    rust_name: candidate,
+                });
+            }
+            used.insert(candidate.clone());
+            generated.insert(candidate.clone(), field.wire_name.clone());
+        } else {
+            let rust_name = unique_ident(candidate.clone(), &mut used);
+            generated.insert(rust_name, field.wire_name.clone());
+        }
+
+        normalized
+            .entry(candidate)
+            .or_insert_with(|| (field.wire_name.clone(), explicit));
+    }
+
+    Ok(())
 }
 
 fn referenced_schema_description(

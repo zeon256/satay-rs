@@ -50,6 +50,7 @@ pub(crate) struct ValidatedType {
     pub(crate) treat_error_as_none: bool,
     pub(crate) none_if: Vec<String>,
     pub(crate) ignore: bool,
+    pub(crate) identifier_words: Option<Vec<String>>,
 }
 
 impl ValidatedType {
@@ -62,6 +63,7 @@ impl ValidatedType {
             treat_error_as_none: false,
             none_if: vec![],
             ignore: false,
+            identifier_words: None,
         }
     }
 

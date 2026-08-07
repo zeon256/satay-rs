@@ -614,6 +614,252 @@ components:
 }
 
 #[test]
+fn parses_target_neutral_property_identifiers_into_ir() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Identifier:
+      type: string
+    BusStop:
+      type: object
+      properties:
+        Description:
+          type: string
+          x-satay:
+            identifier: desc
+        RequestIdentifier:
+          type: string
+          x-satay:
+            identifier: request-id
+        ReferencedIdentifier:
+          $ref: '#/components/schemas/Identifier'
+          x-satay:
+            identifier: reference-id
+        RoadName:
+          type: string
+        WireKeyword:
+          type: string
+          x-satay:
+            identifier: type
+"#,
+    );
+
+    let bus_stop = component(&api, "BusStop");
+    let ComponentKind::Struct(fields) = &bus_stop.kind else {
+        panic!("expected BusStop struct");
+    };
+
+    assert_eq!(field(fields, "Description").rust_name, "desc");
+    assert_eq!(
+        field(fields, "Description").identifier_words.as_deref(),
+        Some(["desc".to_owned()].as_slice())
+    );
+    assert_eq!(field(fields, "RequestIdentifier").rust_name, "request_id");
+    assert_eq!(
+        field(fields, "RequestIdentifier")
+            .identifier_words
+            .as_deref(),
+        Some(["request".to_owned(), "id".to_owned()].as_slice())
+    );
+    assert_eq!(
+        field(fields, "ReferencedIdentifier").rust_name,
+        "reference_id"
+    );
+    assert_eq!(field(fields, "WireKeyword").rust_name, "r#type");
+    assert_eq!(field(fields, "RoadName").rust_name, "road_name");
+    assert!(field(fields, "RoadName").identifier_words.is_none());
+}
+
+#[test]
+fn rejects_invalid_target_neutral_property_identifiers() {
+    let cases = [
+        (r#""""#, "identifier must not be empty"),
+        ("RequestId", "lower kebab-case"),
+        ("request_id", "lower kebab-case"),
+        ("-request", "lower kebab-case"),
+        ("request--id", "lower kebab-case"),
+        ("request-id-", "lower kebab-case"),
+        ("request.id", "lower kebab-case"),
+    ];
+
+    for (identifier, expected_message) in cases {
+        let spec = format!(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {{}}
+components:
+  schemas:
+    Record:
+      type: object
+      properties:
+        RequestIdentifier:
+          type: string
+          x-satay:
+            identifier: {identifier}
+"#
+        );
+
+        match parse_invalid(&spec) {
+            ValidationError::InvalidExtension {
+                context,
+                path,
+                source,
+            } => {
+                assert_eq!(context, "property `Record.RequestIdentifier`");
+                assert_eq!(path, "x-satay.identifier");
+                assert!(
+                    source.to_string().contains(expected_message),
+                    "unexpected diagnostic: {source}"
+                );
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+}
+
+#[test]
+fn rejects_property_identifier_outside_object_properties() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Description:
+      type: string
+      x-satay:
+        identifier: desc
+"#,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::SatayIdentifierRequiresObjectProperty { context }
+            if context == "schema `Description`"
+    ));
+}
+
+#[test]
+fn rejects_explicit_property_identifier_collisions_after_rust_normalization() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Record:
+      type: object
+      properties:
+        Description:
+          type: string
+          x-satay:
+            identifier: request-id
+        request_id:
+          type: string
+"#,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::DuplicateSatayIdentifierRustField {
+            context,
+            first_property,
+            second_property,
+            rust_name,
+        } if context == "schema `Record`"
+            && first_property == "Description"
+            && second_property == "request_id"
+            && rust_name == "request_id"
+    ));
+}
+
+#[test]
+fn rejects_property_identifier_collisions_across_all_of_branches() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Base:
+      type: object
+      properties:
+        Description:
+          type: string
+          x-satay:
+            identifier: request-id
+    Record:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+        - type: object
+          properties:
+            request_id:
+              type: string
+"#,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::DuplicateSatayIdentifierRustField {
+            context,
+            first_property,
+            second_property,
+            rust_name,
+        } if context == "schema `Record`"
+            && first_property == "Description"
+            && second_property == "request_id"
+            && rust_name == "request_id"
+    ));
+}
+
+#[test]
+fn preserves_legacy_field_deduplication_without_identifier_overrides() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Record:
+      type: object
+      properties:
+        request-id:
+          type: string
+        request_id:
+          type: string
+"#,
+    );
+
+    let record = component(&api, "Record");
+    let ComponentKind::Struct(fields) = &record.kind else {
+        panic!("expected Record struct");
+    };
+    assert_eq!(field(fields, "request-id").rust_name, "request_id");
+    assert_eq!(field(fields, "request_id").rust_name, "request_id_2");
+}
+
+#[test]
 fn rejects_unsupported_x_satay_reference_sibling() {
     let err = parse_invalid(
         r#"

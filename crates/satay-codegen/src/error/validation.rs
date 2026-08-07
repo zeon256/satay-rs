@@ -172,6 +172,25 @@ pub enum ValidationError {
     #[error("{context} uses x-satay.ignore outside an object property")]
     SatayIgnoreRequiresObjectProperty { context: String },
 
+    /// `x-satay.identifier` was applied outside an object property.
+    ///
+    /// Error message: `{context} uses x-satay.identifier outside an object property`
+    #[error("{context} uses x-satay.identifier outside an object property")]
+    SatayIdentifierRequiresObjectProperty { context: String },
+
+    /// An explicit property identifier collides with another Rust field after normalization.
+    ///
+    /// Error message: `{context} maps properties `{first_property}` and `{second_property}` to duplicate Rust field `{rust_name}``
+    #[error(
+        "{context} maps properties `{first_property}` and `{second_property}` to duplicate Rust field `{rust_name}`"
+    )]
+    DuplicateSatayIdentifierRustField {
+        context: String,
+        first_property: String,
+        second_property: String,
+        rust_name: String,
+    },
+
     /// `x-satay.integer-type` was applied to a non-integer schema.
     ///
     /// Error message: `{context} uses x-satay.integer-type `{integer_type}` on `{kind}`; supported integer-type wire schemas are integer schemas and string schemas with x-satay.parse-as integer-range`

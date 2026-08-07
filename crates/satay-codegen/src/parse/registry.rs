@@ -289,6 +289,7 @@ mod tests {
             None,
             vec![Field {
                 wire_name: "id".to_owned(),
+                identifier_words: None,
                 rust_name: "id".to_owned(),
                 description: None,
                 ty: TypeRef::String,

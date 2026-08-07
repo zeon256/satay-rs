@@ -151,6 +151,7 @@ pub(crate) struct FloatLimit {
 #[derive(Debug, Clone)]
 pub(crate) struct Field {
     pub(crate) wire_name: String,
+    pub(crate) identifier_words: Option<Vec<String>>,
     pub(crate) rust_name: String,
     pub(crate) description: Option<String>,
     pub(crate) ty: TypeRef,
