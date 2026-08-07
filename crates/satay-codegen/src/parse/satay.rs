@@ -26,6 +26,7 @@ pub(crate) struct SataySchemaOptions {
     pub(crate) none_if: Option<Vec<String>>,
     pub(crate) enum_variants: Option<BTreeMap<String, String>>,
     pub(crate) ignore: Option<bool>,
+    pub(crate) identifier: Option<SatayIdentifier>,
 }
 
 impl SataySchemaOptions {
@@ -39,6 +40,41 @@ impl SataySchemaOptions {
             Some(wire) => Some(wire.into_integer_type()),
             None => None,
         }
+    }
+}
+
+/// A target-neutral property identifier represented as canonical words.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub(crate) struct SatayIdentifier(Vec<String>);
+
+impl SatayIdentifier {
+    pub(crate) fn words(&self) -> &[String] {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for SatayIdentifier {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.is_empty() {
+            return Err("identifier must not be empty");
+        }
+
+        let words = value.split('-').collect::<Vec<_>>();
+        if words.iter().any(|word| {
+            word.is_empty()
+                || !word
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
+        }) {
+            return Err(
+                "identifier must use lower kebab-case ASCII words (for example `request-id`)",
+            );
+        }
+
+        Ok(Self(words.into_iter().map(str::to_owned).collect()))
     }
 }
 
@@ -354,6 +390,7 @@ mod tests {
             "none-if": ["", "-"],
             "enum-variants": { "A": "Available" },
             "ignore": true,
+            "identifier": "request-id",
         }));
 
         let options = schema_options(&schema, "property `Status.value`")
@@ -365,6 +402,10 @@ mod tests {
         assert_eq!(options.treat_error_as_none, Some(true));
         assert_eq!(options.none_if, Some(vec![String::new(), "-".to_owned()]));
         assert_eq!(options.ignore, Some(true));
+        assert_eq!(
+            options.identifier.as_ref().map(SatayIdentifier::words),
+            Some(["request".to_owned(), "id".to_owned()].as_slice())
+        );
         assert_eq!(
             options.enum_variants,
             Some(BTreeMap::from([("A".to_owned(), "Available".to_owned())]))
@@ -428,6 +469,8 @@ mod tests {
         for (value, expected_path) in [
             (json!({ "parse-as": "uuid" }), "x-satay.parse-as"),
             (json!({ "ignore": "yes" }), "x-satay.ignore"),
+            (json!({ "identifier": "request_id" }), "x-satay.identifier"),
+            (json!({ "identifier": 7 }), "x-satay.identifier"),
         ] {
             let schema = schema_with_satay(value);
             assert_eq!(

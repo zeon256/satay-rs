@@ -72,6 +72,56 @@ This projects `{"value": [{"Link": "a"}, {"Link": "b"}]}` into `Vec<String>`. Bo
 
 Generated JSON decoders validate the response's container shape before deserializing the projected payload. Missing selected fields become JSON `null`, so required projected types fail normal serde validation while optional projected types decode as `None`.
 
+## `identifier`
+
+Use `x-satay.identifier` on an object property when its generated public name should differ from its OpenAPI wire name:
+
+```yaml
+BusStop:
+  type: object
+  required: [Description, Latitude, Longitude, RequestIdentifier]
+  properties:
+    Description:
+      type: string
+      x-satay:
+        identifier: desc
+    Latitude:
+      type: number
+      format: double
+      x-satay:
+        identifier: lat
+    Longitude:
+      type: number
+      format: double
+      x-satay:
+        identifier: long
+    RequestIdentifier:
+      type: string
+      x-satay:
+        identifier: request-id
+```
+
+This generates Rust fields using the requested public semantics while preserving the original wire keys:
+
+```rust
+pub struct BusStop {
+    #[cfg_attr(feature = "serde", serde(rename = "Description"))]
+    pub desc: String,
+    #[cfg_attr(feature = "serde", serde(rename = "Latitude"))]
+    pub lat: f64,
+    #[cfg_attr(feature = "serde", serde(rename = "Longitude"))]
+    pub long: f64,
+    #[cfg_attr(feature = "serde", serde(rename = "RequestIdentifier"))]
+    pub request_id: String,
+}
+```
+
+The extension value is target-neutral, not a Rust token. It must be one or more lower-kebab-case ASCII words: lowercase letters and digits separated by single hyphens. Satay retains those word boundaries, and the Rust backend renders them as snake_case. Rust keywords use raw identifiers where possible, so `identifier: type` renders as `r#type`. A future backend can apply its own casing and keyword policy to the same words.
+
+`identifier` changes only the generated public symbol. The OpenAPI property key remains the canonical serialization and deserialization name; this extension is therefore distinct from a Serde alias, which accepts additional wire spellings. Omitting `identifier` preserves the existing wire-name-derived behavior exactly. If an explicit identifier collides with another generated Rust field after snake_case normalization and keyword escaping, Satay reports a validation error instead of changing the requested name with a suffix.
+
+`identifier` is valid only on object properties, including beside a property `$ref`. Target-specific names and identifier overrides for schemas, operations, parameters, and enum variants are intentionally outside this extension's scope.
+
 ## `ignore`
 
 Use `x-satay.ignore` on an object property that is present on the wire but should not be part of the generated public Rust model:
@@ -296,4 +346,4 @@ pub struct BusServiceArrival {
 
 This is useful for APIs that return empty or malformed values in nested objects when data is unavailable, rather than omitting the field or returning `null`. The `treat-error-as-none` extension requires the generated crate's `json` feature.
 
-For a referenced field, place `x-satay` directly beside `$ref` as shown above. Satay supports `description`, `x-satay.treat-error-as-none`, and `x-satay.ignore` beside a field `$ref`; other `$ref` siblings are rejected instead of being ignored. An `allOf` wrapper is not required or supported for these extensions.
+For a referenced field, place `x-satay` directly beside `$ref` as shown above. Satay supports `description`, `x-satay.treat-error-as-none`, `x-satay.ignore`, and `x-satay.identifier` beside a field `$ref`; other `$ref` siblings are rejected instead of being ignored. An `allOf` wrapper is not required or supported for these extensions.

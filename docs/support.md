@@ -38,6 +38,7 @@ Satay targets OpenAPI 3.1.x and a small, typed subset.
 - Satay-specific `x-satay.enum-variants` hints for naming generated Rust enum variants.
 - Satay-specific `x-satay.treat-error-as-none` hints for struct fields where deserialization errors should produce `None` instead of failing.
 - Satay-specific `x-satay.ignore` hints for validated wire-only object properties that should be accepted during deserialization but omitted from generated public structs and serialization.
+- Satay-specific `x-satay.identifier` overrides for target-neutral public property names, using canonical lower-kebab-case words that the Rust backend renders as snake_case while preserving the original wire key.
 - Validation constraints rendered through `nutype` for:
   - string `minLength` / `maxLength`
   - string `pattern` through `nutype`'s `regex` validator

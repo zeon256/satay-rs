@@ -9,6 +9,7 @@ mod ast;
 mod behavior;
 mod common;
 mod enums;
+mod identifiers;
 mod ignore;
 mod integers;
 mod maps;

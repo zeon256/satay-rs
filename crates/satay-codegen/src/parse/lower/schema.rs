@@ -159,9 +159,16 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
         let mut parsed = Vec::with_capacity(fields.len());
 
         for field in fields.iter().filter(|field| !field.ty.ignore) {
+            let identifier = field
+                .ty
+                .identifier_words
+                .as_ref()
+                .map(|words| words.join("-"))
+                .unwrap_or_else(|| field.wire_name.clone());
             parsed.push(Field {
                 wire_name: field.wire_name.clone(),
-                rust_name: unique_ident(field_ident(&field.wire_name), &mut used),
+                identifier_words: field.ty.identifier_words.clone(),
+                rust_name: unique_ident(field_ident(&identifier), &mut used),
                 description: field.description.clone(),
                 ty: self.parse_type_ref_with_hint(
                     &field.ty,

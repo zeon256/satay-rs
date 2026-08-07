@@ -26,14 +26,16 @@ pub(crate) struct ValidatedSataySchema {
     pub(crate) treat_error_as_none: bool,
     pub(crate) none_if: Vec<String>,
     pub(crate) ignore: bool,
+    pub(crate) identifier_words: Option<Vec<String>>,
 }
 
-pub(super) fn reject_ignore_outside_object_property(
+pub(super) fn reject_object_property_options_outside_object_property(
     schema: &OasObjectSchema,
     context: &str,
 ) -> Result<(), ValidationError> {
     let options = schema_options(schema, context)?.unwrap_or_default();
-    validate_ignore(&options, context, false).map(|_| ())
+    validate_ignore(&options, context, false)?;
+    validate_identifier(&options, context, false).map(|_| ())
 }
 
 pub(super) fn validate_component_enum_satay(
@@ -67,6 +69,7 @@ pub(super) fn validate_type_satay(
     };
     let treat_error_as_none = allow_field_options && options.treat_error_as_none.unwrap_or(false);
     let ignore = validate_ignore(&options, context, allow_field_options)?;
+    let identifier_words = validate_identifier(&options, context, allow_field_options)?;
 
     validate_satay_integer_type(schema_type, parse_as, explicit_integer_type, context)?;
 
@@ -123,8 +126,27 @@ pub(super) fn validate_type_satay(
         treat_error_as_none,
         none_if,
         ignore,
+        identifier_words,
         ..ValidatedSataySchema::default()
     })
+}
+
+fn validate_identifier(
+    options: &SataySchemaOptions,
+    context: &str,
+    allow_object_property: bool,
+) -> Result<Option<Vec<String>>, ValidationError> {
+    if options.identifier.is_some() && !allow_object_property {
+        return Err(ValidationError::SatayIdentifierRequiresObjectProperty {
+            context: context.to_owned(),
+        });
+    }
+
+    Ok(options
+        .identifier
+        .as_ref()
+        .filter(|_| allow_object_property)
+        .map(|identifier| identifier.words().to_vec()))
 }
 
 fn validate_ignore(
@@ -403,6 +425,31 @@ mod tests {
             error,
             ValidationError::SatayIgnoreRequiresObjectProperty { context }
                 if context == "schema `Metadata`"
+        ));
+    }
+
+    #[test]
+    fn validates_identifier_only_on_object_properties() {
+        let schema = schema_with_satay(json!({ "identifier": "request-id" }));
+
+        let property =
+            validate_type_satay(&schema, Some(OasSchemaType::String), "User.request", true)
+                .unwrap();
+        assert_eq!(
+            property.identifier_words,
+            Some(vec!["request".to_owned(), "id".to_owned()])
+        );
+
+        let error = validation_error(validate_type_satay(
+            &schema,
+            Some(OasSchemaType::String),
+            "schema `RequestIdentifier`",
+            false,
+        ));
+        assert!(matches!(
+            error,
+            ValidationError::SatayIdentifierRequiresObjectProperty { context }
+                if context == "schema `RequestIdentifier`"
         ));
     }
 

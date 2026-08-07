@@ -1,0 +1,46 @@
+openapi: 3.1.0
+info:
+  title: Bus Stops API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    BusStop:
+      type: object
+      required:
+        - BusStopCode
+        - RoadName
+        - Description
+        - Latitude
+        - Longitude
+        - RequestIdentifier
+        - WireKeyword
+      properties:
+        BusStopCode:
+          type: string
+          x-satay:
+            parse-as: u32
+        RoadName:
+          type: string
+        Description:
+          type: string
+          x-satay:
+            identifier: desc
+        Latitude:
+          type: number
+          format: double
+          x-satay:
+            identifier: lat
+        Longitude:
+          type: number
+          format: double
+          x-satay:
+            identifier: long
+        RequestIdentifier:
+          type: string
+          x-satay:
+            identifier: request-id
+        WireKeyword:
+          type: string
+          x-satay:
+            identifier: type
