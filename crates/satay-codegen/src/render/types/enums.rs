@@ -125,7 +125,6 @@ fn render_open_enum_deserialize_impl(name: &syn::Ident, enum_: &Enum) -> syn::It
             where
                 D: serde::Deserializer<'de>,
             {
-                use serde::Deserialize;
                 let value = String::deserialize(deserializer)?;
                 Ok(match value.as_str() {
                     #(#deserialize_arms)*

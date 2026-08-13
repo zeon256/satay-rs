@@ -214,7 +214,6 @@ components:
         &types_rs,
         "serde :: Deserialize :: deserialize"
     ));
-    assert!(contains_tokens(&types_rs, "use serde :: Deserialize ;"));
     assert!(contains_tokens(
         &types_rs,
         "String :: deserialize ( deserializer )"
