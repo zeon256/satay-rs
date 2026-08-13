@@ -208,6 +208,17 @@ components:
         &types_rs,
         "impl < 'de > serde::Deserialize < 'de > for AudioTranscriptionModel"
     ));
+    // Regression for #155: must not emit the long UFCS path that fires the
+    // `minimal_imports` lint; reference `Deserialize` unqualified instead.
+    assert!(!contains_tokens(
+        &types_rs,
+        "serde :: Deserialize :: deserialize"
+    ));
+    assert!(contains_tokens(&types_rs, "use serde :: Deserialize ;"));
+    assert!(contains_tokens(
+        &types_rs,
+        "String :: deserialize ( deserializer )"
+    ));
 }
 
 #[test]
