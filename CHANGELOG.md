@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.2](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.15.1...satay-codegen-v0.15.2) - 2026-08-13
+
+### Fixed
+
+- *(codegen)* dont emit serde import in in open enum
+
 ## [0.15.1](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.15.0...satay-codegen-v0.15.1) - 2026-08-13
 
 ### Fixed
