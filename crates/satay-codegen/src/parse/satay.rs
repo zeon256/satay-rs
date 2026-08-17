@@ -24,6 +24,9 @@ pub(crate) struct SataySchemaOptions {
     pub(crate) integer_type: Option<SatayIntegerTypeWire>,
     pub(crate) treat_error_as_none: Option<bool>,
     pub(crate) none_if: Option<Vec<String>>,
+    pub(crate) true_values: Option<Vec<String>>,
+    pub(crate) false_values: Option<Vec<String>>,
+    pub(crate) unknown_as: Option<bool>,
     pub(crate) enum_variants: Option<BTreeMap<String, String>>,
     pub(crate) ignore: Option<bool>,
     pub(crate) identifier: Option<SatayIdentifier>,
@@ -388,6 +391,9 @@ mod tests {
             "integer-type": "u16",
             "treat-error-as-none": true,
             "none-if": ["", "-"],
+            "true-values": ["Y", "Yes"],
+            "false-values": ["N", "No"],
+            "unknown-as": false,
             "enum-variants": { "A": "Available" },
             "ignore": true,
             "identifier": "request-id",
@@ -401,6 +407,15 @@ mod tests {
         assert_eq!(options.integer_type(), Some(IntegerType::U16));
         assert_eq!(options.treat_error_as_none, Some(true));
         assert_eq!(options.none_if, Some(vec![String::new(), "-".to_owned()]));
+        assert_eq!(
+            options.true_values,
+            Some(vec!["Y".to_owned(), "Yes".to_owned()])
+        );
+        assert_eq!(
+            options.false_values,
+            Some(vec!["N".to_owned(), "No".to_owned()])
+        );
+        assert_eq!(options.unknown_as, Some(false));
         assert_eq!(options.ignore, Some(true));
         assert_eq!(
             options.identifier.as_ref().map(SatayIdentifier::words),
@@ -471,6 +486,8 @@ mod tests {
             (json!({ "ignore": "yes" }), "x-satay.ignore"),
             (json!({ "identifier": "request_id" }), "x-satay.identifier"),
             (json!({ "identifier": 7 }), "x-satay.identifier"),
+            (json!({ "true-values": [true] }), "x-satay.true-values[0]"),
+            (json!({ "unknown-as": "false" }), "x-satay.unknown-as"),
         ] {
             let schema = schema_with_satay(value);
             assert_eq!(

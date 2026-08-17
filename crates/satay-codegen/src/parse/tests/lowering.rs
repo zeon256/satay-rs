@@ -321,7 +321,10 @@ components:
     let reading = component(&api, "Reading");
     match &reading.kind {
         ComponentKind::Struct(fields) => {
-            assert_eq!(field(fields, "id").ty, TypeRef::ParsedString(ParseAs::U32));
+            assert_eq!(
+                field(fields, "id").ty,
+                TypeRef::ParsedString(StringCodec::Standard(ParseAs::U32))
+            );
             assert_eq!(
                 field(fields, "nickname").ty,
                 TypeRef::Option(Box::new(TypeRef::String))
@@ -331,7 +334,10 @@ components:
     }
 
     let reading_id = parameter(&api.operations[0], "readingId");
-    assert_eq!(reading_id.ty, TypeRef::ParsedString(ParseAs::U32));
+    assert_eq!(
+        reading_id.ty,
+        TypeRef::ParsedString(StringCodec::Standard(ParseAs::U32))
+    );
 }
 
 #[test]

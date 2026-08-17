@@ -8,7 +8,7 @@ use super::resolve::ResolvedDocument;
 use crate::error::ValidationError;
 use crate::model::{
     Enum, HttpMethod, IntegerType, ParameterLocation, ParseAs, PathSegment, RangeScalar,
-    ResponseStatus, Validation,
+    ResponseStatus, StringCodec, Validation,
 };
 
 #[derive(Debug)]
@@ -153,7 +153,7 @@ impl ValidatedType {
 pub(crate) enum ValidatedTypeKind {
     Named(String),
     String,
-    ParsedString(ParseAs),
+    ParsedString(StringCodec),
     ParsedInteger(ParseAs),
     Integer(IntegerType),
     F32,

@@ -77,19 +77,19 @@ components:
         ComponentKind::Struct(fields) => {
             assert_eq!(
                 field(fields, "stop").ty,
-                TypeRef::ParsedString(ParseAs::U32)
+                TypeRef::ParsedString(StringCodec::Standard(ParseAs::U32))
             );
             assert_eq!(
                 field(fields, "latitude").ty,
-                TypeRef::ParsedString(ParseAs::F64)
+                TypeRef::ParsedString(StringCodec::Standard(ParseAs::F64))
             );
             assert_eq!(
                 field(fields, "visit").ty,
-                TypeRef::ParsedString(ParseAs::U8)
+                TypeRef::ParsedString(StringCodec::Standard(ParseAs::U8))
             );
             assert_eq!(
                 field(fields, "monitored").ty,
-                TypeRef::ParsedString(ParseAs::Bool)
+                TypeRef::ParsedString(StringCodec::Standard(ParseAs::Bool))
             );
             assert_eq!(
                 field(fields, "numericMonitored").ty,
@@ -97,7 +97,7 @@ components:
             );
             assert_eq!(
                 field(fields, "estimatedArrival").ty,
-                TypeRef::ParsedString(ParseAs::OffsetDateTime)
+                TypeRef::ParsedString(StringCodec::Standard(ParseAs::OffsetDateTime))
             );
             assert_eq!(
                 field(fields, "frequency").ty,
@@ -144,7 +144,10 @@ paths:
     );
 
     let date = parameter(&api.operations[0], "date");
-    assert_eq!(date.ty, TypeRef::ParsedString(ParseAs::Date));
+    assert_eq!(
+        date.ty,
+        TypeRef::ParsedString(StringCodec::Standard(ParseAs::Date))
+    );
     assert!(!date.required);
 }
 
@@ -174,7 +177,10 @@ paths:
     );
 
     let date = parameter(&api.operations[0], "date");
-    assert_eq!(date.ty, TypeRef::ParsedString(ParseAs::NaiveDateTime));
+    assert_eq!(
+        date.ty,
+        TypeRef::ParsedString(StringCodec::Standard(ParseAs::NaiveDateTime))
+    );
     assert!(!date.required);
 }
 
@@ -925,6 +931,73 @@ components:
     };
     assert_eq!(field(fields, "wbgt").none_if, ["NA", "-"]);
     assert_eq!(field(fields, "optionalWbgt").none_if, ["NA"]);
+}
+
+#[test]
+fn parses_configured_boolean_string_mappings() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    TaxiStand:
+      type: object
+      required: [Bfa]
+      properties:
+        Bfa:
+          type: string
+          x-satay:
+            parse-as: bool
+            true-values: [Y, Yes, "1", "true"]
+            false-values: [N, No, "0", "false", ""]
+            unknown-as: false
+"#,
+    );
+
+    let taxi_stand = component(&api, "TaxiStand");
+    let ComponentKind::Struct(fields) = &taxi_stand.kind else {
+        panic!("expected TaxiStand struct");
+    };
+    let TypeRef::ParsedString(StringCodec::MappedBool(mapping)) = &field(fields, "Bfa").ty else {
+        panic!("expected mapped boolean string codec");
+    };
+    assert_eq!(mapping.true_values, ["Y", "Yes", "1", "true"]);
+    assert_eq!(mapping.false_values, ["N", "No", "0", "false", ""]);
+    assert_eq!(mapping.unknown_as, Some(false));
+}
+
+#[test]
+fn rejects_overlapping_boolean_string_mappings() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    TaxiStand:
+      type: object
+      properties:
+        Bfa:
+          type: string
+          x-satay:
+            parse-as: bool
+            true-values: [Y, unknown]
+            false-values: [N, unknown]
+"#,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::OverlappingSatayBoolMapping { context, value }
+            if context == "property `TaxiStand.Bfa`" && value == "unknown"
+    ));
 }
 
 #[test]

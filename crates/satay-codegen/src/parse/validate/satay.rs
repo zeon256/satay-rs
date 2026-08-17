@@ -9,11 +9,11 @@ use super::super::satay::{
     parse_satay_parse_as, satay_parse_as_wire, schema_options, validate_satay_integer_type,
 };
 use crate::error::ValidationError;
-use crate::model::{IntegerType, ParseAs, RangeScalar};
+use crate::model::{BoolStringMapping, IntegerType, ParseAs, RangeScalar, StringCodec};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ValidatedParseAs {
-    ParsedString(ParseAs),
+    ParsedString(StringCodec),
     ParsedInteger(ParseAs),
     Range(RangeScalar),
 }
@@ -83,9 +83,9 @@ pub(super) fn validate_type_satay(
                     context,
                 )?))
             }
-            (Some(OasSchemaType::String), parse_as) => {
-                Some(ValidatedParseAs::ParsedString(parse_as))
-            }
+            (Some(OasSchemaType::String), parse_as) => Some(ValidatedParseAs::ParsedString(
+                StringCodec::Standard(parse_as),
+            )),
             (Some(OasSchemaType::Integer), ParseAs::Bool) => {
                 Some(ValidatedParseAs::ParsedInteger(parse_as))
             }
@@ -109,7 +109,7 @@ pub(super) fn validate_type_satay(
             context: context.to_owned(),
         });
     }
-    if !none_if.is_empty() && !matches!(parse_as, Some(ValidatedParseAs::ParsedString(_))) {
+    if !none_if.is_empty() && !matches!(&parse_as, Some(ValidatedParseAs::ParsedString(_))) {
         return Err(ValidationError::SatayNoneIfRequiresParsedString {
             context: context.to_owned(),
         });
@@ -120,6 +120,16 @@ pub(super) fn validate_type_satay(
         });
     }
 
+    let bool_string_mapping =
+        validate_bool_string_mapping(&options, parse_as.as_ref(), &none_if, context)?;
+    let parse_as = match (parse_as, bool_string_mapping) {
+        (Some(ValidatedParseAs::ParsedString(_)), Some(mapping)) => Some(
+            ValidatedParseAs::ParsedString(StringCodec::MappedBool(mapping)),
+        ),
+        (parse_as, None) => parse_as,
+        _ => unreachable!("validated boolean mapping requires a parsed string"),
+    };
+
     Ok(ValidatedSataySchema {
         parse_as,
         explicit_integer_type,
@@ -129,6 +139,74 @@ pub(super) fn validate_type_satay(
         identifier_words,
         ..ValidatedSataySchema::default()
     })
+}
+
+fn validate_bool_string_mapping(
+    options: &SataySchemaOptions,
+    parse_as: Option<&ValidatedParseAs>,
+    none_if: &[String],
+    context: &str,
+) -> Result<Option<BoolStringMapping>, ValidationError> {
+    let configured = options.true_values.is_some()
+        || options.false_values.is_some()
+        || options.unknown_as.is_some();
+    if !configured {
+        return Ok(None);
+    }
+    if !matches!(
+        parse_as,
+        Some(ValidatedParseAs::ParsedString(codec)) if codec.parse_as() == ParseAs::Bool
+    ) {
+        return Err(ValidationError::SatayBoolMappingRequiresParsedStringBool {
+            context: context.to_owned(),
+        });
+    }
+
+    let (Some(true_values), Some(false_values)) =
+        (options.true_values.as_ref(), options.false_values.as_ref())
+    else {
+        return Err(ValidationError::IncompleteSatayBoolMapping {
+            context: context.to_owned(),
+        });
+    };
+    if true_values.is_empty() {
+        return Err(ValidationError::EmptySatayBoolMapping {
+            context: context.to_owned(),
+            keyword: "true-values",
+        });
+    }
+    if false_values.is_empty() {
+        return Err(ValidationError::EmptySatayBoolMapping {
+            context: context.to_owned(),
+            keyword: "false-values",
+        });
+    }
+
+    let true_values_set = true_values.iter().collect::<BTreeSet<_>>();
+    if let Some(value) = false_values
+        .iter()
+        .find(|value| true_values_set.contains(value))
+    {
+        return Err(ValidationError::OverlappingSatayBoolMapping {
+            context: context.to_owned(),
+            value: value.clone(),
+        });
+    }
+
+    if let Some(value) = none_if.iter().find(|value| {
+        true_values_set.contains(value) || false_values.iter().any(|mapped| mapped == *value)
+    }) {
+        return Err(ValidationError::OverlappingSatayBoolMappingNoneIf {
+            context: context.to_owned(),
+            value: value.clone(),
+        });
+    }
+
+    Ok(Some(BoolStringMapping {
+        true_values: true_values.clone(),
+        false_values: false_values.clone(),
+        unknown_as: options.unknown_as,
+    }))
 }
 
 fn validate_identifier(
@@ -226,7 +304,9 @@ mod tests {
 
         assert_eq!(
             validated.parse_as,
-            Some(ValidatedParseAs::ParsedString(ParseAs::OffsetDateTime))
+            Some(ValidatedParseAs::ParsedString(StringCodec::Standard(
+                ParseAs::OffsetDateTime
+            )))
         );
         assert_eq!(validated.explicit_integer_type, None);
         assert!(!validated.treat_error_as_none);
@@ -246,7 +326,9 @@ mod tests {
 
         assert_eq!(
             validated.parse_as,
-            Some(ValidatedParseAs::ParsedString(ParseAs::Date))
+            Some(ValidatedParseAs::ParsedString(StringCodec::Standard(
+                ParseAs::Date
+            )))
         );
     }
 
@@ -264,7 +346,9 @@ mod tests {
 
         assert_eq!(
             validated.parse_as,
-            Some(ValidatedParseAs::ParsedString(ParseAs::NaiveDateTime))
+            Some(ValidatedParseAs::ParsedString(StringCodec::Standard(
+                ParseAs::NaiveDateTime
+            )))
         );
     }
 
@@ -280,6 +364,145 @@ mod tests {
             validated.parse_as,
             Some(ValidatedParseAs::ParsedInteger(ParseAs::Bool))
         );
+    }
+
+    #[test]
+    fn validates_complete_boolean_string_mapping() {
+        let schema = schema_with_satay(json!({
+            "parse-as": "bool",
+            "true-values": ["Y", "Yes"],
+            "false-values": ["N", "No"],
+            "unknown-as": false,
+        }));
+
+        let validated =
+            validate_type_satay(&schema, Some(OasSchemaType::String), "Flag.enabled", true)
+                .unwrap();
+
+        assert_eq!(
+            validated.parse_as,
+            Some(ValidatedParseAs::ParsedString(StringCodec::MappedBool(
+                BoolStringMapping {
+                    true_values: vec!["Y".to_owned(), "Yes".to_owned()],
+                    false_values: vec!["N".to_owned(), "No".to_owned()],
+                    unknown_as: Some(false),
+                }
+            )))
+        );
+    }
+
+    #[test]
+    fn rejects_incomplete_or_empty_boolean_string_mappings() {
+        let incomplete = schema_with_satay(json!({
+            "parse-as": "bool",
+            "true-values": ["Y"],
+        }));
+        assert!(matches!(
+            validation_error(validate_type_satay(
+                &incomplete,
+                Some(OasSchemaType::String),
+                "Flag.enabled",
+                true,
+            )),
+            ValidationError::IncompleteSatayBoolMapping { context }
+                if context == "Flag.enabled"
+        ));
+
+        let empty = schema_with_satay(json!({
+            "parse-as": "bool",
+            "true-values": [],
+            "false-values": ["N"],
+        }));
+        assert!(matches!(
+            validation_error(validate_type_satay(
+                &empty,
+                Some(OasSchemaType::String),
+                "Flag.enabled",
+                true,
+            )),
+            ValidationError::EmptySatayBoolMapping {
+                context,
+                keyword: "true-values",
+            } if context == "Flag.enabled"
+        ));
+    }
+
+    #[test]
+    fn rejects_overlapping_boolean_and_none_mappings() {
+        let overlapping = schema_with_satay(json!({
+            "parse-as": "bool",
+            "true-values": ["Y", "same"],
+            "false-values": ["N", "same"],
+        }));
+        assert!(matches!(
+            validation_error(validate_type_satay(
+                &overlapping,
+                Some(OasSchemaType::String),
+                "Flag.enabled",
+                true,
+            )),
+            ValidationError::OverlappingSatayBoolMapping { context, value }
+                if context == "Flag.enabled" && value == "same"
+        ));
+
+        let overlaps_none = schema_with_satay(json!({
+            "parse-as": "bool",
+            "true-values": ["Y"],
+            "false-values": ["N"],
+            "none-if": ["N"],
+        }));
+        assert!(matches!(
+            validation_error(validate_type_satay(
+                &overlaps_none,
+                Some(OasSchemaType::String),
+                "Flag.enabled",
+                true,
+            )),
+            ValidationError::OverlappingSatayBoolMappingNoneIf { context, value }
+                if context == "Flag.enabled" && value == "N"
+        ));
+    }
+
+    #[test]
+    fn allows_boolean_mappings_outside_fields_but_rejects_other_parsers() {
+        let schema = schema_with_satay(json!({
+            "parse-as": "bool",
+            "true-values": ["Y"],
+            "false-values": ["N"],
+        }));
+        let parameter = validate_type_satay(
+            &schema,
+            Some(OasSchemaType::String),
+            "parameter `enabled`",
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            parameter.parse_as,
+            Some(ValidatedParseAs::ParsedString(StringCodec::MappedBool(
+                BoolStringMapping {
+                    true_values: vec!["Y".to_owned()],
+                    false_values: vec!["N".to_owned()],
+                    unknown_as: None,
+                }
+            )))
+        );
+
+        let wrong_parser = schema_with_satay(json!({
+            "parse-as": "u8",
+            "true-values": ["Y"],
+            "false-values": ["N"],
+        }));
+        assert!(matches!(
+            validation_error(validate_type_satay(
+                &wrong_parser,
+                Some(OasSchemaType::String),
+                "Flag.enabled",
+                true,
+            )),
+            ValidationError::SatayBoolMappingRequiresParsedStringBool { context }
+                if context == "Flag.enabled"
+        ));
     }
 
     #[test]

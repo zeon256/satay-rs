@@ -165,16 +165,17 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
                 .as_ref()
                 .map(|words| words.join("-"))
                 .unwrap_or_else(|| field.wire_name.clone());
+            let ty = self.parse_type_ref_with_hint(
+                &field.ty,
+                &format!("{schema_name} {}", field.wire_name),
+                registry,
+            );
             parsed.push(Field {
                 wire_name: field.wire_name.clone(),
                 identifier_words: field.ty.identifier_words.clone(),
                 rust_name: unique_ident(field_ident(&identifier), &mut used),
                 description: field.description.clone(),
-                ty: self.parse_type_ref_with_hint(
-                    &field.ty,
-                    &format!("{schema_name} {}", field.wire_name),
-                    registry,
-                ),
+                ty,
                 required: field.required,
                 treat_error_as_none: field.treat_error_as_none,
                 none_if: field.ty.none_if.clone(),
@@ -194,7 +195,7 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
         match kind {
             ValidatedTypeKind::Named(rust_name) => self.component_ref(rust_name, registry),
             ValidatedTypeKind::String => TypeRef::String,
-            ValidatedTypeKind::ParsedString(parse_as) => TypeRef::ParsedString(*parse_as),
+            ValidatedTypeKind::ParsedString(codec) => TypeRef::ParsedString(codec.clone()),
             ValidatedTypeKind::ParsedInteger(parse_as) => TypeRef::ParsedInteger(*parse_as),
             ValidatedTypeKind::Integer(integer_type) => TypeRef::Integer(*integer_type),
             ValidatedTypeKind::F32 => TypeRef::F32,

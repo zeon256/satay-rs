@@ -2,7 +2,8 @@ use proc_macro2::Literal;
 use syn::parse_quote;
 
 use crate::model::{
-    Operation, Parameter, ParameterLocation, ParseAs, PathSegment, TypeRef, is_array_type,
+    Operation, Parameter, ParameterLocation, ParseAs, PathSegment, StringCodec, TypeRef,
+    is_array_type,
 };
 
 use super::super::{doc_attrs, ident, input_field, lit_str, rust_field_type};
@@ -261,9 +262,8 @@ fn array_values_expr(base: syn::Expr, ty: &TypeRef, base_kind: ArrayValueBase) -
 fn value_expr(base: syn::Expr, ty: &TypeRef, base_kind: ValueBase) -> syn::Expr {
     match ty.non_option() {
         TypeRef::String => parse_quote!(#base.as_str()),
-        TypeRef::ParsedString(parse_as) | TypeRef::ParsedInteger(parse_as) => {
-            parsed_value_expr(base, *parse_as, base_kind)
-        }
+        TypeRef::ParsedString(codec) => parsed_string_value_expr(base, codec, base_kind),
+        TypeRef::ParsedInteger(parse_as) => parsed_value_expr(base, *parse_as, base_kind),
         TypeRef::Named(_) => parse_quote!(#base.as_ref()),
         TypeRef::Range(_) => parse_quote!(&#base.to_string()),
         TypeRef::Constrained { inner, .. } => {
@@ -284,9 +284,8 @@ fn constrained_value_expr(base: syn::Expr, inner: &TypeRef, base_kind: ValueBase
         TypeRef::String => parse_quote!(#base.as_ref()),
         TypeRef::Named(_) => parse_quote!(#base.as_ref()),
         TypeRef::Range(_) => parse_quote!(&#base.to_string()),
-        TypeRef::ParsedString(parse_as) | TypeRef::ParsedInteger(parse_as) => {
-            parsed_value_expr(base, *parse_as, base_kind)
-        }
+        TypeRef::ParsedString(codec) => parsed_string_value_expr(base, codec, base_kind),
+        TypeRef::ParsedInteger(parse_as) => parsed_value_expr(base, *parse_as, base_kind),
         TypeRef::Integer(_) | TypeRef::F32 | TypeRef::F64 | TypeRef::Bool => {
             parse_quote!(&#base.to_string())
         }
@@ -295,6 +294,36 @@ fn constrained_value_expr(base: syn::Expr, inner: &TypeRef, base_kind: ValueBase
         }
         TypeRef::Map(_) | TypeRef::JsonValue => {
             unreachable!("map and JSON value parameters are rejected during validation")
+        }
+    }
+}
+
+fn parsed_string_value_expr(
+    base: syn::Expr,
+    codec: &StringCodec,
+    base_kind: ValueBase,
+) -> syn::Expr {
+    match codec {
+        StringCodec::Standard(parse_as) => parsed_value_expr(base, *parse_as, base_kind),
+        StringCodec::MappedBool(mapping) => {
+            let ref_arg = ref_arg(base, base_kind);
+            let canonical_true = lit_str(
+                mapping
+                    .true_values
+                    .first()
+                    .expect("validated true-values list is non-empty"),
+            );
+            let canonical_false = lit_str(
+                mapping
+                    .false_values
+                    .first()
+                    .expect("validated false-values list is non-empty"),
+            );
+            parse_quote!(if *#ref_arg {
+                #canonical_true
+            } else {
+                #canonical_false
+            })
         }
     }
 }
