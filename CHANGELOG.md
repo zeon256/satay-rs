@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.15.3...satay-codegen-v0.16.0) - 2026-08-17
+
+### Added
+
+- *(runtime)* configure boolean string mappings
+
 ### Added
 
 - *(codegen)* configure canonical true and false strings for string-backed boolean fields
