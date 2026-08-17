@@ -247,6 +247,30 @@ pub struct Bus {
 
 The wire format stays a string: serde deserializes from a JSON string and serializes back to one. Supported string-backed `parse-as` values are `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`, `date`, `naive-datetime`, `offset-datetime`, and `time`. Float parsing uses `fast-float`; `date` generates `satay_runtime::Date` and expects `YYYY-MM-DD` values such as `2024-07-16`; optional query parameters become `Option<satay_runtime::Date>` and encode with `satay_runtime::format_date`. `naive-datetime` generates `satay_runtime::PrimitiveDateTime` and expects `YYYY-MM-DDTHH:mm:ss` values such as `2024-07-16T23:59:00`; optional query parameters encode with `satay_runtime::format_naive_datetime`. `offset-datetime` generates `satay_runtime::OffsetDateTime`; `time` generates `satay_runtime::Time` and expects `HHMM` values such as `0620` or `2352`. Nullable `time` fields generate `Option<satay_runtime::Time>` and treat an empty string as `None`. `bool` also supports integer schemas, accepting `1`, `0`, `"1"`, `"0"`, `true`, and `false`; integer-backed bool fields serialize as `1` or `0`.
 
+## `true-values`, `false-values`, and `unknown-as`
+
+Use `x-satay.true-values` and `x-satay.false-values` together on an inline struct property with `type: string` and `parse-as: bool` when the API uses custom boolean strings:
+
+```yaml
+Bfa:
+  type: string
+  x-satay:
+    parse-as: bool
+    true-values: ["Y", "Yes", "1", "true"]
+    false-values: ["N", "No", "0", "false", ""]
+    unknown-as: false
+```
+
+Both value lists are required and must be non-empty. A string cannot appear in both lists. Matching is exact and case-sensitive, with no trimming or normalization; empty strings are valid values. Configuring mappings replaces the default string matching for that field. JSON booleans and numeric `0` or `1` retain their natural boolean meaning, while other JSON numbers are rejected.
+
+An unmatched string fails deserialization by default. Optional `unknown-as: true` or `unknown-as: false` instead maps every unmatched string to that boolean. This fallback applies only to strings and can hide upstream wire-format changes; omit it when drift should fail loudly.
+
+Serialization is canonical: `true` uses the first `true-values` entry and `false` uses the first `false-values` entry. Nullable and optional fields keep the normal Satay field rules: nullable fields accept JSON `null`, optional fields accept missing keys, and optional `None` fields are omitted during serialization.
+
+Boolean mappings can be combined with `none-if` when all configured strings are disjoint. Satay rejects overlap between a boolean list and `none-if`. On deserialization, a `none-if` sentinel becomes `None`; all other strings use the boolean mapping and then `unknown-as`, if present. On serialization, `Some(bool)` uses the canonical boolean value, while a required `None` uses the first `none-if` sentinel.
+
+Mappings may be declared directly on an inline struct property or on a reusable string component. Referencing struct fields inherit the mapping. Path, query, and header parameters also support mappings and encode booleans with the first canonical entries. The options are rejected on `$ref` siblings, integer-backed `parse-as: bool`, and other parsers. `none-if` remains field-only.
+
 ## `none-if`
 
 Use `x-satay.none-if` on a struct property with a string-backed `parse-as` when the API uses one or more sentinel strings for an unavailable value:

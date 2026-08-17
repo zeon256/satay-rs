@@ -166,6 +166,39 @@ pub enum ValidationError {
     #[error("{context} cannot combine x-satay.none-if with x-satay.treat-error-as-none")]
     ConflictingSatayNoneHandling { context: String },
 
+    /// A boolean string mapping was not paired with a string-backed bool parser.
+    ///
+    /// Error message: `{context} uses boolean string mappings without string-backed x-satay.parse-as bool`
+    #[error("{context} uses boolean string mappings without string-backed x-satay.parse-as bool")]
+    SatayBoolMappingRequiresParsedStringBool { context: String },
+
+    /// A boolean string mapping omitted one of its required value lists.
+    ///
+    /// Error message: `{context} must define both x-satay.true-values and x-satay.false-values`
+    #[error("{context} must define both x-satay.true-values and x-satay.false-values")]
+    IncompleteSatayBoolMapping { context: String },
+
+    /// A boolean string mapping contains an empty value list.
+    ///
+    /// Error message: `{context}.x-satay.{keyword} must contain at least one string`
+    #[error("{context}.x-satay.{keyword} must contain at least one string")]
+    EmptySatayBoolMapping {
+        context: String,
+        keyword: &'static str,
+    },
+
+    /// A value appears in both true and false boolean string mappings.
+    ///
+    /// Error message: `{context} maps `{value}` as both true and false`
+    #[error("{context} maps `{value}` as both true and false")]
+    OverlappingSatayBoolMapping { context: String, value: String },
+
+    /// A boolean mapping value is also configured as a null sentinel.
+    ///
+    /// Error message: `{context} maps `{value}` as both a boolean and x-satay.none-if`
+    #[error("{context} maps `{value}` as both a boolean and x-satay.none-if")]
+    OverlappingSatayBoolMappingNoneIf { context: String, value: String },
+
     /// `x-satay.ignore` was applied outside an object property.
     ///
     /// Error message: `{context} uses x-satay.ignore outside an object property`

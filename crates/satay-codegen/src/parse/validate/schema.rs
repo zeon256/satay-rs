@@ -29,7 +29,8 @@ use super::{
 use crate::error::ValidationError;
 use crate::ident::{field_ident, type_ident, unique_ident, variant_ident};
 use crate::model::{
-    Enum, EnumFallback, EnumVariant, IntegerLimit, IntegerType, ParseAs, TypeRef, Validation,
+    Enum, EnumFallback, EnumVariant, IntegerLimit, IntegerType, ParseAs, StringCodec, TypeRef,
+    Validation,
 };
 
 /// Annotation keywords permitted beside a single `allOf`/`$ref` branch.
@@ -182,6 +183,9 @@ fn validate_reference_siblings(
     if options.parse_as.is_some()
         || options.integer_type.is_some()
         || options.none_if.is_some()
+        || options.true_values.is_some()
+        || options.false_values.is_some()
+        || options.unknown_as.is_some()
         || options.enum_variants.is_some()
     {
         let keyword = options
@@ -189,6 +193,9 @@ fn validate_reference_siblings(
             .map(|_| "parse-as")
             .or_else(|| options.integer_type.map(|_| "integer-type"))
             .or_else(|| options.none_if.as_ref().map(|_| "none-if"))
+            .or_else(|| options.true_values.as_ref().map(|_| "true-values"))
+            .or_else(|| options.false_values.as_ref().map(|_| "false-values"))
+            .or_else(|| options.unknown_as.map(|_| "unknown-as"))
             .or_else(|| options.enum_variants.as_ref().map(|_| "enum-variants"))
             .expect("at least one forbidden field is set");
         return Err(ValidationError::UnsupportedRefSiblingKeyword {
@@ -2682,7 +2689,7 @@ fn validate_object_type_schema(
 
 fn validated_parse_as_kind(parse_as: ValidatedParseAs) -> ValidatedTypeKind {
     match parse_as {
-        ValidatedParseAs::ParsedString(parse_as) => ValidatedTypeKind::ParsedString(parse_as),
+        ValidatedParseAs::ParsedString(codec) => ValidatedTypeKind::ParsedString(codec),
         ValidatedParseAs::ParsedInteger(parse_as) => ValidatedTypeKind::ParsedInteger(parse_as),
         ValidatedParseAs::Range(scalar) => ValidatedTypeKind::Range(scalar),
     }
@@ -2780,7 +2787,9 @@ fn validate_inline_type_kind(
 
 fn validate_string_type(schema: &OasObjectSchema) -> Result<ValidatedTypeKind, ValidationError> {
     match schema.format.as_deref() {
-        Some("unixtime") => Ok(ValidatedTypeKind::ParsedString(ParseAs::UnixTime)),
+        Some("unixtime") => Ok(ValidatedTypeKind::ParsedString(StringCodec::Standard(
+            ParseAs::UnixTime,
+        ))),
         _ => Ok(ValidatedTypeKind::String),
     }
 }

@@ -74,7 +74,7 @@ fn render_component(component: &Component, items: &mut Vec<syn::Item>) {
                 fields,
                 true,
             )));
-            if let Some(impl_) = structs::render_none_if_impl(&component.rust_name, fields) {
+            if let Some(impl_) = structs::render_field_serde_impl(&component.rust_name, fields) {
                 items.push(Item::Impl(impl_));
             }
         }

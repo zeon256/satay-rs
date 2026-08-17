@@ -531,6 +531,274 @@ mod tests {
 }
 
 #[test]
+fn x_satay_bool_mappings_generate_configured_serde_behavior() {
+    let files = satay_codegen::generate(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths:
+  /indicators:
+    get:
+      operationId: getIndicators
+      parameters:
+        - name: enabled
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/MappedBool'
+      responses:
+        '204':
+          description: No content
+components:
+  schemas:
+    Indicators:
+      type: object
+      required: [strict, fallback, lossy, requiredNullable, noneMapped]
+      properties:
+        strict:
+          type: string
+          x-satay:
+            parse-as: bool
+            true-values: [Y, Yes, "1", "true"]
+            false-values: [N, No, "0", "false", ""]
+        fallback:
+          type: string
+          x-satay:
+            parse-as: bool
+            true-values: [Y]
+            false-values: [N]
+            unknown-as: false
+        lossy:
+          type: string
+          x-satay:
+            parse-as: bool
+            true-values: [Y]
+            false-values: [N]
+            treat-error-as-none: true
+        optional:
+          type: [string, "null"]
+          x-satay:
+            parse-as: bool
+            true-values: [Y]
+            false-values: [N]
+        requiredNullable:
+          type: [string, "null"]
+          x-satay:
+            parse-as: bool
+            true-values: [Y]
+            false-values: [N]
+        reusable:
+          $ref: '#/components/schemas/MappedBool'
+        noneMapped:
+          type: string
+          x-satay:
+            parse-as: bool
+            true-values: [Y]
+            false-values: [N]
+            none-if: [""]
+    MappedBool:
+      type: string
+      x-satay:
+        parse-as: bool
+        true-values: [Y]
+        false-values: [N]
+"#,
+    )
+    .expect("generate configured bool fixture");
+
+    let types_rs = parse_rust(find_file(&files, "types.rs"));
+    let indicators = find_struct(&types_rs, "Indicators");
+    assert_field(indicators, "strict", "bool");
+    assert_field(indicators, "fallback", "bool");
+    assert_field(indicators, "lossy", "Option<bool>");
+    assert_field(indicators, "optional", "Option<bool>");
+    assert_field(indicators, "required_nullable", "Option<bool>");
+    assert_field(indicators, "reusable", "Option<bool>");
+    assert_field(indicators, "none_mapped", "Option<bool>");
+    assert_attr_contains(
+        &field(indicators, "strict").attrs,
+        "cfg_attr",
+        r#"deserialize_with = "Indicators::__satay_deserialize_strict_bool_mapping""#,
+    );
+    assert!(contains_tokens(&types_rs, r#"&["Y", "Yes", "1", "true"]"#));
+    assert!(contains_tokens(
+        &types_rs,
+        r#"&["N", "No", "0", "false", ""]"#
+    ));
+    assert!(contains_tokens(
+        &types_rs,
+        "satay_runtime::serde_string::as_bool::option::deserialize_mapped"
+    ));
+    assert!(contains_tokens(
+        &types_rs,
+        "satay_runtime::serde_string::as_bool::serialize_mapped_none_if"
+    ));
+
+    let temp = tempfile::tempdir().expect("create temp crate");
+    let crate_dir = temp.path();
+    let generated_dir = crate_dir.join("src/generated");
+    let runtime_path = runtime_path_toml();
+    write_manifest(crate_dir, &runtime_path, false, false);
+    write_generated_files(&generated_dir, &files);
+    let lib_contents = r##"pub mod generated;
+
+#[cfg(test)]
+mod tests {
+    use super::generated::{GetIndicatorsInput, Indicators, operations};
+    use serde_json::{Value, json};
+
+    fn value_with(strict: Value, fallback: Value) -> Value {
+        json!({
+            "strict": strict,
+            "fallback": fallback,
+            "lossy": "Y",
+            "requiredNullable": "Y",
+            "noneMapped": "Y"
+        })
+    }
+
+    #[test]
+    fn configured_values_decode_and_use_first_values_for_serialization() {
+        for value in ["Y", "Yes", "1", "true"] {
+            let decoded: Indicators =
+                serde_json::from_value(value_with(json!(value), json!("Y"))).unwrap();
+            assert!(decoded.strict, "{value}");
+        }
+        for value in ["N", "No", "0", "false", ""] {
+            let decoded: Indicators =
+                serde_json::from_value(value_with(json!(value), json!("Y"))).unwrap();
+            assert!(!decoded.strict, "{value}");
+        }
+
+        let true_parts = operations::get_indicators::get_indicators_parts(
+            GetIndicatorsInput::new(true),
+        )
+        .unwrap();
+        assert_eq!(true_parts.uri, "/indicators?enabled=Y");
+        let false_parts = operations::get_indicators::get_indicators_parts(
+            GetIndicatorsInput::new(false),
+        )
+        .unwrap();
+        assert_eq!(false_parts.uri, "/indicators?enabled=N");
+
+        let encoded = serde_json::to_value(Indicators {
+            strict: true,
+            fallback: false,
+            lossy: None,
+            optional: None,
+            reusable: Some(true),
+            required_nullable: Some(false),
+            none_mapped: None,
+        })
+        .unwrap();
+        assert_eq!(
+            encoded,
+            json!({
+                "strict": "Y",
+                "fallback": "N",
+                "requiredNullable": "N",
+                "reusable": "Y",
+                "noneMapped": ""
+            })
+        );
+    }
+
+    #[test]
+    fn unknown_values_are_strict_unless_a_fallback_is_configured() {
+        let fallback: Indicators =
+            serde_json::from_value(value_with(json!("Y"), json!("upstream-drift"))).unwrap();
+        assert!(!fallback.fallback);
+
+        let lossy: Indicators = serde_json::from_value(json!({
+            "strict": "Y",
+            "fallback": "N",
+            "lossy": "upstream-drift",
+            "requiredNullable": "Y",
+            "noneMapped": "Y"
+        }))
+        .unwrap();
+        assert_eq!(lossy.lossy, None);
+
+        assert!(
+            serde_json::from_value::<Indicators>(value_with(json!("unknown"), json!("Y")))
+                .is_err()
+        );
+        assert!(
+            serde_json::from_value::<Indicators>(value_with(json!("yes"), json!("Y"))).is_err()
+        );
+        assert!(
+            serde_json::from_value::<Indicators>(value_with(json!(2), json!("Y"))).is_err()
+        );
+
+        let numeric: Indicators =
+            serde_json::from_value(value_with(json!(1), json!("Y"))).unwrap();
+        assert!(numeric.strict);
+        let boolean: Indicators =
+            serde_json::from_value(value_with(json!(false), json!("Y"))).unwrap();
+        assert!(!boolean.strict);
+    }
+
+    #[test]
+    fn nullable_and_none_if_fields_preserve_their_distinct_contracts() {
+        let decoded: Indicators = serde_json::from_value(json!({
+            "strict": "Y",
+            "fallback": "N",
+            "optional": null,
+            "requiredNullable": null,
+            "noneMapped": ""
+        }))
+        .unwrap();
+        assert_eq!(decoded.optional, None);
+        assert_eq!(decoded.required_nullable, None);
+        assert_eq!(decoded.none_mapped, None);
+
+        let missing_optional: Indicators = serde_json::from_value(json!({
+            "strict": "Y",
+            "fallback": "N",
+            "requiredNullable": "N",
+            "noneMapped": "N"
+        }))
+        .unwrap();
+        assert_eq!(missing_optional.optional, None);
+        assert_eq!(missing_optional.required_nullable, Some(false));
+        assert_eq!(missing_optional.none_mapped, Some(false));
+
+        assert!(serde_json::from_value::<Indicators>(json!({
+            "strict": null,
+            "fallback": "N",
+            "requiredNullable": "Y",
+            "noneMapped": "Y"
+        }))
+        .is_err());
+        assert!(serde_json::from_value::<Indicators>(json!({
+            "strict": "Y",
+            "fallback": "N",
+            "noneMapped": "Y"
+        }))
+        .is_err());
+        assert!(serde_json::from_value::<Indicators>(json!({
+            "strict": "Y",
+            "fallback": "N",
+            "requiredNullable": "Y",
+            "noneMapped": null
+        }))
+        .is_err());
+    }
+}
+"##;
+    fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
+
+    run_temp_cargo(
+        crate_dir,
+        "test",
+        &[],
+        "configured bool generated crate tests",
+    );
+}
+
+#[test]
 fn x_satay_parse_as_date_generates_query_parameter_encoding() {
     let files = satay_codegen::generate(
         r#"

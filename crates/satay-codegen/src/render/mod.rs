@@ -219,9 +219,8 @@ pub fn doc_attrs(description: Option<&str>) -> Vec<syn::Attribute> {
 pub fn rust_type(ty: &TypeRef) -> syn::Type {
     match ty {
         TypeRef::String => parse_quote!(String),
-        TypeRef::ParsedString(parse_as) | TypeRef::ParsedInteger(parse_as) => {
-            parse_as_rust_type(*parse_as)
-        }
+        TypeRef::ParsedString(codec) => parse_as_rust_type(codec.parse_as()),
+        TypeRef::ParsedInteger(parse_as) => parse_as_rust_type(*parse_as),
         TypeRef::Integer(integer_type) => integer_rust_type(*integer_type),
         TypeRef::F32 => parse_quote!(f32),
         TypeRef::F64 => parse_quote!(f64),

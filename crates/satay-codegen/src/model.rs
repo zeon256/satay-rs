@@ -148,6 +148,35 @@ pub(crate) struct FloatLimit {
     pub(crate) exclusive: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BoolStringMapping {
+    pub(crate) true_values: Vec<String>,
+    pub(crate) false_values: Vec<String>,
+    pub(crate) unknown_as: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum StringCodec {
+    Standard(ParseAs),
+    MappedBool(BoolStringMapping),
+}
+
+impl StringCodec {
+    pub(crate) fn parse_as(&self) -> ParseAs {
+        match self {
+            Self::Standard(parse_as) => *parse_as,
+            Self::MappedBool(_) => ParseAs::Bool,
+        }
+    }
+
+    pub(crate) fn bool_string_mapping(&self) -> Option<&BoolStringMapping> {
+        match self {
+            Self::MappedBool(mapping) => Some(mapping),
+            Self::Standard(_) => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct Field {
     pub(crate) wire_name: String,
@@ -206,7 +235,7 @@ pub(crate) struct UnionVariant {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TypeRef {
     String,
-    ParsedString(ParseAs),
+    ParsedString(StringCodec),
     ParsedInteger(ParseAs),
     Integer(IntegerType),
     F32,
