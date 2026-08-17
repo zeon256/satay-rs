@@ -153,7 +153,11 @@ fn render_none_if_functions(field: &Field) -> [syn::ImplItemFn; 2] {
             }
         ),
         parse_quote!(
-            #[allow(clippy::ref_option)]
+            #[allow(
+                clippy::ref_option,
+                clippy::trivially_copy_pass_by_ref,
+                reason = "Serde `serialize_with` receives a reference to the field type"
+            )]
             fn #serialize_name<S>(
                 value: &Option<#inner_ty>,
                 serializer: S,

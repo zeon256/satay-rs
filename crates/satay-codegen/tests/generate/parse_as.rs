@@ -358,7 +358,7 @@ components:
   schemas:
     Reading:
       type: object
-      required: [requiredWbgt, nullableWbgt]
+      required: [requiredWbgt, nullableWbgt, maximumSpeed]
       properties:
         requiredWbgt:
           type: string
@@ -375,6 +375,11 @@ components:
           x-satay:
             parse-as: f64
             none-if: [NA]
+        maximumSpeed:
+          type: string
+          x-satay:
+            parse-as: u8
+            none-if: ["999"]
 "#,
     )
     .expect("generate none-if fixture");
@@ -384,6 +389,7 @@ components:
     assert_field(reading, "required_wbgt", "Option<f64>");
     assert_field(reading, "optional_wbgt", "Option<f64>");
     assert_field(reading, "nullable_wbgt", "Option<f64>");
+    assert_field(reading, "maximum_speed", "Option<u8>");
     assert_attr_contains(
         &field(reading, "required_wbgt").attrs,
         "cfg_attr",
@@ -414,7 +420,20 @@ components:
     ));
     assert!(contains_tokens(
         &types_rs,
-        "#[allow(clippy::ref_option)] fn __satay_serialize_required_wbgt_none_if"
+        r#"#[allow(clippy::ref_option, clippy::trivially_copy_pass_by_ref, reason = "Serde `serialize_with` receives a reference to the field type")] fn __satay_serialize_required_wbgt_none_if"#
+    ));
+    assert!(contains_tokens(
+        &types_rs,
+        "satay_runtime::serde_string::as_u8::deserialize_none_if"
+    ));
+    assert!(contains_tokens(&types_rs, "&[\"999\"]"));
+    assert!(contains_tokens(
+        &types_rs,
+        r#"satay_runtime::serde_string::as_u8::serialize_none_if(value, "999", serializer)"#
+    ));
+    assert!(contains_tokens(
+        &types_rs,
+        r#"#[allow(clippy::ref_option, clippy::trivially_copy_pass_by_ref, reason = "Serde `serialize_with` receives a reference to the field type")] fn __satay_serialize_maximum_speed_none_if"#
     ));
 
     let temp = tempfile::tempdir().expect("create temp crate");
@@ -432,36 +451,40 @@ mod tests {
     #[test]
     fn sentinel_fields_decode_and_encode_strictly() {
         let valid: Reading = serde_json::from_str(
-            r#"{"requiredWbgt":"28.7","optionalWbgt":"17.5","nullableWbgt":"12.0"}"#,
+            r#"{"requiredWbgt":"28.7","optionalWbgt":"17.5","nullableWbgt":"12.0","maximumSpeed":"88"}"#,
         )
         .unwrap();
         assert_eq!(valid.required_wbgt, Some(28.7));
         assert_eq!(valid.optional_wbgt, Some(17.5));
         assert_eq!(valid.nullable_wbgt, Some(12.0));
+        assert_eq!(valid.maximum_speed, Some(88));
 
         let sentinel: Reading = serde_json::from_str(
-            r#"{"requiredWbgt":"-","optionalWbgt":"NA","nullableWbgt":"NA"}"#,
+            r#"{"requiredWbgt":"-","optionalWbgt":"NA","nullableWbgt":"NA","maximumSpeed":"999"}"#,
         )
         .unwrap();
         assert_eq!(sentinel.required_wbgt, None);
         assert_eq!(sentinel.optional_wbgt, None);
         assert_eq!(sentinel.nullable_wbgt, None);
+        assert_eq!(sentinel.maximum_speed, None);
 
-        let null_and_missing: Reading =
-            serde_json::from_str(r#"{"requiredWbgt":"28.7","nullableWbgt":null}"#).unwrap();
+        let null_and_missing: Reading = serde_json::from_str(
+            r#"{"requiredWbgt":"28.7","nullableWbgt":null,"maximumSpeed":"88"}"#,
+        )
+        .unwrap();
         assert_eq!(null_and_missing.optional_wbgt, None);
         assert_eq!(null_and_missing.nullable_wbgt, None);
 
         assert!(serde_json::from_str::<Reading>(
-            r#"{"optionalWbgt":"1","nullableWbgt":"2"}"#,
+            r#"{"optionalWbgt":"1","nullableWbgt":"2","maximumSpeed":"88"}"#,
         )
         .is_err());
         assert!(serde_json::from_str::<Reading>(
-            r#"{"requiredWbgt":null,"nullableWbgt":"2"}"#,
+            r#"{"requiredWbgt":null,"nullableWbgt":"2","maximumSpeed":"88"}"#,
         )
         .is_err());
         assert!(serde_json::from_str::<Reading>(
-            r#"{"requiredWbgt":"unknown","nullableWbgt":"2"}"#,
+            r#"{"requiredWbgt":"unknown","nullableWbgt":"2","maximumSpeed":"88"}"#,
         )
         .is_err());
 
@@ -469,11 +492,16 @@ mod tests {
             required_wbgt: None,
             optional_wbgt: None,
             nullable_wbgt: None,
+            maximum_speed: None,
         })
         .unwrap();
         assert_eq!(
             encoded,
-            serde_json::json!({"requiredWbgt": "NA", "nullableWbgt": "NA"})
+            serde_json::json!({
+                "requiredWbgt": "NA",
+                "nullableWbgt": "NA",
+                "maximumSpeed": "999"
+            })
         );
     }
 }
@@ -490,8 +518,15 @@ mod tests {
     run_temp_cargo(
         crate_dir,
         "clippy",
-        &["--lib", "--", "-D", "clippy::ref_option"],
-        "none-if generated crate ref-option clippy",
+        &[
+            "--lib",
+            "--",
+            "-D",
+            "clippy::ref_option",
+            "-D",
+            "clippy::trivially_copy_pass_by_ref",
+        ],
+        "none-if generated crate scoped serializer clippy",
     );
 }
 
