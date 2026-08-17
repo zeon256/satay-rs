@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.3](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.15.2...satay-codegen-v0.15.3) - 2026-08-17
+
+### Fixed
+
+- generated none-if serializers fail pedantic Clippy for small Copy types
+
 ### Fixed
 
 - *(codegen)* scope lint allowances in generated none-if serializers so pedantic Clippy passes on small `Copy` field types
