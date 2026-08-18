@@ -14,11 +14,12 @@ pub fn render_struct(
     description: Option<&str>,
     fields: &[Field],
     serde: bool,
+    imports: &mut BTreeSet<String>,
 ) -> syn::ItemStruct {
     let attrs = struct_attrs(description, serde);
     let fields = fields
         .iter()
-        .map(|field| render_struct_field(name, field, serde))
+        .map(|field| render_struct_field(name, field, serde, imports))
         .collect::<Vec<_>>();
     let name = ident(name);
 
@@ -41,7 +42,12 @@ fn struct_attrs(description: Option<&str>, serde: bool) -> Vec<syn::Attribute> {
     attrs
 }
 
-fn render_struct_field(struct_name: &str, field: &Field, serde: bool) -> syn::Field {
+fn render_struct_field(
+    struct_name: &str,
+    field: &Field,
+    serde: bool,
+    imports: &mut BTreeSet<String>,
+) -> syn::Field {
     let rust_name = rust_field_name(field);
     let name = ident(&rust_name);
     let ty = rust_field_type(
@@ -49,12 +55,17 @@ fn render_struct_field(struct_name: &str, field: &Field, serde: bool) -> syn::Fi
         field.required,
         field.treat_error_as_none || !field.none_if.is_empty(),
     );
-    let attrs = field_attrs(struct_name, field, serde);
+    let attrs = field_attrs(struct_name, field, serde, imports);
 
     parse_quote!(#(#attrs)* pub #name: #ty)
 }
 
-fn field_attrs(struct_name: &str, field: &Field, serde: bool) -> Vec<syn::Attribute> {
+fn field_attrs(
+    struct_name: &str,
+    field: &Field,
+    serde: bool,
+    imports: &mut BTreeSet<String>,
+) -> Vec<syn::Attribute> {
     let mut attrs = doc_attrs(field.description.as_deref());
     if !serde {
         return attrs;
@@ -87,13 +98,14 @@ fn field_attrs(struct_name: &str, field: &Field, serde: bool) -> Vec<syn::Attrib
         serde_attrs.push(quote::quote!(deserialize_with = #deserialize));
         serde_attrs.push(quote::quote!(serialize_with = #serialize));
     } else if field.treat_error_as_none {
+        imports.insert("satay_runtime::treat_error_as_none".to_owned());
         serde_attrs.push(quote::quote!(
-            deserialize_with = "satay_runtime::treat_error_as_none::deserialize"
+            deserialize_with = "treat_error_as_none::deserialize"
         ));
         serde_attrs.push(quote::quote!(
-            serialize_with = "satay_runtime::treat_error_as_none::serialize"
+            serialize_with = "treat_error_as_none::serialize"
         ));
-    } else if let Some(module) = parsed_serde_module(field) {
+    } else if let Some(module) = parsed_serde_module(field, imports) {
         serde_attrs.push(quote::quote!(with = #module));
     }
     if !field.required || field.treat_error_as_none {
@@ -498,18 +510,17 @@ fn rust_field_name(field: &Field) -> String {
     )
 }
 
-fn parsed_serde_module(field: &Field) -> Option<syn::LitStr> {
+fn parsed_serde_module(field: &Field, imports: &mut BTreeSet<String>) -> Option<syn::LitStr> {
     let (parent, leaf) = match field.ty.non_option() {
-        TypeRef::ParsedString(codec) => (
-            "satay_runtime::serde_string",
-            parse_as_string_serde_leaf(codec.parse_as()),
-        ),
-        TypeRef::ParsedInteger(parse_as) => (
-            "satay_runtime::serde_integer",
-            parse_as_integer_serde_leaf(*parse_as),
-        ),
+        TypeRef::ParsedString(codec) => {
+            ("serde_string", parse_as_string_serde_leaf(codec.parse_as()))
+        }
+        TypeRef::ParsedInteger(parse_as) => {
+            ("serde_integer", parse_as_integer_serde_leaf(*parse_as))
+        }
         _ => return None,
     };
+    imports.insert(format!("satay_runtime::{parent}"));
     let module = if !field.required || field.ty.is_option() {
         format!("{parent}::{leaf}::option")
     } else {
@@ -517,6 +528,7 @@ fn parsed_serde_module(field: &Field) -> Option<syn::LitStr> {
     };
     Some(lit_str(&module))
 }
+
 fn bool_string_mapping(field: &Field) -> Option<&BoolStringMapping> {
     match field.ty.non_option() {
         TypeRef::ParsedString(codec) => codec.bool_string_mapping(),

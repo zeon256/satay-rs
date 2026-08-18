@@ -53,12 +53,12 @@ components:
         assert_attr_contains(
             &field(service, field_name).attrs,
             "cfg_attr",
-            r#"deserialize_with = "satay_runtime::treat_error_as_none::deserialize""#,
+            r#"deserialize_with = "treat_error_as_none::deserialize""#,
         );
         assert_attr_contains(
             &field(service, field_name).attrs,
             "cfg_attr",
-            r#"serialize_with = "satay_runtime::treat_error_as_none::serialize""#,
+            r#"serialize_with = "treat_error_as_none::serialize""#,
         );
         assert_attr_contains(&field(service, field_name).attrs, "cfg_attr", "default");
         assert_attr_contains(
@@ -67,6 +67,13 @@ components:
             r#"skip_serializing_if = "Option::is_none""#,
         );
     }
+    // Regression for `minimal_imports`: runtime modules arrive via cfg-gated
+    // `use` items instead of fully qualified attribute paths. The module is
+    // `json`-gated in satay-runtime, so its import carries both features.
+    assert!(contains_tokens(
+        &types_rs,
+        "#[cfg(all(feature = \"serde\", feature = \"json\"))] use satay_runtime::treat_error_as_none;"
+    ));
 
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();
@@ -233,32 +240,32 @@ components:
     assert_attr_contains(
         &field(reading, "id").attrs,
         "cfg_attr",
-        r#"with = "satay_runtime::serde_string::as_u32""#,
+        r#"with = "serde_string::as_u32""#,
     );
     assert_attr_contains(
         &field(reading, "value").attrs,
         "cfg_attr",
-        r#"with = "satay_runtime::serde_string::as_f64""#,
+        r#"with = "serde_string::as_f64""#,
     );
     assert_attr_contains(
         &field(reading, "monitored").attrs,
         "cfg_attr",
-        r#"with = "satay_runtime::serde_integer::as_bool""#,
+        r#"with = "serde_integer::as_bool""#,
     );
     assert_attr_contains(
         &field(reading, "seen_at").attrs,
         "cfg_attr",
-        r#"with = "satay_runtime::serde_string::as_offset_datetime""#,
+        r#"with = "serde_string::as_offset_datetime""#,
     );
     assert_attr_contains(
         &field(reading, "starts_at").attrs,
         "cfg_attr",
-        r#"with = "satay_runtime::serde_string::as_time::option""#,
+        r#"with = "serde_string::as_time::option""#,
     );
     assert_attr_contains(
         &field(reading, "alias_id").attrs,
         "cfg_attr",
-        r#"with = "satay_runtime::serde_string::as_u32""#,
+        r#"with = "serde_string::as_u32""#,
     );
 
     let parts_rs = parse_rust(find_file(&files, "get_reading/parts.rs"));
@@ -1015,22 +1022,22 @@ components:
     assert_attr_contains(
         &field(event, "started_at").attrs,
         "cfg_attr",
-        r#"with = "satay_runtime::serde_integer::as_unix_time""#,
+        r#"with = "serde_integer::as_unix_time""#,
     );
     assert_attr_contains(
         &field(event, "ended_at").attrs,
         "cfg_attr",
-        r#"with = "satay_runtime::serde_integer::as_unix_time::option""#,
+        r#"with = "serde_integer::as_unix_time::option""#,
     );
     assert_attr_contains(
         &field(event, "created_at_string").attrs,
         "cfg_attr",
-        r#"with = "satay_runtime::serde_string::as_unix_time""#,
+        r#"with = "serde_string::as_unix_time""#,
     );
     assert_attr_contains(
         &field(event, "ended_at_string").attrs,
         "cfg_attr",
-        r#"with = "satay_runtime::serde_string::as_unix_time::option""#,
+        r#"with = "serde_string::as_unix_time::option""#,
     );
 
     let parts_rs = parse_rust(find_file(&files, "get_events/parts.rs"));
