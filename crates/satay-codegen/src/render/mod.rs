@@ -297,34 +297,38 @@ pub fn parse_as_rust_type(parse_as: ParseAs) -> syn::Type {
     }
 }
 
-pub fn parse_as_string_serde_module(parse_as: ParseAs) -> &'static str {
+/// Leaf module of `satay_runtime::serde_string` providing string-backed
+/// serde for this parse-as.
+pub fn parse_as_string_serde_leaf(parse_as: ParseAs) -> &'static str {
     match parse_as {
-        ParseAs::U8 => "satay_runtime::serde_string::as_u8",
-        ParseAs::U16 => "satay_runtime::serde_string::as_u16",
-        ParseAs::U32 => "satay_runtime::serde_string::as_u32",
-        ParseAs::U64 => "satay_runtime::serde_string::as_u64",
-        ParseAs::I8 => "satay_runtime::serde_string::as_i8",
-        ParseAs::I16 => "satay_runtime::serde_string::as_i16",
-        ParseAs::I32 => "satay_runtime::serde_string::as_i32",
-        ParseAs::I64 => "satay_runtime::serde_string::as_i64",
-        ParseAs::F32 => "satay_runtime::serde_string::as_f32",
-        ParseAs::F64 => "satay_runtime::serde_string::as_f64",
-        ParseAs::Bool => "satay_runtime::serde_string::as_bool",
-        ParseAs::Date => "satay_runtime::serde_string::as_date",
-        ParseAs::NaiveDateTime => "satay_runtime::serde_string::as_naive_datetime",
-        ParseAs::OffsetDateTime => "satay_runtime::serde_string::as_offset_datetime",
-        ParseAs::UnixTime => "satay_runtime::serde_string::as_unix_time",
-        ParseAs::Time => "satay_runtime::serde_string::as_time",
+        ParseAs::U8 => "as_u8",
+        ParseAs::U16 => "as_u16",
+        ParseAs::U32 => "as_u32",
+        ParseAs::U64 => "as_u64",
+        ParseAs::I8 => "as_i8",
+        ParseAs::I16 => "as_i16",
+        ParseAs::I32 => "as_i32",
+        ParseAs::I64 => "as_i64",
+        ParseAs::F32 => "as_f32",
+        ParseAs::F64 => "as_f64",
+        ParseAs::Bool => "as_bool",
+        ParseAs::Date => "as_date",
+        ParseAs::NaiveDateTime => "as_naive_datetime",
+        ParseAs::OffsetDateTime => "as_offset_datetime",
+        ParseAs::UnixTime => "as_unix_time",
+        ParseAs::Time => "as_time",
         ParseAs::IntegerRange | ParseAs::NumberRange => {
             unreachable!("range parse-as uses generated range types")
         }
     }
 }
 
-pub fn parse_as_integer_serde_module(parse_as: ParseAs) -> &'static str {
+/// Leaf module of `satay_runtime::serde_integer` providing integer-backed
+/// serde for this parse-as.
+pub fn parse_as_integer_serde_leaf(parse_as: ParseAs) -> &'static str {
     match parse_as {
-        ParseAs::Bool => "satay_runtime::serde_integer::as_bool",
-        ParseAs::UnixTime => "satay_runtime::serde_integer::as_unix_time",
+        ParseAs::Bool => "as_bool",
+        ParseAs::UnixTime => "as_unix_time",
         ParseAs::U8
         | ParseAs::U16
         | ParseAs::U32
