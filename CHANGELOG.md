@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+### Fixed
+
+- *(codegen)* import runtime serde modules in generated types instead of fully qualified call-site paths, so the `minimal_imports` lint passes in generated clients
+
 ## [0.16.0](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.15.3...satay-codegen-v0.16.0) - 2026-08-17
 
 ### Added

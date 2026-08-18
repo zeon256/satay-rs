@@ -1,9 +1,11 @@
+use std::collections::BTreeSet;
+
 use crate::ident::field_ident;
 use crate::model::{BoolStringMapping, Field, TypeRef};
 use syn::parse_quote;
 
 use super::super::{
-    doc_attrs, ident, lit_str, parse_as_integer_serde_module, parse_as_string_serde_module,
+    doc_attrs, ident, lit_str, parse_as_integer_serde_leaf, parse_as_string_serde_leaf,
     rust_field_type, rust_type,
 };
 
@@ -104,11 +106,15 @@ fn field_attrs(struct_name: &str, field: &Field, serde: bool) -> Vec<syn::Attrib
     attrs
 }
 
-pub fn render_field_serde_impl(name: &str, fields: &[Field]) -> Option<syn::ItemImpl> {
+pub fn render_field_serde_impl(
+    name: &str,
+    fields: &[Field],
+    imports: &mut BTreeSet<String>,
+) -> Option<syn::ItemImpl> {
     let functions = fields
         .iter()
         .filter(|field| bool_string_mapping(field).is_some() || !field.none_if.is_empty())
-        .flat_map(render_field_serde_functions)
+        .flat_map(|field| render_field_serde_functions(field, imports))
         .collect::<Vec<_>>();
     if functions.is_empty() {
         return None;
@@ -123,31 +129,35 @@ pub fn render_field_serde_impl(name: &str, fields: &[Field]) -> Option<syn::Item
     ))
 }
 
-fn render_field_serde_functions(field: &Field) -> [syn::ImplItemFn; 2] {
+fn render_field_serde_functions(
+    field: &Field,
+    imports: &mut BTreeSet<String>,
+) -> [syn::ImplItemFn; 2] {
     if bool_string_mapping(field).is_some() {
-        render_bool_string_mapping_functions(field)
+        render_bool_string_mapping_functions(field, imports)
     } else {
-        render_none_if_functions(field)
+        render_none_if_functions(field, imports)
     }
 }
 
-fn render_none_if_functions(field: &Field) -> [syn::ImplItemFn; 2] {
+fn render_none_if_functions(field: &Field, imports: &mut BTreeSet<String>) -> [syn::ImplItemFn; 2] {
     let deserialize_name = ident(&none_if_deserialize_name(field));
     let serialize_name = ident(&none_if_serialize_name(field));
     let inner_ty = rust_type(field.ty.non_option());
-    let module = match field.ty.non_option() {
-        TypeRef::ParsedString(codec) => parse_as_string_serde_module(codec.parse_as()),
+    let leaf = match field.ty.non_option() {
+        TypeRef::ParsedString(codec) => parse_as_string_serde_leaf(codec.parse_as()),
         _ => unreachable!("validated none-if field must use string-backed parse-as"),
     };
+    imports.insert(format!("satay_runtime::serde_string::{leaf}"));
+    let leaf_module = ident(leaf);
     let deserialize_module = if !field.required || field.ty.is_option() {
-        format!("{module}::option")
+        imports.insert(format!(
+            "satay_runtime::serde_string::{leaf}::option as {leaf}_option"
+        ));
+        ident(&format!("{leaf}_option"))
     } else {
-        module.to_owned()
+        leaf_module.clone()
     };
-    let deserialize_module = syn::parse_str::<syn::Path>(&deserialize_module)
-        .expect("runtime serde module path is valid");
-    let serialize_module =
-        syn::parse_str::<syn::Path>(module).expect("runtime serde module path is valid");
     let none_if = field
         .none_if
         .iter()
@@ -184,22 +194,25 @@ fn render_none_if_functions(field: &Field) -> [syn::ImplItemFn; 2] {
             where
                 S: serde::Serializer,
             {
-                #serialize_module::serialize_none_if(value, #canonical, serializer)
+                #leaf_module::serialize_none_if(value, #canonical, serializer)
             }
         ),
     ]
 }
 
-fn render_bool_string_mapping_functions(field: &Field) -> [syn::ImplItemFn; 2] {
+fn render_bool_string_mapping_functions(
+    field: &Field,
+    imports: &mut BTreeSet<String>,
+) -> [syn::ImplItemFn; 2] {
     let tokens = BoolMappingTokens::new(field);
     if !field.none_if.is_empty() {
-        return render_mapped_bool_none_if_functions(field, &tokens);
+        return render_mapped_bool_none_if_functions(field, &tokens, imports);
     }
 
     if !field.required || field.ty.is_option() || field.treat_error_as_none {
-        render_optional_mapped_bool_functions(&tokens, field.treat_error_as_none)
+        render_optional_mapped_bool_functions(&tokens, field.treat_error_as_none, imports)
     } else {
-        render_required_mapped_bool_functions(&tokens)
+        render_required_mapped_bool_functions(&tokens, imports)
     }
 }
 
@@ -254,7 +267,9 @@ impl BoolMappingTokens {
 fn render_mapped_bool_none_if_functions(
     field: &Field,
     tokens: &BoolMappingTokens,
+    imports: &mut BTreeSet<String>,
 ) -> [syn::ImplItemFn; 2] {
+    imports.insert("satay_runtime::serde_string::as_bool".to_owned());
     let BoolMappingTokens {
         deserialize_name,
         serialize_name,
@@ -265,9 +280,10 @@ fn render_mapped_bool_none_if_functions(
         unknown_as,
     } = tokens;
     let deserialize_module: syn::Path = if !field.required || field.ty.is_option() {
-        parse_quote!(satay_runtime::serde_string::as_bool::option)
+        imports.insert("satay_runtime::serde_string::as_bool::option as as_bool_option".to_owned());
+        parse_quote!(as_bool_option)
     } else {
-        parse_quote!(satay_runtime::serde_string::as_bool)
+        parse_quote!(as_bool)
     };
     let none_if = field
         .none_if
@@ -308,7 +324,7 @@ fn render_mapped_bool_none_if_functions(
             where
                 S: serde::Serializer,
             {
-                satay_runtime::serde_string::as_bool::serialize_mapped_none_if(
+                as_bool::serialize_mapped_none_if(
                     value,
                     #canonical_true,
                     #canonical_false,
@@ -323,7 +339,9 @@ fn render_mapped_bool_none_if_functions(
 fn render_optional_mapped_bool_functions(
     tokens: &BoolMappingTokens,
     treat_error_as_none: bool,
+    imports: &mut BTreeSet<String>,
 ) -> [syn::ImplItemFn; 2] {
+    imports.insert("satay_runtime::serde_string::as_bool::option as as_bool_option".to_owned());
     let BoolMappingTokens {
         deserialize_name,
         serialize_name,
@@ -335,7 +353,7 @@ fn render_optional_mapped_bool_functions(
     } = tokens;
     let deserialize: syn::Expr = if treat_error_as_none {
         parse_quote!(
-            satay_runtime::serde_string::as_bool::option::deserialize_mapped(
+            as_bool_option::deserialize_mapped(
                 deserializer,
                 &[#(#true_values),*],
                 &[#(#false_values),*],
@@ -345,7 +363,7 @@ fn render_optional_mapped_bool_functions(
         )
     } else {
         parse_quote!(
-            satay_runtime::serde_string::as_bool::option::deserialize_mapped(
+            as_bool_option::deserialize_mapped(
                 deserializer,
                 &[#(#true_values),*],
                 &[#(#false_values),*],
@@ -378,7 +396,7 @@ fn render_optional_mapped_bool_functions(
             where
                 S: serde::Serializer,
             {
-                satay_runtime::serde_string::as_bool::option::serialize_mapped(
+                as_bool_option::serialize_mapped(
                     value,
                     #canonical_true,
                     #canonical_false,
@@ -389,7 +407,11 @@ fn render_optional_mapped_bool_functions(
     ]
 }
 
-fn render_required_mapped_bool_functions(tokens: &BoolMappingTokens) -> [syn::ImplItemFn; 2] {
+fn render_required_mapped_bool_functions(
+    tokens: &BoolMappingTokens,
+    imports: &mut BTreeSet<String>,
+) -> [syn::ImplItemFn; 2] {
+    imports.insert("satay_runtime::serde_string::as_bool".to_owned());
     let BoolMappingTokens {
         deserialize_name,
         serialize_name,
@@ -406,7 +428,7 @@ fn render_required_mapped_bool_functions(tokens: &BoolMappingTokens) -> [syn::Im
             where
                 D: serde::Deserializer<'de>,
             {
-                satay_runtime::serde_string::as_bool::deserialize_mapped(
+                as_bool::deserialize_mapped(
                     deserializer,
                     &[#(#true_values),*],
                     &[#(#false_values),*],
@@ -426,7 +448,7 @@ fn render_required_mapped_bool_functions(tokens: &BoolMappingTokens) -> [syn::Im
             where
                 S: serde::Serializer,
             {
-                satay_runtime::serde_string::as_bool::serialize_mapped(
+                as_bool::serialize_mapped(
                     value,
                     #canonical_true,
                     #canonical_false,
@@ -477,15 +499,21 @@ fn rust_field_name(field: &Field) -> String {
 }
 
 fn parsed_serde_module(field: &Field) -> Option<syn::LitStr> {
-    let module = match field.ty.non_option() {
-        TypeRef::ParsedString(codec) => parse_as_string_serde_module(codec.parse_as()),
-        TypeRef::ParsedInteger(parse_as) => parse_as_integer_serde_module(*parse_as),
+    let (parent, leaf) = match field.ty.non_option() {
+        TypeRef::ParsedString(codec) => (
+            "satay_runtime::serde_string",
+            parse_as_string_serde_leaf(codec.parse_as()),
+        ),
+        TypeRef::ParsedInteger(parse_as) => (
+            "satay_runtime::serde_integer",
+            parse_as_integer_serde_leaf(*parse_as),
+        ),
         _ => return None,
     };
     let module = if !field.required || field.ty.is_option() {
-        format!("{module}::option")
+        format!("{parent}::{leaf}::option")
     } else {
-        module.to_owned()
+        format!("{parent}::{leaf}")
     };
     Some(lit_str(&module))
 }

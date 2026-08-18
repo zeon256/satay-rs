@@ -405,35 +405,39 @@ components:
         "cfg_attr",
         r#"skip_serializing_if = "Option::is_none""#,
     );
-    assert!(contains_tokens(
-        &types_rs,
-        "satay_runtime::serde_string::as_f64::deserialize_none_if"
-    ));
+    // Regression for `minimal_imports`: call sites stay at two segments and
+    // the runtime serde modules arrive via cfg-gated `use` items.
+    assert!(contains_tokens(&types_rs, "as_f64::deserialize_none_if"));
     assert!(contains_tokens(&types_rs, "&[\"NA\", \"-\"]"));
     assert!(contains_tokens(
         &types_rs,
-        "satay_runtime::serde_string::as_f64::option::deserialize_none_if"
+        "as_f64_option::deserialize_none_if"
     ));
     assert!(contains_tokens(
         &types_rs,
-        "satay_runtime::serde_string::as_f64::serialize_none_if(value, \"NA\", serializer)"
+        "as_f64::serialize_none_if(value, \"NA\", serializer)"
     ));
     assert!(contains_tokens(
         &types_rs,
         r#"#[allow(clippy::ref_option, clippy::trivially_copy_pass_by_ref, reason = "Serde `serialize_with` receives a reference to the field type")] fn __satay_serialize_required_wbgt_none_if"#
     ));
-    assert!(contains_tokens(
-        &types_rs,
-        "satay_runtime::serde_string::as_u8::deserialize_none_if"
-    ));
+    assert!(contains_tokens(&types_rs, "as_u8::deserialize_none_if"));
     assert!(contains_tokens(&types_rs, "&[\"999\"]"));
     assert!(contains_tokens(
         &types_rs,
-        r#"satay_runtime::serde_string::as_u8::serialize_none_if(value, "999", serializer)"#
+        r#"as_u8::serialize_none_if(value, "999", serializer)"#
     ));
     assert!(contains_tokens(
         &types_rs,
         r#"#[allow(clippy::ref_option, clippy::trivially_copy_pass_by_ref, reason = "Serde `serialize_with` receives a reference to the field type")] fn __satay_serialize_maximum_speed_none_if"#
+    ));
+    assert!(contains_tokens(
+        &types_rs,
+        "#[cfg(feature = \"serde\")] use satay_runtime::serde_string::{as_f64, as_u8};"
+    ));
+    assert!(contains_tokens(
+        &types_rs,
+        "#[cfg(feature = \"serde\")] use satay_runtime::serde_string::as_f64::option as as_f64_option;"
     ));
 
     let temp = tempfile::tempdir().expect("create temp crate");
@@ -627,13 +631,23 @@ components:
         &types_rs,
         r#"&["N", "No", "0", "false", ""]"#
     ));
+    // Regression for `minimal_imports`: call sites stay at two segments and
+    // the runtime serde modules arrive via cfg-gated `use` items.
     assert!(contains_tokens(
         &types_rs,
-        "satay_runtime::serde_string::as_bool::option::deserialize_mapped"
+        "as_bool_option::deserialize_mapped"
     ));
     assert!(contains_tokens(
         &types_rs,
-        "satay_runtime::serde_string::as_bool::serialize_mapped_none_if"
+        "as_bool::serialize_mapped_none_if"
+    ));
+    assert!(contains_tokens(
+        &types_rs,
+        "#[cfg(feature = \"serde\")] use satay_runtime::serde_string::as_bool;"
+    ));
+    assert!(contains_tokens(
+        &types_rs,
+        "#[cfg(feature = \"serde\")] use satay_runtime::serde_string::as_bool::option as as_bool_option;"
     ));
 
     let temp = tempfile::tempdir().expect("create temp crate");
