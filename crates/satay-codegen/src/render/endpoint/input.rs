@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse_quote;
@@ -17,6 +19,8 @@ pub(super) fn render_input(operation: &Operation) -> syn::ItemStruct {
         operation.description.as_deref(),
         &input_fields,
         false,
+        // Input structs render without serde attrs, so no imports are collected.
+        &mut BTreeSet::new(),
     )
 }
 

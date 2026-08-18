@@ -65,17 +65,29 @@ pub(super) fn render_types_file(api: &Api) -> syn::File {
 }
 
 /// Renders the collected runtime serde module imports as cfg-gated `use`
-/// items so call sites stay short enough for the `minimal_imports` lint.
-/// Aliased `option` submodules emit standalone imports; plain leaves are
-/// grouped per runtime parent module.
+/// items so call sites and attribute strings stay short enough for the
+/// `minimal_imports` lint. Aliased `option` submodules emit standalone
+/// imports; plain leaves are grouped per runtime parent module.
 fn serde_use_items(imports: &BTreeSet<String>) -> Vec<Item> {
-    let mut plain = BTreeMap::<&str, BTreeSet<&str>>::new();
+    fn cfg_attr(import: &str) -> &'static str {
+        // `treat_error_as_none` is `json`-gated in satay-runtime; every other
+        // serde module is `serde`-gated.
+        if import == "satay_runtime::treat_error_as_none" {
+            r#"#[cfg(all(feature = "serde", feature = "json"))]"#
+        } else {
+            r#"#[cfg(feature = "serde")]"#
+        }
+    }
+
+    let mut use_items = vec![];
     let mut aliased = vec![];
+    let mut plain = BTreeMap::<&str, BTreeSet<&str>>::new();
     for import in imports {
         if let Some((path, alias)) = import.split_once(" as ") {
-            aliased.push(format!(
-                "#[cfg(feature = \"serde\")] use {path} as {alias};"
-            ));
+            aliased.push(format!(r"{} use {path} as {alias};", cfg_attr(import)));
+        } else if *import == "satay_runtime::treat_error_as_none" {
+            // Never grouped with `serde`-gated siblings: its cfg differs.
+            use_items.push(format!(r"{} use {import};", cfg_attr(import)));
         } else if let Some((parent, leaf)) = import.rsplit_once("::") {
             plain.entry(parent).or_default().insert(leaf);
         } else {
@@ -84,16 +96,16 @@ fn serde_use_items(imports: &BTreeSet<String>) -> Vec<Item> {
     }
 
     aliased.sort();
-    let mut use_items = aliased;
+    use_items.extend(aliased);
     for (parent, leaves) in &plain {
         let import = if leaves.len() == 1 {
             format!(
-                "#[cfg(feature = \"serde\")] use {parent}::{};",
+                r#"#[cfg(feature = "serde")] use {parent}::{};"#,
                 leaves.iter().next().expect("single leaf")
             )
         } else {
             let leaves = leaves.iter().copied().collect::<Vec<_>>().join(", ");
-            format!("#[cfg(feature = \"serde\")] use {parent}::{{{leaves}}};")
+            format!(r#"#[cfg(feature = "serde")] use {parent}::{{{leaves}}};"#)
         };
         use_items.push(import);
     }
@@ -129,6 +141,7 @@ fn render_component(
                 component.description.as_deref(),
                 fields,
                 true,
+                runtime_serde_imports,
             )));
             if let Some(impl_) = structs::render_field_serde_impl(
                 &component.rust_name,
