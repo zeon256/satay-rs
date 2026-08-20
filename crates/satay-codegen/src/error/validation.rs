@@ -221,6 +221,12 @@ pub enum ValidationError {
     #[error("{context} maps `{value}` as both a boolean and x-satay.none-if")]
     OverlappingSatayBoolMappingNoneIf { context: String, value: String },
 
+    /// `x-satay.treat-error-as-none` was applied outside an object property.
+    ///
+    /// Error message: `{context} uses x-satay.treat-error-as-none outside an object property`
+    #[error("{context} uses x-satay.treat-error-as-none outside an object property")]
+    SatayTreatErrorAsNoneRequiresObjectProperty { context: String },
+
     /// `x-satay.ignore` was applied outside an object property.
     ///
     /// Error message: `{context} uses x-satay.ignore outside an object property`

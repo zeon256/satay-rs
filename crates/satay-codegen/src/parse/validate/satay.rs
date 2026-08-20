@@ -32,20 +32,46 @@ pub(crate) struct ValidatedSataySchema {
     pub(crate) identifier_words: Option<Vec<String>>,
 }
 
-pub(super) fn reject_object_property_options_outside_object_property(
+#[derive(Debug, Clone, Copy)]
+enum SatayValidationContext {
+    Value,
+    Property,
+}
+
+pub(super) fn reject_property_options_on_value_schema(
     schema: &OasObjectSchema,
     context: &str,
 ) -> Result<(), ValidationError> {
     let options = schema_options(schema, context)?.unwrap_or_default();
-    validate_ignore(&options, context, false)?;
-    validate_identifier(&options, context, false).map(|_| ())
+    reject_property_options_on_value(&options, context)
 }
 
-pub(super) fn validate_type_satay(
+pub(super) fn validate_value_satay(
     schema: &OasObjectSchema,
     schema_type: Option<OasSchemaType>,
     context: &str,
-    allow_field_options: bool,
+) -> Result<ValidatedSataySchema, ValidationError> {
+    validate_type_satay(schema, schema_type, context, SatayValidationContext::Value)
+}
+
+pub(super) fn validate_property_satay(
+    schema: &OasObjectSchema,
+    schema_type: Option<OasSchemaType>,
+    context: &str,
+) -> Result<ValidatedSataySchema, ValidationError> {
+    validate_type_satay(
+        schema,
+        schema_type,
+        context,
+        SatayValidationContext::Property,
+    )
+}
+
+fn validate_type_satay(
+    schema: &OasObjectSchema,
+    schema_type: Option<OasSchemaType>,
+    context: &str,
+    validation_context: SatayValidationContext,
 ) -> Result<ValidatedSataySchema, ValidationError> {
     let options = schema_options(schema, context)?.unwrap_or_default();
     let parse_as = parse_satay_parse_as(&options);
@@ -59,9 +85,20 @@ pub(super) fn validate_type_satay(
             })
         })
         .transpose()?;
-    let treat_error_as_none = allow_field_options && options.treat_error_as_none.unwrap_or(false);
-    let ignore = validate_ignore(&options, context, allow_field_options)?;
-    let identifier_words = validate_identifier(&options, context, allow_field_options)?;
+    let (treat_error_as_none, ignore, identifier_words) = match validation_context {
+        SatayValidationContext::Value => {
+            reject_property_options_on_value(&options, context)?;
+            (false, false, None)
+        }
+        SatayValidationContext::Property => (
+            options.treat_error_as_none.unwrap_or(false),
+            options.ignore.unwrap_or(false),
+            options
+                .identifier
+                .as_ref()
+                .map(|identifier| identifier.words().to_vec()),
+        ),
+    };
     validate_satay_integer_type(schema_type, parse_as, integer_type_wire, context)?;
 
     let directive = if let Some(parse_as) = parse_as {
@@ -104,11 +141,6 @@ pub(super) fn validate_type_satay(
         ValidatedTypeDirective::AsDeclared
     };
 
-    if sentinels.is_some() && !allow_field_options {
-        return Err(ValidationError::SatayNoneIfRequiresStructField {
-            context: context.to_owned(),
-        });
-    }
     if sentinels.is_some() && !matches!(&directive, ValidatedTypeDirective::ParsedString(_)) {
         return Err(ValidationError::SatayNoneIfRequiresParsedString {
             context: context.to_owned(),
@@ -208,36 +240,34 @@ fn validate_bool_string_mapping(
     Ok(Some(mapping))
 }
 
-fn validate_identifier(
+fn reject_property_options_on_value(
     options: &SataySchemaOptions,
     context: &str,
-    allow_object_property: bool,
-) -> Result<Option<Vec<String>>, ValidationError> {
-    if options.identifier.is_some() && !allow_object_property {
+) -> Result<(), ValidationError> {
+    if options.treat_error_as_none.is_some() {
+        return Err(
+            ValidationError::SatayTreatErrorAsNoneRequiresObjectProperty {
+                context: context.to_owned(),
+            },
+        );
+    }
+    if options.none_if.is_some() {
+        return Err(ValidationError::SatayNoneIfRequiresStructField {
+            context: context.to_owned(),
+        });
+    }
+    if options.ignore.is_some() {
+        return Err(ValidationError::SatayIgnoreRequiresObjectProperty {
+            context: context.to_owned(),
+        });
+    }
+    if options.identifier.is_some() {
         return Err(ValidationError::SatayIdentifierRequiresObjectProperty {
             context: context.to_owned(),
         });
     }
 
-    Ok(options
-        .identifier
-        .as_ref()
-        .filter(|_| allow_object_property)
-        .map(|identifier| identifier.words().to_vec()))
-}
-
-fn validate_ignore(
-    options: &SataySchemaOptions,
-    context: &str,
-    allow_object_property: bool,
-) -> Result<bool, ValidationError> {
-    if options.ignore.is_some() && !allow_object_property {
-        return Err(ValidationError::SatayIgnoreRequiresObjectProperty {
-            context: context.to_owned(),
-        });
-    }
-
-    Ok(allow_object_property && options.ignore.unwrap_or(false))
+    Ok(())
 }
 
 pub(super) fn reject_enum_variants_without_enum(
@@ -309,7 +339,7 @@ mod tests {
             Some(OasSchemaType::Boolean),
             None,
         ] {
-            let validated = validate_type_satay(&schema, schema_type, "Value", false).unwrap();
+            let validated = validate_value_satay(&schema, schema_type, "Value").unwrap();
             assert_eq!(validated.directive, ValidatedTypeDirective::AsDeclared);
         }
     }
@@ -318,13 +348,8 @@ mod tests {
     fn validates_parse_as_for_string_schema() {
         let schema = schema_with_satay(json!({ "parse-as": "offset-datetime" }));
 
-        let validated = validate_type_satay(
-            &schema,
-            Some(OasSchemaType::String),
-            "Event.created_at",
-            false,
-        )
-        .unwrap();
+        let validated =
+            validate_value_satay(&schema, Some(OasSchemaType::String), "Event.created_at").unwrap();
 
         assert_eq!(
             validated.directive,
@@ -340,13 +365,8 @@ mod tests {
     fn validates_parse_as_date_for_string_schema() {
         let schema = schema_with_satay(json!({ "parse-as": "date" }));
 
-        let validated = validate_type_satay(
-            &schema,
-            Some(OasSchemaType::String),
-            "parameter `date`",
-            false,
-        )
-        .unwrap();
+        let validated =
+            validate_value_satay(&schema, Some(OasSchemaType::String), "parameter `date`").unwrap();
 
         assert_eq!(
             validated.directive,
@@ -358,13 +378,8 @@ mod tests {
     fn validates_parse_as_naive_datetime_for_string_schema() {
         let schema = schema_with_satay(json!({ "parse-as": "naive-datetime" }));
 
-        let validated = validate_type_satay(
-            &schema,
-            Some(OasSchemaType::String),
-            "parameter `date`",
-            false,
-        )
-        .unwrap();
+        let validated =
+            validate_value_satay(&schema, Some(OasSchemaType::String), "parameter `date`").unwrap();
 
         assert_eq!(
             validated.directive,
@@ -377,8 +392,7 @@ mod tests {
         let schema = schema_with_satay(json!({ "parse-as": "bool" }));
 
         let validated =
-            validate_type_satay(&schema, Some(OasSchemaType::Integer), "Flag.enabled", false)
-                .unwrap();
+            validate_value_satay(&schema, Some(OasSchemaType::Integer), "Flag.enabled").unwrap();
 
         assert_eq!(
             validated.directive,
@@ -393,11 +407,10 @@ mod tests {
             "integer-type": "i32",
         }));
 
-        let error = validation_error(validate_type_satay(
+        let error = validation_error(validate_value_satay(
             &schema,
             Some(OasSchemaType::Integer),
             "Flag.enabled",
-            false,
         ));
         assert_eq!(
             error.to_string(),
@@ -420,11 +433,10 @@ mod tests {
             "integer-type": "auto",
         }));
 
-        let error = validation_error(validate_type_satay(
+        let error = validation_error(validate_value_satay(
             &schema,
             Some(OasSchemaType::Integer),
             "Flag.enabled",
-            false,
         ));
 
         assert!(matches!(
@@ -446,8 +458,7 @@ mod tests {
         }));
 
         let validated =
-            validate_type_satay(&schema, Some(OasSchemaType::String), "Flag.enabled", true)
-                .unwrap();
+            validate_property_satay(&schema, Some(OasSchemaType::String), "Flag.enabled").unwrap();
 
         assert_eq!(
             validated.directive,
@@ -469,11 +480,10 @@ mod tests {
             "true-values": ["Y"],
         }));
         assert!(matches!(
-            validation_error(validate_type_satay(
+            validation_error(validate_property_satay(
                 &incomplete,
                 Some(OasSchemaType::String),
                 "Flag.enabled",
-                true,
             )),
             ValidationError::IncompleteSatayBoolMapping { context }
                 if context == "Flag.enabled"
@@ -485,11 +495,10 @@ mod tests {
             "false-values": ["N"],
         }));
         assert!(matches!(
-            validation_error(validate_type_satay(
+            validation_error(validate_property_satay(
                 &empty,
                 Some(OasSchemaType::String),
                 "Flag.enabled",
-                true,
             )),
             ValidationError::EmptySatayBoolMapping {
                 context,
@@ -506,11 +515,10 @@ mod tests {
             "false-values": ["N", "same"],
         }));
         assert!(matches!(
-            validation_error(validate_type_satay(
+            validation_error(validate_property_satay(
                 &overlapping,
                 Some(OasSchemaType::String),
                 "Flag.enabled",
-                true,
             )),
             ValidationError::OverlappingSatayBoolMapping { context, value }
                 if context == "Flag.enabled" && value == "same"
@@ -523,11 +531,10 @@ mod tests {
             "none-if": ["N"],
         }));
         assert!(matches!(
-            validation_error(validate_type_satay(
+            validation_error(validate_property_satay(
                 &overlaps_none,
                 Some(OasSchemaType::String),
                 "Flag.enabled",
-                true,
             )),
             ValidationError::OverlappingSatayBoolMappingNoneIf { context, value }
                 if context == "Flag.enabled" && value == "N"
@@ -541,13 +548,9 @@ mod tests {
             "true-values": ["Y"],
             "false-values": ["N"],
         }));
-        let parameter = validate_type_satay(
-            &schema,
-            Some(OasSchemaType::String),
-            "parameter `enabled`",
-            false,
-        )
-        .unwrap();
+        let parameter =
+            validate_value_satay(&schema, Some(OasSchemaType::String), "parameter `enabled`")
+                .unwrap();
         assert_eq!(
             parameter.directive,
             ValidatedTypeDirective::ParsedString(StringCodec::MappedBool(
@@ -562,11 +565,10 @@ mod tests {
             "false-values": ["N"],
         }));
         assert!(matches!(
-            validation_error(validate_type_satay(
+            validation_error(validate_property_satay(
                 &wrong_parser,
                 Some(OasSchemaType::String),
                 "Flag.enabled",
-                true,
             )),
             ValidationError::SatayBoolMappingRequiresParsedStringBool { context }
                 if context == "Flag.enabled"
@@ -577,11 +579,10 @@ mod tests {
     fn rejects_parse_as_for_unsupported_wire_schema() {
         let schema = schema_with_satay(json!({ "parse-as": "time" }));
 
-        let error = validation_error(validate_type_satay(
+        let error = validation_error(validate_value_satay(
             &schema,
             Some(OasSchemaType::Number),
             "Event.at",
-            false,
         ));
 
         assert!(matches!(
@@ -601,13 +602,8 @@ mod tests {
             "integer-type": "u16",
         }));
 
-        let validated = validate_type_satay(
-            &schema,
-            Some(OasSchemaType::String),
-            "RangeFilter.age",
-            false,
-        )
-        .unwrap();
+        let validated =
+            validate_value_satay(&schema, Some(OasSchemaType::String), "RangeFilter.age").unwrap();
 
         assert_eq!(
             validated.directive,
@@ -620,7 +616,7 @@ mod tests {
         let schema = schema_with_satay(json!({ "integer-type": "u16" }));
 
         let validated =
-            validate_type_satay(&schema, Some(OasSchemaType::Integer), "Count", false).unwrap();
+            validate_value_satay(&schema, Some(OasSchemaType::Integer), "Count").unwrap();
 
         assert_eq!(
             validated.directive,
@@ -635,7 +631,7 @@ mod tests {
         schema.maximum = Some(60.into());
 
         let validated =
-            validate_type_satay(&schema, Some(OasSchemaType::Integer), "Count", false).unwrap();
+            validate_value_satay(&schema, Some(OasSchemaType::Integer), "Count").unwrap();
 
         assert_eq!(
             validated.directive,
@@ -650,7 +646,7 @@ mod tests {
             schema.format = Some("unixtime".to_owned());
 
             let validated =
-                validate_type_satay(&schema, Some(OasSchemaType::Integer), "Epoch", false).unwrap();
+                validate_value_satay(&schema, Some(OasSchemaType::Integer), "Epoch").unwrap();
 
             assert_eq!(
                 validated.directive,
@@ -668,13 +664,8 @@ mod tests {
         schema.minimum = Some(1.into());
         schema.maximum = Some(60.into());
 
-        let validated = validate_type_satay(
-            &schema,
-            Some(OasSchemaType::String),
-            "RangeFilter.age",
-            false,
-        )
-        .unwrap();
+        let validated =
+            validate_value_satay(&schema, Some(OasSchemaType::String), "RangeFilter.age").unwrap();
 
         assert_eq!(
             validated.directive,
@@ -691,12 +682,7 @@ mod tests {
             (None, "missing"),
         ] {
             let auto_schema = schema_with_satay(json!({ "integer-type": "auto" }));
-            let error = validation_error(validate_type_satay(
-                &auto_schema,
-                schema_type,
-                "Value",
-                false,
-            ));
+            let error = validation_error(validate_value_satay(&auto_schema, schema_type, "Value"));
 
             assert!(matches!(
                 error,
@@ -710,7 +696,7 @@ mod tests {
             ));
 
             let absent_schema = schema_with_satay(json!({}));
-            validate_type_satay(&absent_schema, schema_type, "Value", false)
+            validate_value_satay(&absent_schema, schema_type, "Value")
                 .expect("an absent integer type has no placement restriction");
         }
     }
@@ -724,11 +710,10 @@ mod tests {
                 "none-if": [],
             }));
 
-            let error = validation_error(validate_type_satay(
+            let error = validation_error(validate_property_satay(
                 &schema,
                 Some(OasSchemaType::Integer),
                 "User.id",
-                true,
             ));
 
             assert!(
@@ -746,11 +731,10 @@ mod tests {
     fn rejects_integer_type_for_plain_string_schema() {
         let schema = schema_with_satay(json!({ "integer-type": "i32" }));
 
-        let error = validation_error(validate_type_satay(
+        let error = validation_error(validate_value_satay(
             &schema,
             Some(OasSchemaType::String),
             "User.id",
-            false,
         ));
 
         assert!(matches!(
@@ -839,46 +823,52 @@ mod tests {
     }
 
     #[test]
-    fn validates_treat_error_as_none_only_when_allowed() {
-        let schema = schema_with_satay(json!({ "treat-error-as-none": true }));
+    fn accepts_treat_error_as_none_only_on_properties() {
+        for value in [true, false] {
+            let schema = schema_with_satay(json!({ "treat-error-as-none": value }));
 
-        let allowed =
-            validate_type_satay(&schema, Some(OasSchemaType::String), "User.nickname", true)
-                .unwrap();
-        let ignored =
-            validate_type_satay(&schema, Some(OasSchemaType::String), "User.nickname", false)
-                .unwrap();
+            let property =
+                validate_property_satay(&schema, Some(OasSchemaType::String), "User.nickname")
+                    .unwrap();
+            assert!(
+                matches!(property.field_decoding, ValidatedFieldDecoding::Lossy) == value,
+                "true enables lossy decoding; false preserves strict decoding"
+            );
 
-        assert!(matches!(
-            allowed.field_decoding,
-            ValidatedFieldDecoding::Lossy
-        ));
-        assert!(matches!(
-            ignored.field_decoding,
-            ValidatedFieldDecoding::Strict
-        ));
+            let error = validation_error(validate_value_satay(
+                &schema,
+                Some(OasSchemaType::String),
+                "schema `Nickname`",
+            ));
+            assert!(matches!(
+                error,
+                ValidationError::SatayTreatErrorAsNoneRequiresObjectProperty { context }
+                    if context == "schema `Nickname`"
+            ));
+        }
     }
 
     #[test]
-    fn validates_ignore_only_on_object_properties() {
-        let schema = schema_with_satay(json!({ "ignore": true }));
+    fn accepts_ignore_only_on_object_properties() {
+        for value in [true, false] {
+            let schema = schema_with_satay(json!({ "ignore": value }));
 
-        let property =
-            validate_type_satay(&schema, Some(OasSchemaType::String), "User.metadata", true)
-                .unwrap();
-        assert!(property.ignore);
+            let property =
+                validate_property_satay(&schema, Some(OasSchemaType::String), "User.metadata")
+                    .unwrap();
+            assert_eq!(property.ignore, value);
 
-        let error = validation_error(validate_type_satay(
-            &schema,
-            Some(OasSchemaType::String),
-            "schema `Metadata`",
-            false,
-        ));
-        assert!(matches!(
-            error,
-            ValidationError::SatayIgnoreRequiresObjectProperty { context }
-                if context == "schema `Metadata`"
-        ));
+            let error = validation_error(validate_value_satay(
+                &schema,
+                Some(OasSchemaType::String),
+                "schema `Metadata`",
+            ));
+            assert!(matches!(
+                error,
+                ValidationError::SatayIgnoreRequiresObjectProperty { context }
+                    if context == "schema `Metadata`"
+            ));
+        }
     }
 
     #[test]
@@ -886,18 +876,16 @@ mod tests {
         let schema = schema_with_satay(json!({ "identifier": "request-id" }));
 
         let property =
-            validate_type_satay(&schema, Some(OasSchemaType::String), "User.request", true)
-                .unwrap();
+            validate_property_satay(&schema, Some(OasSchemaType::String), "User.request").unwrap();
         assert_eq!(
             property.identifier_words,
             Some(vec!["request".to_owned(), "id".to_owned()])
         );
 
-        let error = validation_error(validate_type_satay(
+        let error = validation_error(validate_value_satay(
             &schema,
             Some(OasSchemaType::String),
             "schema `RequestIdentifier`",
-            false,
         ));
         assert!(matches!(
             error,
@@ -910,11 +898,10 @@ mod tests {
     fn rejects_non_boolean_treat_error_as_none() {
         let schema = schema_with_satay(json!({ "treat-error-as-none": "yes" }));
 
-        let error = validation_error(validate_type_satay(
+        let error = validation_error(validate_property_satay(
             &schema,
             Some(OasSchemaType::String),
             "User.nickname",
-            true,
         ));
 
         assert!(matches!(

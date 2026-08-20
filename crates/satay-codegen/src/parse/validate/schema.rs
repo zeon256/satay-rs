@@ -19,8 +19,8 @@ use super::super::satay::schema_options;
 use super::constraint::{parse_integer_type, parse_validation, reject_keyword};
 use super::satay::{
     ValidatedSataySchema, ValidatedTypeDirective, reject_enum_variants_without_enum,
-    reject_object_property_options_outside_object_property, validate_enum_satay,
-    validate_type_satay,
+    reject_property_options_on_value_schema, validate_enum_satay, validate_property_satay,
+    validate_value_satay,
 };
 use super::{
     ValidatedComponent, ValidatedComponentKind, ValidatedField, ValidatedFieldDecoding,
@@ -74,21 +74,82 @@ pub(super) fn validate_components(
     Ok(parsed)
 }
 
-pub(super) fn validate_type_schema(
-    document: &ResolvedDocument<'_>,
-    schema: &OasSchema,
-    context: &str,
-    allow_field_options: bool,
-) -> Result<ValidatedType, ValidationError> {
-    let mut stack = vec![];
-    validate_type_schema_with_stack(document, schema, context, allow_field_options, &mut stack)
+#[derive(Debug, Clone, Copy)]
+enum SchemaValidationContext {
+    Value,
+    Property,
 }
 
-fn validate_type_schema_with_stack(
+impl SchemaValidationContext {
+    fn validate_satay(
+        self,
+        schema: &OasObjectSchema,
+        schema_type: Option<OasSchemaType>,
+        context: &str,
+    ) -> Result<ValidatedSataySchema, ValidationError> {
+        match self {
+            Self::Value => validate_value_satay(schema, schema_type, context),
+            Self::Property => validate_property_satay(schema, schema_type, context),
+        }
+    }
+
+    fn validate_enum_satay(
+        self,
+        schema: &OasObjectSchema,
+        enum_values: &[JsonValue],
+        context: &str,
+    ) -> Result<BTreeMap<String, String>, ValidationError> {
+        if matches!(self, Self::Value) {
+            reject_property_options_on_value_schema(schema, context)?;
+        }
+        validate_enum_satay(schema, enum_values, context)
+    }
+}
+
+pub(super) fn validate_value_schema(
     document: &ResolvedDocument<'_>,
     schema: &OasSchema,
     context: &str,
-    allow_field_options: bool,
+) -> Result<ValidatedType, ValidationError> {
+    let mut stack = vec![];
+    validate_value_schema_with_stack(document, schema, context, &mut stack)
+}
+
+fn validate_value_schema_with_stack(
+    document: &ResolvedDocument<'_>,
+    schema: &OasSchema,
+    context: &str,
+    stack: &mut Vec<String>,
+) -> Result<ValidatedType, ValidationError> {
+    validate_schema_with_stack(
+        document,
+        schema,
+        context,
+        SchemaValidationContext::Value,
+        stack,
+    )
+}
+
+fn validate_property_schema_with_stack(
+    document: &ResolvedDocument<'_>,
+    schema: &OasSchema,
+    context: &str,
+    stack: &mut Vec<String>,
+) -> Result<ValidatedType, ValidationError> {
+    validate_schema_with_stack(
+        document,
+        schema,
+        context,
+        SchemaValidationContext::Property,
+        stack,
+    )
+}
+
+fn validate_schema_with_stack(
+    document: &ResolvedDocument<'_>,
+    schema: &OasSchema,
+    context: &str,
+    validation_context: SchemaValidationContext,
     stack: &mut Vec<String>,
 ) -> Result<ValidatedType, ValidationError> {
     reject_preserved_unknown_keywords(schema, context)?;
@@ -100,7 +161,7 @@ fn validate_type_schema_with_stack(
                 .ok_or_else(|| ValidationError::UnsupportedBooleanSchema {
                     context: context.to_owned(),
                 })?;
-        let validated_satay = validate_reference_siblings(schema, context, allow_field_options)?;
+        let validated_satay = validate_reference_siblings(schema, context, validation_context)?;
         let description = match optional_description(&schema.description) {
             Some(description) => Some(description),
             None => referenced_schema_description(document, reference)?,
@@ -153,7 +214,7 @@ fn validate_type_schema_with_stack(
         schema_type,
         nullable,
         context,
-        allow_field_options,
+        validation_context,
         stack,
     )
 }
@@ -161,7 +222,7 @@ fn validate_type_schema_with_stack(
 fn validate_reference_siblings(
     schema: &OasObjectSchema,
     context: &str,
-    allow_field_options: bool,
+    validation_context: SchemaValidationContext,
 ) -> Result<ValidatedSataySchema, ValidationError> {
     if let Some(keyword) = unsupported_reference_schema_keyword(schema) {
         return Err(ValidationError::UnsupportedRefSiblingKeyword {
@@ -180,37 +241,26 @@ fn validate_reference_siblings(
     }
 
     let options = schema_options(schema, context)?.unwrap_or_default();
-    if options.parse_as.is_some()
-        || options.integer_type.is_some()
-        || options.none_if.is_some()
-        || options.true_values.is_some()
-        || options.false_values.is_some()
-        || options.unknown_as.is_some()
-        || options.enum_variants.is_some()
-    {
-        let keyword = options
-            .parse_as
-            .map(|_| "parse-as")
-            .or_else(|| options.integer_type.map(|_| "integer-type"))
-            .or_else(|| options.none_if.as_ref().map(|_| "none-if"))
-            .or_else(|| options.true_values.as_ref().map(|_| "true-values"))
-            .or_else(|| options.false_values.as_ref().map(|_| "false-values"))
-            .or_else(|| options.unknown_as.map(|_| "unknown-as"))
-            .or_else(|| options.enum_variants.as_ref().map(|_| "enum-variants"))
-            .expect("at least one forbidden field is set");
+    let mut keyword = options
+        .parse_as
+        .map(|_| "parse-as")
+        .or_else(|| options.integer_type.map(|_| "integer-type"))
+        .or_else(|| options.none_if.as_ref().map(|_| "none-if"))
+        .or_else(|| options.true_values.as_ref().map(|_| "true-values"))
+        .or_else(|| options.false_values.as_ref().map(|_| "false-values"))
+        .or_else(|| options.unknown_as.map(|_| "unknown-as"))
+        .or_else(|| options.enum_variants.as_ref().map(|_| "enum-variants"));
+    if matches!(validation_context, SchemaValidationContext::Value) {
+        keyword = keyword.or_else(|| options.treat_error_as_none.map(|_| "treat-error-as-none"));
+    }
+    if let Some(keyword) = keyword {
         return Err(ValidationError::UnsupportedRefSiblingKeyword {
             context: context.to_owned(),
             keyword: format!("x-satay.{keyword}"),
         });
     }
-    if options.treat_error_as_none.is_some() && !allow_field_options {
-        return Err(ValidationError::UnsupportedRefSiblingKeyword {
-            context: context.to_owned(),
-            keyword: "x-satay.treat-error-as-none".to_owned(),
-        });
-    }
 
-    validate_type_satay(schema, None, context, allow_field_options)
+    validation_context.validate_satay(schema, None, context)
 }
 
 fn unsupported_reference_schema_keyword(schema: &OasObjectSchema) -> Option<&str> {
@@ -313,9 +363,6 @@ fn validate_component_schema(
 ) -> Result<ValidatedComponent, ValidationError> {
     let context = format!("schema `{schema_name}`");
     reject_preserved_unknown_keywords(schema, &context)?;
-    if let Some(schema) = schema.as_object() {
-        reject_object_property_options_outside_object_property(schema, &context)?;
-    }
     let kind = if let Some(reference) = schema.reference() {
         let schema =
             schema
@@ -323,7 +370,7 @@ fn validate_component_schema(
                 .ok_or_else(|| ValidationError::UnsupportedBooleanSchema {
                     context: context.clone(),
                 })?;
-        validate_reference_siblings(schema, &context, false)?;
+        validate_reference_siblings(schema, &context, SchemaValidationContext::Value)?;
         ValidatedComponentKind::Reference(schema_ref_type_name(reference)?)
     } else {
         let schema =
@@ -332,6 +379,7 @@ fn validate_component_schema(
                 .ok_or_else(|| ValidationError::UnsupportedBooleanSchema {
                     context: context.clone(),
                 })?;
+        reject_property_options_on_value_schema(schema, &context)?;
         if schema_is_union(schema) {
             ValidatedComponentKind::Type(validate_union_type_schema(
                 document, schema, &context, stack,
@@ -347,7 +395,11 @@ fn validate_component_schema(
             let (schema_type, nullable) = schema_type_and_nullable(schema, &context)?;
             let enum_values = effective_enum_values(schema, schema_type, &context)?;
             if !enum_values.is_empty() {
-                let explicit_variants = validate_enum_satay(schema, &enum_values, &context)?;
+                let explicit_variants = SchemaValidationContext::Value.validate_enum_satay(
+                    schema,
+                    &enum_values,
+                    &context,
+                )?;
                 validate_enum_shape(&enum_values, schema_type, &context)?;
                 ValidatedComponentKind::Type(validated_component_enum_type(
                     schema,
@@ -380,7 +432,7 @@ fn validate_component_schema(
                         schema_type,
                         nullable,
                         &context,
-                        false,
+                        SchemaValidationContext::Value,
                         stack,
                     )?),
                     Some(kind) => {
@@ -804,7 +856,8 @@ fn validate_open_string_enum_any_of_branch<'a>(
         return Ok(None);
     }
 
-    let explicit_variants = validate_enum_satay(schema, &values, context)?;
+    let explicit_variants =
+        SchemaValidationContext::Value.validate_enum_satay(schema, &values, context)?;
     validate_enum_shape(&values, schema_type, context)?;
 
     Ok(Some(OpenStringEnumBranch {
@@ -1113,7 +1166,8 @@ fn validate_inline_plain_union_branch(
             return Err(keyword.branch_error(context, index));
         }
 
-        let explicit_variants = validate_enum_satay(schema, &enum_values, context)
+        let explicit_variants = SchemaValidationContext::Value
+            .validate_enum_satay(schema, &enum_values, context)
             .map_err(|_| keyword.branch_error(context, index))?;
         validate_enum_shape(&enum_values, schema_type, context)
             .map_err(|_| keyword.branch_error(context, index))?;
@@ -1153,7 +1207,7 @@ fn validate_inline_plain_union_branch(
             Some(schema_type),
             false,
             context,
-            false,
+            SchemaValidationContext::Value,
             stack,
         )?;
         return Ok((ty, "Map".to_owned()));
@@ -1169,7 +1223,7 @@ fn validate_inline_plain_union_branch(
         Some(schema_type),
         false,
         context,
-        false,
+        SchemaValidationContext::Value,
         stack,
     )
     .map_err(|_| keyword.branch_error(context, index))?;
@@ -2615,16 +2669,16 @@ fn validate_object_type_schema(
     schema_type: Option<OasSchemaType>,
     nullable: bool,
     context: &str,
-    allow_field_options: bool,
+    validation_context: SchemaValidationContext,
     stack: &mut Vec<String>,
 ) -> Result<ValidatedType, ValidationError> {
     let description = optional_description(&schema.description);
     let enum_values = effective_enum_values(schema, schema_type, context)?;
     if !enum_values.is_empty() {
-        let explicit_variants = validate_enum_satay(schema, &enum_values, context)?;
+        let explicit_variants =
+            validation_context.validate_enum_satay(schema, &enum_values, context)?;
         validate_enum_shape(&enum_values, schema_type, context)?;
-        let validated_satay =
-            validate_type_satay(schema, schema_type, context, allow_field_options)?;
+        let validated_satay = validation_context.validate_satay(schema, schema_type, context)?;
         return Ok(ValidatedType {
             kind: ValidatedTypeKind::Enum(validated_enum(
                 &enum_values,
@@ -2642,7 +2696,7 @@ fn validate_object_type_schema(
     }
 
     reject_enum_variants_without_enum(schema, context)?;
-    let validated_satay = validate_type_satay(schema, schema_type, context, allow_field_options)?;
+    let validated_satay = validation_context.validate_satay(schema, schema_type, context)?;
 
     let directive_kind = match &validated_satay.directive {
         ValidatedTypeDirective::ParsedString(codec) => {
@@ -2729,11 +2783,10 @@ fn validate_inline_type_kind(
                         context: context.to_owned(),
                     })?;
             Ok(ValidatedTypeKind::Array(Box::new(
-                validate_type_schema_with_stack(
+                validate_value_schema_with_stack(
                     document,
                     items,
                     &format!("{context} items"),
-                    false,
                     stack,
                 )?,
             )))
@@ -2761,11 +2814,10 @@ fn validate_inline_type_kind(
                 reject_keyword(schema.min_properties.is_some(), "minProperties", context)?;
                 reject_keyword(schema.max_properties.is_some(), "maxProperties", context)?;
                 Ok(ValidatedTypeKind::Map(Box::new(
-                    validate_type_schema_with_stack(
+                    validate_value_schema_with_stack(
                         document,
                         value,
                         &format!("{context} additionalProperties"),
-                        false,
                         stack,
                     )?,
                 )))
@@ -2844,11 +2896,10 @@ fn validate_struct_properties(
 
     for (wire_name, property_schema) in &schema.properties {
         let property_context = format!("property `{schema_name}.{wire_name}`");
-        let ty = validate_type_schema_with_stack(
+        let ty = validate_property_schema_with_stack(
             document,
             property_schema,
             &property_context,
-            true,
             stack,
         )?;
         fields.push(ValidatedField {

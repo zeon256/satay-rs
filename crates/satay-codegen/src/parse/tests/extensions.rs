@@ -570,12 +570,16 @@ components:
           type: string
     BusServiceArrival:
       type: object
-      required: [nextBus]
+      required: [nextBus, strictNextBus]
       properties:
         nextBus:
           $ref: '#/components/schemas/BusArrivalTiming'
           x-satay:
             treat-error-as-none: true
+        strictNextBus:
+          $ref: '#/components/schemas/BusArrivalTiming'
+          x-satay:
+            treat-error-as-none: false
 "#,
     );
 
@@ -587,6 +591,127 @@ components:
     assert!(next_bus.required);
     assert!(next_bus.treat_error_as_none);
     assert_eq!(next_bus.ty, TypeRef::Named("BusArrivalTiming".to_owned()));
+    let strict_next_bus = field(fields, "strictNextBus");
+    assert!(strict_next_bus.required);
+    assert!(!strict_next_bus.treat_error_as_none);
+    assert_eq!(
+        strict_next_bus.ty,
+        TypeRef::Named("BusArrivalTiming".to_owned())
+    );
+}
+
+#[test]
+fn rejects_property_only_options_on_value_enum_schemas_by_presence() {
+    for value in [true, false] {
+        let spec = format!(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {{}}
+components:
+  schemas:
+    Status:
+      type: string
+      enum: [ready]
+      x-satay:
+        treat-error-as-none: {value}
+"#
+        );
+
+        assert!(matches!(
+            parse_invalid(&spec),
+            ValidationError::SatayTreatErrorAsNoneRequiresObjectProperty { context }
+                if context == "schema `Status`"
+        ));
+    }
+}
+
+#[test]
+fn rejects_property_only_options_on_open_enum_value_branches() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Status:
+      anyOf:
+        - type: string
+        - type: string
+          enum: [ready]
+          x-satay:
+            treat-error-as-none: false
+"#,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::SatayTreatErrorAsNoneRequiresObjectProperty { context }
+            if context == "schema `Status`"
+    ));
+}
+
+#[test]
+fn validates_array_items_in_value_context() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Record:
+      type: object
+      properties:
+        values:
+          type: array
+          items:
+            type: string
+            x-satay:
+              treat-error-as-none: false
+"#,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::SatayTreatErrorAsNoneRequiresObjectProperty { context }
+            if context == "property `Record.values` items"
+    ));
+}
+
+#[test]
+fn rejects_property_options_on_value_reference_siblings_by_presence() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Identifier:
+      type: string
+    IdentifierAlias:
+      $ref: '#/components/schemas/Identifier'
+      x-satay:
+        treat-error-as-none: false
+"#,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::UnsupportedRefSiblingKeyword { context, keyword }
+            if context == "schema `IdentifierAlias`"
+                && keyword == "x-satay.treat-error-as-none"
+    ));
 }
 
 #[test]
