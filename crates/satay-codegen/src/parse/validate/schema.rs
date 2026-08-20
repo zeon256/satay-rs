@@ -23,9 +23,9 @@ use super::satay::{
     validate_type_satay,
 };
 use super::{
-    ValidatedComponent, ValidatedComponentKind, ValidatedField, ValidatedType, ValidatedTypeKind,
-    ValidatedUnion, ValidatedUnionTag, ValidatedUnionTagStyle, ValidatedUnionVariant,
-    ValidatedUnionVariantKind,
+    ValidatedComponent, ValidatedComponentKind, ValidatedField, ValidatedFieldDecoding,
+    ValidatedFieldValue, ValidatedType, ValidatedTypeKind, ValidatedUnion, ValidatedUnionTag,
+    ValidatedUnionTagStyle, ValidatedUnionVariant, ValidatedUnionVariantKind,
 };
 use crate::error::ValidationError;
 use crate::ident::{field_ident, type_ident, unique_ident, variant_ident};
@@ -107,7 +107,7 @@ fn validate_type_schema_with_stack(
         };
         let mut ty = ValidatedType::named(schema_ref_type_name(reference)?);
         ty.description = description;
-        ty.treat_error_as_none = validated_satay.treat_error_as_none;
+        ty.field_decoding = validated_satay.field_decoding;
         ty.ignore = validated_satay.ignore;
         ty.identifier_words = validated_satay.identifier_words;
         return Ok(ty);
@@ -140,8 +140,7 @@ fn validate_type_schema_with_stack(
             nullable: false,
             validation: None,
             description: optional_description(&schema.description),
-            treat_error_as_none: false,
-            none_if: vec![],
+            field_decoding: ValidatedFieldDecoding::Strict,
             ignore: false,
             identifier_words: None,
         });
@@ -425,8 +424,7 @@ fn validated_component_enum_type(
         nullable,
         validation: None,
         description: optional_description(&schema.description),
-        treat_error_as_none: false,
-        none_if: vec![],
+        field_decoding: ValidatedFieldDecoding::Strict,
         ignore: false,
         identifier_words: None,
     })
@@ -507,8 +505,7 @@ fn validate_union_type_schema(
             nullable: false,
             validation: None,
             description: optional_description(&schema.description),
-            treat_error_as_none: false,
-            none_if: vec![],
+            field_decoding: ValidatedFieldDecoding::Strict,
             ignore: false,
             identifier_words: None,
         });
@@ -542,8 +539,7 @@ fn validate_union_type_schema(
         nullable,
         validation: None,
         description: optional_description(&schema.description),
-        treat_error_as_none: false,
-        none_if: vec![],
+        field_decoding: ValidatedFieldDecoding::Strict,
         ignore: false,
         identifier_words: None,
     })
@@ -673,8 +669,7 @@ fn validate_open_string_enum_any_of(
         nullable: false,
         validation: None,
         description: optional_description(&schema.description).or(branch_description),
-        treat_error_as_none: false,
-        none_if: vec![],
+        field_decoding: ValidatedFieldDecoding::Strict,
         ignore: false,
         identifier_words: None,
     }))
@@ -1086,8 +1081,7 @@ fn validate_nested_discriminator_union_branch(
         nullable: false,
         validation: None,
         description: optional_description(&schema.description),
-        treat_error_as_none: false,
-        none_if: vec![],
+        field_decoding: ValidatedFieldDecoding::Strict,
         ignore: false,
         identifier_words: None,
     };
@@ -1135,8 +1129,7 @@ fn validate_inline_plain_union_branch(
             nullable,
             validation: None,
             description: optional_description(&schema.description),
-            treat_error_as_none: false,
-            none_if: vec![],
+            field_decoding: ValidatedFieldDecoding::Strict,
             ignore: false,
             identifier_words: None,
         };
@@ -1774,16 +1767,12 @@ fn embedded_discriminator_value(
         return Ok(None);
     };
 
-    if field.ty.ignore {
+    let ty = field.value.ty();
+    if ty.ignore {
         return Ok(None);
     }
 
-    if !field.required
-        || field.treat_error_as_none
-        || field.ty.treat_error_as_none
-        || !field.ty.none_if.is_empty()
-        || field.ty.nullable
-    {
+    if !field.required || !matches!(field.value, ValidatedFieldValue::Strict(_)) || ty.nullable {
         return Err(invalid_discriminator_property(
             context,
             schema_name,
@@ -1792,7 +1781,7 @@ fn embedded_discriminator_value(
         ));
     }
 
-    let ValidatedTypeKind::Enum(enum_) = &field.ty.kind else {
+    let ValidatedTypeKind::Enum(enum_) = &ty.kind else {
         return Err(invalid_discriminator_property(
             context,
             schema_name,
@@ -2511,9 +2500,9 @@ fn reject_any_of_cycles(components: &[ValidatedComponent]) -> Result<(), Validat
 fn component_contains_union(component: &ValidatedComponent) -> bool {
     match &component.kind {
         ValidatedComponentKind::Reference(_) => false,
-        ValidatedComponentKind::Struct(fields) => {
-            fields.iter().any(|field| field.ty.contains_any_of())
-        }
+        ValidatedComponentKind::Struct(fields) => fields
+            .iter()
+            .any(|field| field.value.ty().contains_any_of()),
         ValidatedComponentKind::Type(ty) => ty.contains_any_of(),
     }
 }
@@ -2531,7 +2520,7 @@ fn collect_component_union_targets(
         }
         ValidatedComponentKind::Struct(fields) => {
             for field in fields {
-                collect_type_union_targets(&field.ty, schemas_by_rust_name, targets);
+                collect_type_union_targets(field.value.ty(), schemas_by_rust_name, targets);
             }
         }
         ValidatedComponentKind::Type(ty) => {
@@ -2563,7 +2552,7 @@ fn collect_type_union_targets(
         }
         ValidatedTypeKind::InlineStruct(fields) => {
             for field in fields {
-                collect_type_union_targets(&field.ty, schemas_by_rust_name, targets);
+                collect_type_union_targets(field.value.ty(), schemas_by_rust_name, targets);
             }
         }
         ValidatedTypeKind::Named(rust_name) => {
@@ -2646,8 +2635,7 @@ fn validate_object_type_schema(
             nullable,
             validation: None,
             description,
-            treat_error_as_none: validated_satay.treat_error_as_none,
-            none_if: validated_satay.none_if,
+            field_decoding: validated_satay.field_decoding,
             ignore: validated_satay.ignore,
             identifier_words: validated_satay.identifier_words,
         });
@@ -2672,8 +2660,7 @@ fn validate_object_type_schema(
             nullable,
             validation: None,
             description,
-            treat_error_as_none: validated_satay.treat_error_as_none,
-            none_if: validated_satay.none_if,
+            field_decoding: validated_satay.field_decoding,
             ignore: validated_satay.ignore,
             identifier_words: validated_satay.identifier_words,
         });
@@ -2697,8 +2684,7 @@ fn validate_object_type_schema(
         nullable,
         validation,
         description,
-        treat_error_as_none: validated_satay.treat_error_as_none,
-        none_if: validated_satay.none_if,
+        field_decoding: validated_satay.field_decoding,
         ignore: validated_satay.ignore,
         identifier_words: validated_satay.identifier_words,
     })
@@ -2766,8 +2752,7 @@ fn validate_inline_type_kind(
                     nullable: false,
                     validation: None,
                     description: None,
-                    treat_error_as_none: false,
-                    none_if: vec![],
+                    field_decoding: ValidatedFieldDecoding::Strict,
                     ignore: false,
                     identifier_words: None,
                 })))
@@ -2869,9 +2854,8 @@ fn validate_struct_properties(
         fields.push(ValidatedField {
             wire_name: wire_name.clone(),
             description: ty.description.clone(),
-            treat_error_as_none: ty.treat_error_as_none,
-            ty,
             required: required.contains(wire_name),
+            value: ty.into_field_value(),
         });
     }
 
@@ -2887,10 +2871,10 @@ fn validate_rust_field_identifier_collisions(
     let mut generated = BTreeMap::<String, String>::new();
     let mut used = BTreeSet::new();
 
-    for field in fields.iter().filter(|field| !field.ty.ignore) {
-        let explicit = field.ty.identifier_words.is_some();
-        let identifier = field
-            .ty
+    for field in fields.iter().filter(|field| !field.value.ty().ignore) {
+        let ty = field.value.ty();
+        let explicit = ty.identifier_words.is_some();
+        let identifier = ty
             .identifier_words
             .as_ref()
             .map(|words| words.join("-"))
