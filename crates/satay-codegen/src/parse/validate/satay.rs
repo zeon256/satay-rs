@@ -26,7 +26,6 @@ pub(crate) enum ValidatedTypeDirective {
 #[derive(Debug, Clone)]
 pub(crate) struct ValidatedSataySchema {
     pub(crate) directive: ValidatedTypeDirective,
-    pub(crate) enum_variants: BTreeMap<String, String>,
     pub(crate) treat_error_as_none: bool,
     pub(crate) none_if: Vec<String>,
     pub(crate) ignore: bool,
@@ -40,21 +39,6 @@ pub(super) fn reject_object_property_options_outside_object_property(
     let options = schema_options(schema, context)?.unwrap_or_default();
     validate_ignore(&options, context, false)?;
     validate_identifier(&options, context, false).map(|_| ())
-}
-
-pub(super) fn validate_component_enum_satay(
-    schema: &OasObjectSchema,
-    enum_values: &[JsonValue],
-    context: &str,
-) -> Result<ValidatedSataySchema, ValidationError> {
-    Ok(ValidatedSataySchema {
-        directive: ValidatedTypeDirective::AsDeclared,
-        enum_variants: validate_enum_variants(schema, enum_values, context)?,
-        treat_error_as_none: false,
-        none_if: vec![],
-        ignore: false,
-        identifier_words: None,
-    })
 }
 
 pub(super) fn validate_type_satay(
@@ -148,7 +132,6 @@ pub(super) fn validate_type_satay(
 
     Ok(ValidatedSataySchema {
         directive,
-        enum_variants: BTreeMap::new(),
         treat_error_as_none,
         none_if,
         ignore,
@@ -250,21 +233,31 @@ fn validate_ignore(
     Ok(allow_object_property && options.ignore.unwrap_or(false))
 }
 
-pub(super) fn validate_type_enum_satay(
+pub(super) fn reject_enum_variants_without_enum(
     schema: &OasObjectSchema,
-    enum_values: &[JsonValue],
     context: &str,
-) -> Result<BTreeMap<String, String>, ValidationError> {
-    validate_enum_variants(schema, enum_values, context)
+) -> Result<(), ValidationError> {
+    let options = schema_options(schema, context)?.unwrap_or_default();
+    if options.enum_variants.is_some() {
+        return Err(ValidationError::SatayEnumVariantsRequireEnum {
+            context: context.to_owned(),
+        });
+    }
+
+    Ok(())
 }
 
-fn validate_enum_variants(
+pub(super) fn validate_enum_satay(
     schema: &OasObjectSchema,
     enum_values: &[JsonValue],
     context: &str,
 ) -> Result<BTreeMap<String, String>, ValidationError> {
-    if enum_values.is_empty() {
-        return Ok(BTreeMap::new());
+    let options = schema_options(schema, context)?.unwrap_or_default();
+    if let Some(parse_as) = parse_satay_parse_as(&options) {
+        return Err(ValidationError::SatayParseAsWithEnum {
+            context: context.to_owned(),
+            parse_as: satay_parse_as_wire(parse_as).to_owned(),
+        });
     }
 
     let mut wire_names = BTreeSet::new();
@@ -275,7 +268,6 @@ fn validate_enum_variants(
         wire_names.insert(value.to_owned());
     }
 
-    let options = schema_options(schema, context)?.unwrap_or_default();
     parse_satay_enum_variants(&options, context, &wire_names)
 }
 
@@ -771,8 +763,7 @@ mod tests {
         }));
         schema.enum_values = vec![json!("in-progress"), json!("done")];
 
-        let variants =
-            validate_type_enum_satay(&schema, &schema.enum_values, "Task.status").unwrap();
+        let variants = validate_enum_satay(&schema, &schema.enum_values, "Task.status").unwrap();
 
         assert_eq!(
             variants.get("in-progress").map(String::as_str),
@@ -791,7 +782,7 @@ mod tests {
         }));
         schema.enum_values = vec![json!("active")];
 
-        let error = validation_error(validate_type_enum_satay(
+        let error = validation_error(validate_enum_satay(
             &schema,
             &schema.enum_values,
             "Task.status",
@@ -801,6 +792,39 @@ mod tests {
             error,
             ValidationError::UnknownSatayEnumVariantValue { context, wire_name }
                 if context == "Task.status" && wire_name == "archived"
+        ));
+    }
+
+    #[test]
+    fn rejects_enum_variant_overrides_without_enum_values() {
+        for mappings in [json!({}), json!({ "active": "Active" })] {
+            let schema = schema_with_satay(json!({ "enum-variants": mappings }));
+
+            let error = validation_error(reject_enum_variants_without_enum(&schema, "Task.status"));
+
+            assert!(matches!(
+                error,
+                ValidationError::SatayEnumVariantsRequireEnum { context }
+                    if context == "Task.status"
+            ));
+        }
+    }
+
+    #[test]
+    fn rejects_parse_as_with_enum_values() {
+        let mut schema = schema_with_satay(json!({ "parse-as": "date" }));
+        schema.enum_values = vec![json!("active")];
+
+        let error = validation_error(validate_enum_satay(
+            &schema,
+            &schema.enum_values,
+            "Task.status",
+        ));
+
+        assert!(matches!(
+            error,
+            ValidationError::SatayParseAsWithEnum { context, parse_as }
+                if context == "Task.status" && parse_as == "date"
         ));
     }
 

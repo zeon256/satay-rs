@@ -79,6 +79,17 @@ pub enum ValidationError {
         path: String,
         source: serde_json::Error,
     },
+    /// `x-satay.enum-variants` was applied to a schema without enum values.
+    ///
+    /// Error message: `{context} uses x-satay.enum-variants without enum values`
+    #[error("{context} uses x-satay.enum-variants without enum values")]
+    SatayEnumVariantsRequireEnum { context: String },
+
+    /// `x-satay.parse-as` was combined with enum values.
+    ///
+    /// Error message: `{context} cannot combine x-satay.parse-as `{parse_as}` with enum values`
+    #[error("{context} cannot combine x-satay.parse-as `{parse_as}` with enum values")]
+    SatayParseAsWithEnum { context: String, parse_as: String },
 
     /// An `x-satay.enum-variants` entry points at a value that is not in the enum.
     ///
