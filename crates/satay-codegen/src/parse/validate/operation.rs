@@ -15,7 +15,7 @@ use super::super::resolve::ResolvedDocument;
 use super::super::satay::{SatayOperationOptions, SatayOutputOptions, operation_options};
 use super::schema::{
     inline_union_null_branch, reject_any_of_sibling_keywords, reject_plain_one_of_sibling_keywords,
-    schema_uses_all_of, schema_uses_any_of, validate_type_schema,
+    schema_uses_all_of, schema_uses_any_of, validate_value_schema,
 };
 use super::{
     ValidatedOperation, ValidatedParameter, ValidatedRequestBody, ValidatedResponse,
@@ -234,7 +234,7 @@ fn validate_parameter(
         });
     }
 
-    let mut ty = validate_type_schema(document, schema, &schema_context, false)?;
+    let mut ty = validate_value_schema(document, schema, &schema_context)?;
 
     if ty.is_nullable() {
         if !required
@@ -374,7 +374,7 @@ fn validate_request_body(
     Ok(Some(ValidatedRequestBody {
         description: optional_description(&request_body.description),
         content_type: content_type.to_owned(),
-        ty: validate_type_schema(document, schema, context, false)?,
+        ty: validate_value_schema(document, schema, context)?,
         required: request_body.required.unwrap_or(false),
     }))
 }
@@ -435,7 +435,7 @@ fn validate_responses(
                         Some(output) => {
                             validate_projected_response_type(document, schema, output, &context)?
                         }
-                        None => validate_type_schema(document, schema, &context, false)?,
+                        None => validate_value_schema(document, schema, &context)?,
                     };
                     let projection = output.map(|output| ValidatedResponseProjection {
                         unwrap_field: output.unwrap_field.as_str().to_owned(),
@@ -480,7 +480,7 @@ fn validate_projected_response_type(
     let unwrap_required = wrapper.required.iter().any(|field| field == unwrap_field);
 
     let Some(map_field) = output.map_field.as_ref() else {
-        let mut ty = validate_type_schema(document, unwrapped, context, false)?;
+        let mut ty = validate_value_schema(document, unwrapped, context)?;
         if !unwrap_required {
             ty.nullable = true;
         }
@@ -523,7 +523,7 @@ fn validate_projected_response_type(
     let mut projected_array = array.clone();
     projected_array.items = Some(Box::new(mapped.clone()));
     let projected_array = OasSchema::Object(Box::new(projected_array));
-    let mut ty = validate_type_schema(document, &projected_array, context, false)?;
+    let mut ty = validate_value_schema(document, &projected_array, context)?;
     if !unwrap_required {
         ty.nullable = true;
     }

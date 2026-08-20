@@ -158,7 +158,7 @@ With the generated crate's `serde` feature, `odata.metadata` is accepted and dis
 
 Serialization is intentionally lossy: an ignored property can never be supplied through or emitted from the generated struct, so deserialize-then-serialize round trips remove it. Do not use `ignore` on a request model when the server requires that property to be sent.
 
-The property's schema and references are still validated. Unlike operation-level `x-satay.skip`, `ignore` does not bypass validation or remove the containing operation or schema; it only prevents the validated property from reaching the generated model. `ignore` is valid only directly on object properties, including beside a property `$ref`.
+The property's schema and references are still validated. Unlike operation-level `x-satay.skip`, `ignore` does not bypass validation or remove the containing operation or schema; it only prevents the validated property from reaching the generated model. `ignore` is valid only directly on object properties, including beside a property `$ref`. Placement validation is presence-based, so `ignore: false` is also rejected outside an object property.
 
 ## Standard `unixtime` Format
 
@@ -369,5 +369,7 @@ pub struct BusServiceArrival {
 ```
 
 This is useful for APIs that return empty or malformed values in nested objects when data is unavailable, rather than omitting the field or returning `null`. The `treat-error-as-none` extension requires the generated crate's `json` feature.
+
+`treat-error-as-none` is valid only directly on object properties. On a property, `false` is equivalent to omitting the key. Outside an object property, the key is rejected by presence even when its value is `false`.
 
 For a referenced field, place `x-satay` directly beside `$ref` as shown above. Satay supports `description`, `x-satay.treat-error-as-none`, `x-satay.ignore`, and `x-satay.identifier` beside a field `$ref`; other `$ref` siblings are rejected instead of being ignored. An `allOf` wrapper is not required or supported for these extensions.

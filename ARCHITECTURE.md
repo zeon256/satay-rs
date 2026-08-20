@@ -129,11 +129,11 @@ Schema decisions are carried by `ValidatedType`:
 
 Validation responsibilities are split by file:
 
-- `validate/schema.rs` validates component schemas and inline type schemas, rejects unsupported schema shapes, validates enum shape, validates references, and records constraints on `ValidatedType`.
+- `validate/schema.rs` validates component schemas and inline type schemas, rejects unsupported schema shapes, validates enum shape, validates references, and records constraints on `ValidatedType`. Ordinary schemas enter through `validate_value_schema`; object properties enter through the property-specific stack validator. Array items and `additionalProperties` values always return to value context rather than inheriting property capabilities.
 - `validate/operation.rs` validates paths, operation parameters, request bodies, responses, status codes, path placeholders, and JSON media-type requirements.
 - `validate/constraint.rs` parses and normalizes string, integer, number, and array constraints for `nutype` rendering. It also infers integer types from bounds when no explicit `x-satay.integer-type` is provided.
 - `parse/satay.rs` is the authoritative home for typed schema and operation `x-satay` wire contracts, their `schema_options` and `operation_options` accessors, and lower-level parsing helpers shared by validation. The wire types use owned strings so validation does not need to carry extension-value lifetimes.
-- `validate/satay.rs` applies schema-extension compatibility rules such as `parse-as`, `none-if`, `integer-type`, `enum-variants`, `treat-error-as-none`, `ignore`, and `identifier`.
+- `validate/satay.rs` applies schema-extension compatibility rules such as `parse-as`, `none-if`, `integer-type`, `enum-variants`, `treat-error-as-none`, `ignore`, and `identifier`. Separate value and property entry points reject property-only keys on values by wire-key presence, including explicit `false`; the same context split controls which `x-satay` keys are legal beside `$ref`.
 - `validate/operation.rs` applies operation semantics and resolves names from operation extensions against validated operation data.
 
 The wire layer uses `#[serde(deny_unknown_fields)]` and validated newtypes for values with local invariants. It is intentionally separate from the vendor-neutral `satay-oas3::SpecificationExtensions::extension_as<T>()` API: `satay-oas3` provides typed extension deserialization and nested error paths, while `satay-codegen` owns Satay-specific contracts and policy. Validation and lowering must use the centralized accessors rather than traversing raw extension JSON.
