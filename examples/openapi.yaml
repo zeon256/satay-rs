@@ -677,9 +677,6 @@ components:
           type: integer
           description: >
             Indicator of whether the bus is currently being monitored by the system.
-          enum:
-            - 1
-            - 0
           example: 1
           x-satay:
             parse-as: bool

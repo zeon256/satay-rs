@@ -356,6 +356,108 @@ components:
 }
 
 #[test]
+fn rejects_x_satay_enum_variants_without_enum_values() {
+    for (spec, expected_context) in [
+        (
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    VehicleType:
+      type: string
+      x-satay:
+        enum-variants: {}
+"#,
+            "schema `VehicleType`",
+        ),
+        (
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Arrival:
+      type: object
+      properties:
+        vehicle:
+          type: string
+          x-satay:
+            enum-variants:
+              SD: SingleDecker
+"#,
+            "property `Arrival.vehicle`",
+        ),
+    ] {
+        let err = parse_invalid(spec);
+
+        assert!(matches!(
+            err,
+            ValidationError::SatayEnumVariantsRequireEnum { context }
+                if context == expected_context
+        ));
+    }
+}
+
+#[test]
+fn rejects_x_satay_parse_as_with_enum_values() {
+    for (schema, expected_parse_as) in [
+        (
+            r#"
+          type: string
+          enum:
+            - SD
+          x-satay:
+            parse-as: date
+"#,
+            "date",
+        ),
+        (
+            r#"
+          type: integer
+          enum:
+            - 1
+            - 0
+          x-satay:
+            parse-as: bool
+"#,
+            "bool",
+        ),
+    ] {
+        let err = parse_invalid(&format!(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {{}}
+components:
+  schemas:
+    Arrival:
+      type: object
+      properties:
+        vehicle:
+{schema}
+"#
+        ));
+
+        match err {
+            ValidationError::SatayParseAsWithEnum { context, parse_as } => {
+                assert_eq!(context, "property `Arrival.vehicle`");
+                assert_eq!(parse_as, expected_parse_as);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+    }
+}
+
+#[test]
 fn rejects_x_satay_enum_variants_using_reserved_fallback_names() {
     let err = parse_invalid(
         r#"

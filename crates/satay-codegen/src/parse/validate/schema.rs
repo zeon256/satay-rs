@@ -18,9 +18,9 @@ use super::super::resolve::ResolvedDocument;
 use super::super::satay::schema_options;
 use super::constraint::{parse_integer_type, parse_validation, reject_keyword};
 use super::satay::{
-    ValidatedSataySchema, ValidatedTypeDirective,
-    reject_object_property_options_outside_object_property, validate_component_enum_satay,
-    validate_type_enum_satay, validate_type_satay,
+    ValidatedSataySchema, ValidatedTypeDirective, reject_enum_variants_without_enum,
+    reject_object_property_options_outside_object_property, validate_enum_satay,
+    validate_type_satay,
 };
 use super::{
     ValidatedComponent, ValidatedComponentKind, ValidatedField, ValidatedType, ValidatedTypeKind,
@@ -348,16 +348,19 @@ fn validate_component_schema(
             let (schema_type, nullable) = schema_type_and_nullable(schema, &context)?;
             let enum_values = effective_enum_values(schema, schema_type, &context)?;
             if !enum_values.is_empty() {
+                let explicit_variants = validate_enum_satay(schema, &enum_values, &context)?;
                 validate_enum_shape(&enum_values, schema_type, &context)?;
                 ValidatedComponentKind::Type(validated_component_enum_type(
                     schema,
                     &enum_values,
+                    &explicit_variants,
                     nullable,
                     &context,
                 )?)
             } else {
                 match schema_type {
                     Some(OasSchemaType::Object) | None if !schema.properties.is_empty() => {
+                        reject_enum_variants_without_enum(schema, &context)?;
                         ValidatedComponentKind::Struct(validate_struct_properties(
                             document,
                             schema_name,
@@ -408,14 +411,14 @@ fn validate_component_schema(
 fn validated_component_enum_type(
     schema: &OasObjectSchema,
     enum_values: &[JsonValue],
+    explicit_variants: &BTreeMap<String, String>,
     nullable: bool,
     context: &str,
 ) -> Result<ValidatedType, ValidationError> {
-    let validated_satay = validate_component_enum_satay(schema, enum_values, context)?;
     Ok(ValidatedType {
         kind: ValidatedTypeKind::Enum(validated_enum(
             enum_values,
-            &validated_satay.enum_variants,
+            explicit_variants,
             EnumFallback::None,
             context,
         )?),
@@ -806,8 +809,8 @@ fn validate_open_string_enum_any_of_branch<'a>(
         return Ok(None);
     }
 
+    let explicit_variants = validate_enum_satay(schema, &values, context)?;
     validate_enum_shape(&values, schema_type, context)?;
-    let explicit_variants = validate_type_enum_satay(schema, &values, context)?;
 
     Ok(Some(OpenStringEnumBranch {
         values,
@@ -1116,9 +1119,9 @@ fn validate_inline_plain_union_branch(
             return Err(keyword.branch_error(context, index));
         }
 
-        validate_enum_shape(&enum_values, schema_type, context)
+        let explicit_variants = validate_enum_satay(schema, &enum_values, context)
             .map_err(|_| keyword.branch_error(context, index))?;
-        let explicit_variants = validate_type_enum_satay(schema, &enum_values, context)
+        validate_enum_shape(&enum_values, schema_type, context)
             .map_err(|_| keyword.branch_error(context, index))?;
         let enum_ = validated_enum(
             &enum_values,
@@ -2627,6 +2630,30 @@ fn validate_object_type_schema(
     stack: &mut Vec<String>,
 ) -> Result<ValidatedType, ValidationError> {
     let description = optional_description(&schema.description);
+    let enum_values = effective_enum_values(schema, schema_type, context)?;
+    if !enum_values.is_empty() {
+        let explicit_variants = validate_enum_satay(schema, &enum_values, context)?;
+        validate_enum_shape(&enum_values, schema_type, context)?;
+        let validated_satay =
+            validate_type_satay(schema, schema_type, context, allow_field_options)?;
+        return Ok(ValidatedType {
+            kind: ValidatedTypeKind::Enum(validated_enum(
+                &enum_values,
+                &explicit_variants,
+                EnumFallback::None,
+                context,
+            )?),
+            nullable,
+            validation: None,
+            description,
+            treat_error_as_none: validated_satay.treat_error_as_none,
+            none_if: validated_satay.none_if,
+            ignore: validated_satay.ignore,
+            identifier_words: validated_satay.identifier_words,
+        });
+    }
+
+    reject_enum_variants_without_enum(schema, context)?;
     let validated_satay = validate_type_satay(schema, schema_type, context, allow_field_options)?;
 
     let directive_kind = match &validated_satay.directive {
@@ -2642,27 +2669,6 @@ fn validate_object_type_schema(
     if let Some(kind) = directive_kind {
         return Ok(ValidatedType {
             kind,
-            nullable,
-            validation: None,
-            description,
-            treat_error_as_none: validated_satay.treat_error_as_none,
-            none_if: validated_satay.none_if,
-            ignore: validated_satay.ignore,
-            identifier_words: validated_satay.identifier_words,
-        });
-    }
-
-    let enum_values = effective_enum_values(schema, schema_type, context)?;
-    if !enum_values.is_empty() {
-        validate_enum_shape(&enum_values, schema_type, context)?;
-        let explicit_variants = validate_type_enum_satay(schema, &enum_values, context)?;
-        return Ok(ValidatedType {
-            kind: ValidatedTypeKind::Enum(validated_enum(
-                &enum_values,
-                &explicit_variants,
-                EnumFallback::None,
-                context,
-            )?),
             nullable,
             validation: None,
             description,
