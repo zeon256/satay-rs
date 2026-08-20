@@ -142,6 +142,17 @@ pub enum ValidationError {
         kind: String,
     },
 
+    /// Integer-backed boolean parsing was combined with `x-satay.integer-type`.
+    ///
+    /// Error message: `{context} cannot combine x-satay.parse-as `bool` with x-satay.integer-type `{integer_type}``
+    #[error(
+        "{context} cannot combine x-satay.parse-as `bool` with x-satay.integer-type `{integer_type}`"
+    )]
+    SatayParseAsBoolWithIntegerType {
+        context: String,
+        integer_type: String,
+    },
+
     /// An `x-satay.none-if` array is empty.
     ///
     /// Error message: `{context}.x-satay.none-if must contain at least one string`

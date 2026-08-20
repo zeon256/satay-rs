@@ -1246,6 +1246,40 @@ paths:
 }
 
 #[test]
+fn rejects_x_satay_parse_as_bool_with_integer_type_on_property() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Record:
+      type: object
+      properties:
+        id:
+          type: integer
+          x-satay:
+            parse-as: bool
+            integer-type: u8
+"#,
+    );
+
+    match err {
+        ValidationError::SatayParseAsBoolWithIntegerType {
+            context,
+            integer_type,
+        } => {
+            assert_eq!(context, "property `Record.id`");
+            assert_eq!(integer_type, "u8");
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
 fn validates_x_satay_integer_type_on_reachable_request_body_schema() {
     let err = parse_invalid(
         r#"
