@@ -9,6 +9,7 @@ use super::super::satay::{
     satay_parse_as_wire, schema_options, validate_satay_integer_type,
 };
 use super::constraint::parse_integer_type;
+use super::{NonEmptySentinels, ValidatedFieldDecoding};
 use crate::error::ValidationError;
 use crate::model::{
     BoolStringMapping, BoolStringMappingError, IntegerType, ParseAs, RangeScalar, StringCodec,
@@ -26,8 +27,7 @@ pub(crate) enum ValidatedTypeDirective {
 #[derive(Debug, Clone)]
 pub(crate) struct ValidatedSataySchema {
     pub(crate) directive: ValidatedTypeDirective,
-    pub(crate) treat_error_as_none: bool,
-    pub(crate) none_if: Vec<String>,
+    pub(super) field_decoding: ValidatedFieldDecoding,
     pub(crate) ignore: bool,
     pub(crate) identifier_words: Option<Vec<String>>,
 }
@@ -50,15 +50,15 @@ pub(super) fn validate_type_satay(
     let options = schema_options(schema, context)?.unwrap_or_default();
     let parse_as = parse_satay_parse_as(&options);
     let integer_type_wire = options.integer_type_wire();
-    let none_if = match options.none_if.as_ref() {
-        Some(values) if values.is_empty() => {
-            return Err(ValidationError::EmptySatayNoneIf {
+    let sentinels = options
+        .none_if
+        .as_ref()
+        .map(|values| {
+            NonEmptySentinels::new(values.clone()).map_err(|_| ValidationError::EmptySatayNoneIf {
                 context: context.to_owned(),
-            });
-        }
-        Some(values) => values.clone(),
-        None => vec![],
-    };
+            })
+        })
+        .transpose()?;
     let treat_error_as_none = allow_field_options && options.treat_error_as_none.unwrap_or(false);
     let ignore = validate_ignore(&options, context, allow_field_options)?;
     let identifier_words = validate_identifier(&options, context, allow_field_options)?;
@@ -104,24 +104,26 @@ pub(super) fn validate_type_satay(
         ValidatedTypeDirective::AsDeclared
     };
 
-    if !none_if.is_empty() && !allow_field_options {
+    if sentinels.is_some() && !allow_field_options {
         return Err(ValidationError::SatayNoneIfRequiresStructField {
             context: context.to_owned(),
         });
     }
-    if !none_if.is_empty() && !matches!(&directive, ValidatedTypeDirective::ParsedString(_)) {
+    if sentinels.is_some() && !matches!(&directive, ValidatedTypeDirective::ParsedString(_)) {
         return Err(ValidationError::SatayNoneIfRequiresParsedString {
             context: context.to_owned(),
         });
     }
-    if !none_if.is_empty() && treat_error_as_none {
+    if sentinels.is_some() && treat_error_as_none {
         return Err(ValidationError::ConflictingSatayNoneHandling {
             context: context.to_owned(),
         });
     }
 
-    let bool_string_mapping =
-        validate_bool_string_mapping(&options, &directive, &none_if, context)?;
+    let none_if = sentinels
+        .as_ref()
+        .map_or(&[][..], NonEmptySentinels::as_slice);
+    let bool_string_mapping = validate_bool_string_mapping(&options, &directive, none_if, context)?;
     let directive = match (directive, bool_string_mapping) {
         (ValidatedTypeDirective::ParsedString(_), Some(mapping)) => {
             ValidatedTypeDirective::ParsedString(StringCodec::MappedBool(mapping))
@@ -130,10 +132,15 @@ pub(super) fn validate_type_satay(
         _ => unreachable!("validated boolean mapping requires a parsed string"),
     };
 
+    let field_decoding = match sentinels {
+        Some(sentinels) => ValidatedFieldDecoding::Sentinel(sentinels),
+        None if treat_error_as_none => ValidatedFieldDecoding::Lossy,
+        None => ValidatedFieldDecoding::Strict,
+    };
+
     Ok(ValidatedSataySchema {
         directive,
-        treat_error_as_none,
-        none_if,
+        field_decoding,
         ignore,
         identifier_words,
     })
@@ -323,7 +330,10 @@ mod tests {
             validated.directive,
             ValidatedTypeDirective::ParsedString(StringCodec::Standard(ParseAs::OffsetDateTime))
         );
-        assert!(!validated.treat_error_as_none);
+        assert!(matches!(
+            validated.field_decoding,
+            ValidatedFieldDecoding::Strict
+        ));
     }
 
     #[test]
@@ -839,8 +849,14 @@ mod tests {
             validate_type_satay(&schema, Some(OasSchemaType::String), "User.nickname", false)
                 .unwrap();
 
-        assert!(allowed.treat_error_as_none);
-        assert!(!ignored.treat_error_as_none);
+        assert!(matches!(
+            allowed.field_decoding,
+            ValidatedFieldDecoding::Lossy
+        ));
+        assert!(matches!(
+            ignored.field_decoding,
+            ValidatedFieldDecoding::Strict
+        ));
     }
 
     #[test]

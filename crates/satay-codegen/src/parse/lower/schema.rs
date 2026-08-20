@@ -5,9 +5,9 @@ use crate::model::{
 };
 use crate::parse::registry::TypeRegistry;
 use crate::parse::validate::{
-    ValidatedComponent, ValidatedComponentKind, ValidatedDocument, ValidatedField, ValidatedType,
-    ValidatedTypeKind, ValidatedUnion, ValidatedUnionTagStyle, ValidatedUnionVariant,
-    ValidatedUnionVariantKind,
+    ValidatedComponent, ValidatedComponentKind, ValidatedDocument, ValidatedField,
+    ValidatedFieldValue, ValidatedType, ValidatedTypeKind, ValidatedUnion, ValidatedUnionTagStyle,
+    ValidatedUnionVariant, ValidatedUnionVariantKind,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -158,27 +158,34 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
         let mut used = BTreeSet::new();
         let mut parsed = Vec::with_capacity(fields.len());
 
-        for field in fields.iter().filter(|field| !field.ty.ignore) {
-            let identifier = field
-                .ty
+        for field in fields.iter().filter(|field| !field.value.ty().ignore) {
+            let validated_ty = field.value.ty();
+            let identifier = validated_ty
                 .identifier_words
                 .as_ref()
                 .map(|words| words.join("-"))
                 .unwrap_or_else(|| field.wire_name.clone());
             let ty = self.parse_type_ref_with_hint(
-                &field.ty,
+                validated_ty,
                 &format!("{schema_name} {}", field.wire_name),
                 registry,
             );
+            let (treat_error_as_none, none_if) = match &field.value {
+                ValidatedFieldValue::Strict(_) => (false, vec![]),
+                ValidatedFieldValue::Lossy(_) => (true, vec![]),
+                ValidatedFieldValue::SentinelParsedString { sentinels, .. } => {
+                    (false, sentinels.as_slice().to_vec())
+                }
+            };
             parsed.push(Field {
                 wire_name: field.wire_name.clone(),
-                identifier_words: field.ty.identifier_words.clone(),
+                identifier_words: validated_ty.identifier_words.clone(),
                 rust_name: unique_ident(field_ident(&identifier), &mut used),
                 description: field.description.clone(),
                 ty,
                 required: field.required,
-                treat_error_as_none: field.treat_error_as_none,
-                none_if: field.ty.none_if.clone(),
+                treat_error_as_none,
+                none_if,
             });
         }
 
