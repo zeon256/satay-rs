@@ -965,9 +965,9 @@ components:
     let TypeRef::ParsedString(StringCodec::MappedBool(mapping)) = &field(fields, "Bfa").ty else {
         panic!("expected mapped boolean string codec");
     };
-    assert_eq!(mapping.true_values, ["Y", "Yes", "1", "true"]);
-    assert_eq!(mapping.false_values, ["N", "No", "0", "false", ""]);
-    assert_eq!(mapping.unknown_as, Some(false));
+    assert_eq!(mapping.true_values(), ["Y", "Yes", "1", "true"]);
+    assert_eq!(mapping.false_values(), ["N", "No", "0", "false", ""]);
+    assert_eq!(mapping.unknown_as(), Some(false));
 }
 
 #[test]

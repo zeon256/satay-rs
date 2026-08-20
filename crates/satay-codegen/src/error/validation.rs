@@ -1,4 +1,4 @@
-use oas3::spec::ExtensionError;
+use oas3::spec::{self, ExtensionError};
 use serde::de::Error as SerdeError;
 
 /// Errors that can occur while validating an OpenAPI document.
@@ -847,7 +847,7 @@ impl ValidationError {
     }
 }
 
-fn name_or_other_path(error: oas3::spec::ExtensionError) -> String {
+fn name_or_other_path(error: spec::ExtensionError) -> String {
     match error {
         ExtensionError::InvalidName { name } => name,
         _ => "x-satay".to_owned(),

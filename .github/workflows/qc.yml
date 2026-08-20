@@ -177,6 +177,7 @@ jobs:
       - name: Dylint affected packages
         env:
           PACKAGES: ${{ needs.changes.outputs.satay_packages }}
+          DYLINT_RUSTFLAGS: "-D warnings"
         run: |
           set -euo pipefail
 
@@ -185,7 +186,7 @@ jobs:
             package_args+=(--package "$package")
           done < <(jq -r '.[]' <<<"$PACKAGES")
 
-          cargo dylint --all --no-deps "${package_args[@]}"
+          cargo dylint --all --no-deps "${package_args[@]}" -- --tests
 
   test:
     name: Test

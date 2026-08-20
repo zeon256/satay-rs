@@ -242,12 +242,12 @@ impl BoolMappingTokens {
     fn new(field: &Field) -> Self {
         let mapping = bool_string_mapping(field).expect("mapped boolean field has a mapping");
         let true_values = mapping
-            .true_values
+            .true_values()
             .iter()
             .map(|value| lit_str(value))
             .collect::<Vec<_>>();
         let false_values = mapping
-            .false_values
+            .false_values()
             .iter()
             .map(|value| lit_str(value))
             .collect::<Vec<_>>();
@@ -259,7 +259,7 @@ impl BoolMappingTokens {
             .first()
             .expect("validated false-values list is non-empty")
             .clone();
-        let unknown_as = match mapping.unknown_as {
+        let unknown_as = match mapping.unknown_as() {
             Some(value) => parse_quote!(Some(#value)),
             None => parse_quote!(None),
         };

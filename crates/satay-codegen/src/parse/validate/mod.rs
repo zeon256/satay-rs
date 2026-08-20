@@ -170,6 +170,89 @@ pub(crate) enum ValidatedTypeKind {
     Range(RangeScalar),
 }
 
+/// An ordered, non-empty list of wire strings that decode to a single value.
+///
+/// Proof value for later waves; the checked constructor is the only way to
+/// obtain a value, so emptiness is impossible by construction.
+#[allow(dead_code)] // consumed by later waves
+#[derive(Debug, Clone)]
+pub(crate) struct NonEmptySentinels {
+    values: Box<[String]>,
+}
+
+/// Error returned when a [`NonEmptySentinels`] constructor receives an empty list.
+#[allow(dead_code)] // consumed by later waves
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EmptySentinels {
+    Empty,
+}
+
+#[allow(dead_code)] // consumed by later waves
+impl NonEmptySentinels {
+    pub(crate) fn new(values: Vec<String>) -> Result<Self, EmptySentinels> {
+        if values.is_empty() {
+            return Err(EmptySentinels::Empty);
+        }
+        Ok(Self {
+            values: values.into_boxed_slice(),
+        })
+    }
+
+    pub(crate) fn as_slice(&self) -> &[String] {
+        &self.values
+    }
+
+    pub(crate) fn into_vec(self) -> Vec<String> {
+        self.values.into_vec()
+    }
+}
+
+/// A validated string decoded via a [`StringCodec`].
+///
+/// Proof value for later waves; privately wraps the underlying [`ValidatedType`]
+/// so the `ParsedString` kind is the only construction surface — there is no
+/// unchecked constructor from an arbitrary [`ValidatedType`].
+#[allow(dead_code)] // consumed by later waves
+#[derive(Debug, Clone)]
+pub(crate) struct ValidatedParsedString {
+    ty: ValidatedType,
+}
+
+#[allow(dead_code)] // consumed by later waves
+impl ValidatedParsedString {
+    pub(crate) fn new(codec: StringCodec, nullable: bool, description: Option<String>) -> Self {
+        Self {
+            ty: ValidatedType {
+                kind: ValidatedTypeKind::ParsedString(codec),
+                nullable,
+                validation: None,
+                description,
+                treat_error_as_none: false,
+                none_if: vec![],
+                ignore: false,
+                identifier_words: None,
+            },
+        }
+    }
+
+    pub(crate) fn as_type(&self) -> &ValidatedType {
+        &self.ty
+    }
+
+    pub(crate) fn into_type(self) -> ValidatedType {
+        self.ty
+    }
+
+    pub(crate) fn codec(&self) -> &StringCodec {
+        match &self.ty.kind {
+            ValidatedTypeKind::ParsedString(codec) => codec,
+            _ => {
+                unreachable!("ValidatedParsedString is only constructible with a ParsedString kind")
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct ValidatedUnion {
     pub(crate) variants: Vec<ValidatedUnionVariant>,
@@ -272,4 +355,84 @@ pub(crate) fn validate_document<'a>(
 
 fn is_supported_openapi_version(version: &str) -> bool {
     version.starts_with("3.1.")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::BoolStringMapping;
+
+    #[test]
+    fn non_empty_sentinels_rejects_empty_input() {
+        let err = NonEmptySentinels::new(vec![]).unwrap_err();
+        assert!(matches!(err, EmptySentinels::Empty));
+    }
+
+    #[test]
+    fn non_empty_sentinels_retains_input_order() {
+        let sentinels = NonEmptySentinels::new(vec![
+            "n/a".to_owned(),
+            "null".to_owned(),
+            "missing".to_owned(),
+        ])
+        .expect("non-empty input is accepted");
+        assert_eq!(sentinels.as_slice(), &["n/a", "null", "missing"]);
+        let restored = sentinels.into_vec();
+        assert_eq!(restored, ["n/a", "null", "missing"]);
+    }
+
+    #[test]
+    fn parsed_string_construction_sets_kind_and_defaults() {
+        let parsed = ValidatedParsedString::new(
+            StringCodec::Standard(ParseAs::OffsetDateTime),
+            true,
+            Some("creation timestamp".to_owned()),
+        );
+
+        let ty = parsed.as_type();
+        assert!(matches!(
+            ty.kind,
+            ValidatedTypeKind::ParsedString(StringCodec::Standard(ParseAs::OffsetDateTime))
+        ));
+        assert!(ty.nullable);
+        assert_eq!(ty.description.as_deref(), Some("creation timestamp"));
+        assert!(ty.validation.is_none());
+        assert!(!ty.treat_error_as_none);
+        assert!(ty.none_if.is_empty());
+        assert!(!ty.ignore);
+        assert!(ty.identifier_words.is_none());
+    }
+
+    #[test]
+    fn parsed_string_codec_and_into_type_access() {
+        let parsed = ValidatedParsedString::new(
+            StringCodec::MappedBool(
+                BoolStringMapping::try_new(
+                    vec!["yes".to_owned(), "y".to_owned()],
+                    vec!["no".to_owned(), "n".to_owned()],
+                    Some(false),
+                )
+                .expect("valid mapping"),
+            ),
+            false,
+            None,
+        );
+
+        assert_eq!(
+            parsed.codec(),
+            &StringCodec::MappedBool(
+                BoolStringMapping::try_new(
+                    vec!["yes".to_owned(), "y".to_owned()],
+                    vec!["no".to_owned(), "n".to_owned()],
+                    Some(false),
+                )
+                .expect("valid mapping"),
+            )
+        );
+
+        let ty = parsed.into_type();
+        assert!(matches!(ty.kind, ValidatedTypeKind::ParsedString(_)));
+        assert!(!ty.nullable);
+        assert!(ty.description.is_none());
+    }
 }

@@ -37,8 +37,12 @@ impl SataySchemaOptions {
         self.parse_as.map(SatayParseAsWire::into_parse_as)
     }
 
+    pub(crate) fn integer_type_wire(&self) -> Option<SatayIntegerTypeWire> {
+        self.integer_type
+    }
+
     pub(crate) fn integer_type(&self) -> Option<IntegerType> {
-        match self.integer_type {
+        match self.integer_type_wire() {
             Some(SatayIntegerTypeWire::Auto) => None,
             Some(wire) => Some(wire.into_integer_type()),
             None => None,
@@ -270,7 +274,7 @@ pub(super) fn parse_satay_integer_type(options: &SataySchemaOptions) -> Option<I
 pub(super) fn validate_satay_integer_type(
     schema_type: Option<OasSchemaType>,
     parse_as: Option<ParseAs>,
-    integer_type: Option<IntegerType>,
+    integer_type: Option<SatayIntegerTypeWire>,
     context: &str,
 ) -> Result<(), ValidationError> {
     let Some(integer_type) = integer_type else {
@@ -344,16 +348,17 @@ pub(super) fn satay_parse_as_wire(parse_as: ParseAs) -> &'static str {
     }
 }
 
-fn satay_integer_type_wire(integer_type: IntegerType) -> &'static str {
+fn satay_integer_type_wire(integer_type: SatayIntegerTypeWire) -> &'static str {
     match integer_type {
-        IntegerType::U8 => "u8",
-        IntegerType::U16 => "u16",
-        IntegerType::U32 => "u32",
-        IntegerType::U64 => "u64",
-        IntegerType::I8 => "i8",
-        IntegerType::I16 => "i16",
-        IntegerType::I32 => "i32",
-        IntegerType::I64 => "i64",
+        SatayIntegerTypeWire::U8 => "u8",
+        SatayIntegerTypeWire::U16 => "u16",
+        SatayIntegerTypeWire::U32 => "u32",
+        SatayIntegerTypeWire::U64 => "u64",
+        SatayIntegerTypeWire::I8 => "i8",
+        SatayIntegerTypeWire::I16 => "i16",
+        SatayIntegerTypeWire::I32 => "i32",
+        SatayIntegerTypeWire::I64 => "i64",
+        SatayIntegerTypeWire::Auto => "auto",
     }
 }
 
@@ -425,6 +430,33 @@ mod tests {
             options.enum_variants,
             Some(BTreeMap::from([("A".to_owned(), "Available".to_owned())]))
         );
+    }
+
+    #[test]
+    fn preserves_auto_integer_type_wire_before_resolving_it() {
+        let auto_schema = schema_with_satay(json!({ "integer-type": "auto" }));
+        let auto_options = schema_options(&auto_schema, "schema `Count`")
+            .expect("valid extension")
+            .expect("present extension");
+
+        assert_eq!(
+            auto_options.integer_type_wire(),
+            Some(SatayIntegerTypeWire::Auto)
+        );
+        assert_eq!(
+            auto_options
+                .integer_type_wire()
+                .map(satay_integer_type_wire),
+            Some("auto")
+        );
+        assert_eq!(auto_options.integer_type(), None);
+
+        let absent_schema = schema_with_satay(json!({}));
+        let absent_options = schema_options(&absent_schema, "schema `Count`")
+            .expect("valid extension")
+            .expect("present extension");
+        assert_eq!(absent_options.integer_type_wire(), None);
+        assert_eq!(absent_options.integer_type(), None);
     }
 
     #[test]
