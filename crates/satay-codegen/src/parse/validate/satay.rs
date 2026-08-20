@@ -5,25 +5,27 @@ use serde_json::Value as JsonValue;
 
 use super::super::reference::schema_type_wire;
 use super::super::satay::{
-    SataySchemaOptions, parse_range_scalar, parse_satay_enum_variants, parse_satay_integer_type,
-    parse_satay_parse_as, satay_parse_as_wire, schema_options, validate_satay_integer_type,
+    SataySchemaOptions, parse_range_scalar, parse_satay_enum_variants, parse_satay_parse_as,
+    satay_parse_as_wire, schema_options, validate_satay_integer_type,
 };
+use super::constraint::parse_integer_type;
 use crate::error::ValidationError;
 use crate::model::{
     BoolStringMapping, BoolStringMappingError, IntegerType, ParseAs, RangeScalar, StringCodec,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ValidatedParseAs {
+pub(crate) enum ValidatedTypeDirective {
+    AsDeclared,
+    Integer(IntegerType),
     ParsedString(StringCodec),
-    ParsedInteger(ParseAs),
+    ParsedIntegerBool,
     Range(RangeScalar),
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub(crate) struct ValidatedSataySchema {
-    pub(crate) parse_as: Option<ValidatedParseAs>,
-    pub(crate) explicit_integer_type: Option<IntegerType>,
+    pub(crate) directive: ValidatedTypeDirective,
     pub(crate) enum_variants: BTreeMap<String, String>,
     pub(crate) treat_error_as_none: bool,
     pub(crate) none_if: Vec<String>,
@@ -46,8 +48,12 @@ pub(super) fn validate_component_enum_satay(
     context: &str,
 ) -> Result<ValidatedSataySchema, ValidationError> {
     Ok(ValidatedSataySchema {
+        directive: ValidatedTypeDirective::AsDeclared,
         enum_variants: validate_enum_variants(schema, enum_values, context)?,
-        ..ValidatedSataySchema::default()
+        treat_error_as_none: false,
+        none_if: vec![],
+        ignore: false,
+        identifier_words: None,
     })
 }
 
@@ -60,7 +66,6 @@ pub(super) fn validate_type_satay(
     let options = schema_options(schema, context)?.unwrap_or_default();
     let parse_as = parse_satay_parse_as(&options);
     let integer_type_wire = options.integer_type_wire();
-    let explicit_integer_type = parse_satay_integer_type(&options);
     let none_if = match options.none_if.as_ref() {
         Some(values) if values.is_empty() => {
             return Err(ValidationError::EmptySatayNoneIf {
@@ -75,21 +80,21 @@ pub(super) fn validate_type_satay(
     let identifier_words = validate_identifier(&options, context, allow_field_options)?;
     validate_satay_integer_type(schema_type, parse_as, integer_type_wire, context)?;
 
-    let parse_as = if let Some(parse_as) = parse_as {
+    let directive = if let Some(parse_as) = parse_as {
         match (schema_type, parse_as) {
             (Some(OasSchemaType::String), ParseAs::IntegerRange | ParseAs::NumberRange) => {
-                Some(ValidatedParseAs::Range(parse_range_scalar(
+                ValidatedTypeDirective::Range(parse_range_scalar(
                     schema,
                     parse_as,
-                    explicit_integer_type,
+                    options.integer_type(),
                     context,
-                )?))
+                )?)
             }
-            (Some(OasSchemaType::String), parse_as) => Some(ValidatedParseAs::ParsedString(
-                StringCodec::Standard(parse_as),
-            )),
+            (Some(OasSchemaType::String), parse_as) => {
+                ValidatedTypeDirective::ParsedString(StringCodec::Standard(parse_as))
+            }
             (Some(OasSchemaType::Integer), ParseAs::Bool) => {
-                Some(ValidatedParseAs::ParsedInteger(parse_as))
+                ValidatedTypeDirective::ParsedIntegerBool
             }
             _ => {
                 return Err(ValidationError::SatayParseAsRequiresString {
@@ -102,8 +107,17 @@ pub(super) fn validate_type_satay(
                 });
             }
         }
+    } else if schema_type == Some(OasSchemaType::Integer) && integer_type_wire.is_some() {
+        let integer_type = if schema.format.as_deref() == Some("unixtime") {
+            // Preserve integer-type presence in the validated directive;
+            // unixtime format conversion remains authoritative downstream.
+            options.integer_type().unwrap_or(IntegerType::I64)
+        } else {
+            parse_integer_type(schema, context, options.integer_type())?
+        };
+        ValidatedTypeDirective::Integer(integer_type)
     } else {
-        None
+        ValidatedTypeDirective::AsDeclared
     };
 
     if !none_if.is_empty() && !allow_field_options {
@@ -111,7 +125,7 @@ pub(super) fn validate_type_satay(
             context: context.to_owned(),
         });
     }
-    if !none_if.is_empty() && !matches!(&parse_as, Some(ValidatedParseAs::ParsedString(_))) {
+    if !none_if.is_empty() && !matches!(&directive, ValidatedTypeDirective::ParsedString(_)) {
         return Err(ValidationError::SatayNoneIfRequiresParsedString {
             context: context.to_owned(),
         });
@@ -123,29 +137,28 @@ pub(super) fn validate_type_satay(
     }
 
     let bool_string_mapping =
-        validate_bool_string_mapping(&options, parse_as.as_ref(), &none_if, context)?;
-    let parse_as = match (parse_as, bool_string_mapping) {
-        (Some(ValidatedParseAs::ParsedString(_)), Some(mapping)) => Some(
-            ValidatedParseAs::ParsedString(StringCodec::MappedBool(mapping)),
-        ),
-        (parse_as, None) => parse_as,
+        validate_bool_string_mapping(&options, &directive, &none_if, context)?;
+    let directive = match (directive, bool_string_mapping) {
+        (ValidatedTypeDirective::ParsedString(_), Some(mapping)) => {
+            ValidatedTypeDirective::ParsedString(StringCodec::MappedBool(mapping))
+        }
+        (directive, None) => directive,
         _ => unreachable!("validated boolean mapping requires a parsed string"),
     };
 
     Ok(ValidatedSataySchema {
-        parse_as,
-        explicit_integer_type,
+        directive,
+        enum_variants: BTreeMap::new(),
         treat_error_as_none,
         none_if,
         ignore,
         identifier_words,
-        ..ValidatedSataySchema::default()
     })
 }
 
 fn validate_bool_string_mapping(
     options: &SataySchemaOptions,
-    parse_as: Option<&ValidatedParseAs>,
+    directive: &ValidatedTypeDirective,
     none_if: &[String],
     context: &str,
 ) -> Result<Option<BoolStringMapping>, ValidationError> {
@@ -156,8 +169,8 @@ fn validate_bool_string_mapping(
         return Ok(None);
     }
     if !matches!(
-        parse_as,
-        Some(ValidatedParseAs::ParsedString(codec)) if codec.parse_as() == ParseAs::Bool
+        directive,
+        ValidatedTypeDirective::ParsedString(codec) if codec.parse_as() == ParseAs::Bool
     ) {
         return Err(ValidationError::SatayBoolMappingRequiresParsedStringBool {
             context: context.to_owned(),
@@ -287,6 +300,22 @@ mod tests {
     }
 
     #[test]
+    fn uses_as_declared_without_type_options() {
+        let schema = schema_with_satay(json!({}));
+
+        for schema_type in [
+            Some(OasSchemaType::String),
+            Some(OasSchemaType::Integer),
+            Some(OasSchemaType::Number),
+            Some(OasSchemaType::Boolean),
+            None,
+        ] {
+            let validated = validate_type_satay(&schema, schema_type, "Value", false).unwrap();
+            assert_eq!(validated.directive, ValidatedTypeDirective::AsDeclared);
+        }
+    }
+
+    #[test]
     fn validates_parse_as_for_string_schema() {
         let schema = schema_with_satay(json!({ "parse-as": "offset-datetime" }));
 
@@ -299,12 +328,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            validated.parse_as,
-            Some(ValidatedParseAs::ParsedString(StringCodec::Standard(
-                ParseAs::OffsetDateTime
-            )))
+            validated.directive,
+            ValidatedTypeDirective::ParsedString(StringCodec::Standard(ParseAs::OffsetDateTime))
         );
-        assert_eq!(validated.explicit_integer_type, None);
         assert!(!validated.treat_error_as_none);
     }
 
@@ -321,10 +347,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            validated.parse_as,
-            Some(ValidatedParseAs::ParsedString(StringCodec::Standard(
-                ParseAs::Date
-            )))
+            validated.directive,
+            ValidatedTypeDirective::ParsedString(StringCodec::Standard(ParseAs::Date))
         );
     }
 
@@ -341,10 +365,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            validated.parse_as,
-            Some(ValidatedParseAs::ParsedString(StringCodec::Standard(
-                ParseAs::NaiveDateTime
-            )))
+            validated.directive,
+            ValidatedTypeDirective::ParsedString(StringCodec::Standard(ParseAs::NaiveDateTime))
         );
     }
 
@@ -357,9 +379,59 @@ mod tests {
                 .unwrap();
 
         assert_eq!(
-            validated.parse_as,
-            Some(ValidatedParseAs::ParsedInteger(ParseAs::Bool))
+            validated.directive,
+            ValidatedTypeDirective::ParsedIntegerBool
         );
+    }
+
+    #[test]
+    fn rejects_integer_bool_with_exact_type() {
+        let schema = schema_with_satay(json!({
+            "parse-as": "bool",
+            "integer-type": "i32",
+        }));
+
+        let error = validation_error(validate_type_satay(
+            &schema,
+            Some(OasSchemaType::Integer),
+            "Flag.enabled",
+            false,
+        ));
+        assert_eq!(
+            error.to_string(),
+            "Flag.enabled cannot combine x-satay.parse-as `bool` with x-satay.integer-type `i32`"
+        );
+
+        assert!(matches!(
+            error,
+            ValidationError::SatayParseAsBoolWithIntegerType {
+                context,
+                integer_type,
+            } if context == "Flag.enabled" && integer_type == "i32"
+        ));
+    }
+
+    #[test]
+    fn rejects_integer_bool_with_auto_integer_type() {
+        let schema = schema_with_satay(json!({
+            "parse-as": "bool",
+            "integer-type": "auto",
+        }));
+
+        let error = validation_error(validate_type_satay(
+            &schema,
+            Some(OasSchemaType::Integer),
+            "Flag.enabled",
+            false,
+        ));
+
+        assert!(matches!(
+            error,
+            ValidationError::SatayParseAsBoolWithIntegerType {
+                context,
+                integer_type,
+            } if context == "Flag.enabled" && integer_type == "auto"
+        ));
     }
 
     #[test]
@@ -376,15 +448,15 @@ mod tests {
                 .unwrap();
 
         assert_eq!(
-            validated.parse_as,
-            Some(ValidatedParseAs::ParsedString(StringCodec::MappedBool(
+            validated.directive,
+            ValidatedTypeDirective::ParsedString(StringCodec::MappedBool(
                 BoolStringMapping::try_new(
                     vec!["Y".to_owned(), "Yes".to_owned()],
                     vec!["N".to_owned(), "No".to_owned()],
                     Some(false),
                 )
                 .expect("boolean string mapping should be valid")
-            )))
+            ))
         );
     }
 
@@ -475,11 +547,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            parameter.parse_as,
-            Some(ValidatedParseAs::ParsedString(StringCodec::MappedBool(
+            parameter.directive,
+            ValidatedTypeDirective::ParsedString(StringCodec::MappedBool(
                 BoolStringMapping::try_new(vec!["Y".to_owned()], vec!["N".to_owned()], None,)
                     .expect("boolean string mapping should be valid")
-            )))
+            ))
         );
 
         let wrong_parser = schema_with_satay(json!({
@@ -521,7 +593,7 @@ mod tests {
     }
 
     #[test]
-    fn validates_integer_range_scalar_with_explicit_integer_type() {
+    fn validates_integer_range_scalar_with_exact_type() {
         let schema = schema_with_satay(json!({
             "parse-as": "integer-range",
             "integer-type": "u16",
@@ -536,34 +608,66 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            validated.parse_as,
-            Some(ValidatedParseAs::Range(RangeScalar::Integer(
-                IntegerType::U16
-            )))
+            validated.directive,
+            ValidatedTypeDirective::Range(RangeScalar::Integer(IntegerType::U16))
         );
-        assert_eq!(validated.explicit_integer_type, Some(IntegerType::U16));
     }
 
     #[test]
-    fn allows_auto_integer_type_for_integer_and_integer_range_schemas() {
-        let integer_schema = schema_with_satay(json!({ "integer-type": "auto" }));
-        let validated_integer = validate_type_satay(
-            &integer_schema,
-            Some(OasSchemaType::Integer),
-            "Count",
-            false,
-        )
-        .unwrap();
-        assert_eq!(validated_integer.explicit_integer_type, None);
+    fn resolves_exact_integer_type_to_concrete_directive() {
+        let schema = schema_with_satay(json!({ "integer-type": "u16" }));
 
-        let mut range_schema = schema_with_satay(json!({
+        let validated =
+            validate_type_satay(&schema, Some(OasSchemaType::Integer), "Count", false).unwrap();
+
+        assert_eq!(
+            validated.directive,
+            ValidatedTypeDirective::Integer(IntegerType::U16)
+        );
+    }
+
+    #[test]
+    fn resolves_auto_integer_type_to_inferred_concrete_directive() {
+        let mut schema = schema_with_satay(json!({ "integer-type": "auto" }));
+        schema.minimum = Some(1.into());
+        schema.maximum = Some(60.into());
+
+        let validated =
+            validate_type_satay(&schema, Some(OasSchemaType::Integer), "Count", false).unwrap();
+
+        assert_eq!(
+            validated.directive,
+            ValidatedTypeDirective::Integer(IntegerType::U8)
+        );
+    }
+
+    #[test]
+    fn resolves_integer_types_before_unixtime_conversion() {
+        for (integer_type, expected) in [("u16", IntegerType::U16), ("auto", IntegerType::I64)] {
+            let mut schema = schema_with_satay(json!({ "integer-type": integer_type }));
+            schema.format = Some("unixtime".to_owned());
+
+            let validated =
+                validate_type_satay(&schema, Some(OasSchemaType::Integer), "Epoch", false).unwrap();
+
+            assert_eq!(
+                validated.directive,
+                ValidatedTypeDirective::Integer(expected)
+            );
+        }
+    }
+
+    #[test]
+    fn resolves_auto_integer_range_scalar() {
+        let mut schema = schema_with_satay(json!({
             "parse-as": "integer-range",
             "integer-type": "auto",
         }));
-        range_schema.minimum = Some(1.into());
-        range_schema.maximum = Some(60.into());
-        let validated_range = validate_type_satay(
-            &range_schema,
+        schema.minimum = Some(1.into());
+        schema.maximum = Some(60.into());
+
+        let validated = validate_type_satay(
+            &schema,
             Some(OasSchemaType::String),
             "RangeFilter.age",
             false,
@@ -571,12 +675,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            validated_range.parse_as,
-            Some(ValidatedParseAs::Range(RangeScalar::Integer(
-                IntegerType::U8
-            )))
+            validated.directive,
+            ValidatedTypeDirective::Range(RangeScalar::Integer(IntegerType::U8))
         );
-        assert_eq!(validated_range.explicit_integer_type, None);
     }
 
     #[test]
@@ -613,16 +714,17 @@ mod tests {
     }
 
     #[test]
-    fn reports_empty_none_if_before_inapplicable_integer_type() {
+    fn reports_empty_none_if_before_integer_bool_type_conflict() {
         for integer_type in ["i32", "auto"] {
             let schema = schema_with_satay(json!({
+                "parse-as": "bool",
                 "integer-type": integer_type,
                 "none-if": [],
             }));
 
             let error = validation_error(validate_type_satay(
                 &schema,
-                Some(OasSchemaType::String),
+                Some(OasSchemaType::Integer),
                 "User.id",
                 true,
             ));

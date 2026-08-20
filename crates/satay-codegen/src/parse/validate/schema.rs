@@ -18,8 +18,9 @@ use super::super::resolve::ResolvedDocument;
 use super::super::satay::schema_options;
 use super::constraint::{parse_integer_type, parse_validation, reject_keyword};
 use super::satay::{
-    ValidatedParseAs, ValidatedSataySchema, reject_object_property_options_outside_object_property,
-    validate_component_enum_satay, validate_type_enum_satay, validate_type_satay,
+    ValidatedSataySchema, ValidatedTypeDirective,
+    reject_object_property_options_outside_object_property, validate_component_enum_satay,
+    validate_type_enum_satay, validate_type_satay,
 };
 use super::{
     ValidatedComponent, ValidatedComponentKind, ValidatedField, ValidatedType, ValidatedTypeKind,
@@ -2628,9 +2629,19 @@ fn validate_object_type_schema(
     let description = optional_description(&schema.description);
     let validated_satay = validate_type_satay(schema, schema_type, context, allow_field_options)?;
 
-    if let Some(parse_as) = validated_satay.parse_as {
+    let directive_kind = match &validated_satay.directive {
+        ValidatedTypeDirective::ParsedString(codec) => {
+            Some(ValidatedTypeKind::ParsedString(codec.clone()))
+        }
+        ValidatedTypeDirective::ParsedIntegerBool => {
+            Some(ValidatedTypeKind::ParsedInteger(ParseAs::Bool))
+        }
+        ValidatedTypeDirective::Range(scalar) => Some(ValidatedTypeKind::Range(*scalar)),
+        ValidatedTypeDirective::AsDeclared | ValidatedTypeDirective::Integer(_) => None,
+    };
+    if let Some(kind) = directive_kind {
         return Ok(ValidatedType {
-            kind: validated_parse_as_kind(parse_as),
+            kind,
             nullable,
             validation: None,
             description,
@@ -2687,14 +2698,6 @@ fn validate_object_type_schema(
     })
 }
 
-fn validated_parse_as_kind(parse_as: ValidatedParseAs) -> ValidatedTypeKind {
-    match parse_as {
-        ValidatedParseAs::ParsedString(codec) => ValidatedTypeKind::ParsedString(codec),
-        ValidatedParseAs::ParsedInteger(parse_as) => ValidatedTypeKind::ParsedInteger(parse_as),
-        ValidatedParseAs::Range(scalar) => ValidatedTypeKind::Range(scalar),
-    }
-}
-
 fn validate_inline_type_kind(
     document: &ResolvedDocument<'_>,
     schema: &OasObjectSchema,
@@ -2709,11 +2712,18 @@ fn validate_inline_type_kind(
             if schema.format.as_deref() == Some("unixtime") {
                 Ok(ValidatedTypeKind::ParsedInteger(ParseAs::UnixTime))
             } else {
-                Ok(ValidatedTypeKind::Integer(parse_integer_type(
-                    schema,
-                    context,
-                    satay.explicit_integer_type,
-                )?))
+                let integer_type = match &satay.directive {
+                    ValidatedTypeDirective::Integer(integer_type) => *integer_type,
+                    ValidatedTypeDirective::AsDeclared => {
+                        parse_integer_type(schema, context, None)?
+                    }
+                    ValidatedTypeDirective::ParsedString(_)
+                    | ValidatedTypeDirective::ParsedIntegerBool
+                    | ValidatedTypeDirective::Range(_) => {
+                        unreachable!("parsed type directives return before inline validation")
+                    }
+                };
+                Ok(ValidatedTypeKind::Integer(integer_type))
             }
         }
         Some(OasSchemaType::Number) => validate_number_type(schema, context),

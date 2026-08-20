@@ -267,10 +267,6 @@ pub(super) fn parse_satay_parse_as(options: &SataySchemaOptions) -> Option<Parse
     options.parse_as()
 }
 
-pub(super) fn parse_satay_integer_type(options: &SataySchemaOptions) -> Option<IntegerType> {
-    options.integer_type()
-}
-
 pub(super) fn validate_satay_integer_type(
     schema_type: Option<OasSchemaType>,
     parse_as: Option<ParseAs>,
@@ -280,6 +276,13 @@ pub(super) fn validate_satay_integer_type(
     let Some(integer_type) = integer_type else {
         return Ok(());
     };
+
+    if schema_type == Some(OasSchemaType::Integer) && parse_as == Some(ParseAs::Bool) {
+        return Err(ValidationError::SatayParseAsBoolWithIntegerType {
+            context: context.to_owned(),
+            integer_type: satay_integer_type_wire(integer_type).to_owned(),
+        });
+    }
 
     let allowed = schema_type == Some(OasSchemaType::Integer)
         || matches!(
