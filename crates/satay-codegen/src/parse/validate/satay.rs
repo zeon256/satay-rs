@@ -9,7 +9,9 @@ use super::super::satay::{
     parse_satay_parse_as, satay_parse_as_wire, schema_options, validate_satay_integer_type,
 };
 use crate::error::ValidationError;
-use crate::model::{BoolStringMapping, IntegerType, ParseAs, RangeScalar, StringCodec};
+use crate::model::{
+    BoolStringMapping, BoolStringMappingError, IntegerType, ParseAs, RangeScalar, StringCodec,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ValidatedParseAs {
@@ -57,6 +59,7 @@ pub(super) fn validate_type_satay(
 ) -> Result<ValidatedSataySchema, ValidationError> {
     let options = schema_options(schema, context)?.unwrap_or_default();
     let parse_as = parse_satay_parse_as(&options);
+    let integer_type_wire = options.integer_type_wire();
     let explicit_integer_type = parse_satay_integer_type(&options);
     let none_if = match options.none_if.as_ref() {
         Some(values) if values.is_empty() => {
@@ -70,8 +73,7 @@ pub(super) fn validate_type_satay(
     let treat_error_as_none = allow_field_options && options.treat_error_as_none.unwrap_or(false);
     let ignore = validate_ignore(&options, context, allow_field_options)?;
     let identifier_words = validate_identifier(&options, context, allow_field_options)?;
-
-    validate_satay_integer_type(schema_type, parse_as, explicit_integer_type, context)?;
+    validate_satay_integer_type(schema_type, parse_as, integer_type_wire, context)?;
 
     let parse_as = if let Some(parse_as) = parse_as {
         match (schema_type, parse_as) {
@@ -169,32 +171,30 @@ fn validate_bool_string_mapping(
             context: context.to_owned(),
         });
     };
-    if true_values.is_empty() {
-        return Err(ValidationError::EmptySatayBoolMapping {
+    let mapping = BoolStringMapping::try_new(
+        true_values.clone(),
+        false_values.clone(),
+        options.unknown_as,
+    )
+    .map_err(|error| match error {
+        BoolStringMappingError::EmptyTrueValues => ValidationError::EmptySatayBoolMapping {
             context: context.to_owned(),
             keyword: "true-values",
-        });
-    }
-    if false_values.is_empty() {
-        return Err(ValidationError::EmptySatayBoolMapping {
+        },
+        BoolStringMappingError::EmptyFalseValues => ValidationError::EmptySatayBoolMapping {
             context: context.to_owned(),
             keyword: "false-values",
-        });
-    }
-
-    let true_values_set = true_values.iter().collect::<BTreeSet<_>>();
-    if let Some(value) = false_values
-        .iter()
-        .find(|value| true_values_set.contains(value))
-    {
-        return Err(ValidationError::OverlappingSatayBoolMapping {
-            context: context.to_owned(),
-            value: value.clone(),
-        });
-    }
+        },
+        BoolStringMappingError::OverlappingValue(value) => {
+            ValidationError::OverlappingSatayBoolMapping {
+                context: context.to_owned(),
+                value,
+            }
+        }
+    })?;
 
     if let Some(value) = none_if.iter().find(|value| {
-        true_values_set.contains(value) || false_values.iter().any(|mapped| mapped == *value)
+        mapping.true_values().contains(value) || mapping.false_values().contains(value)
     }) {
         return Err(ValidationError::OverlappingSatayBoolMappingNoneIf {
             context: context.to_owned(),
@@ -202,11 +202,7 @@ fn validate_bool_string_mapping(
         });
     }
 
-    Ok(Some(BoolStringMapping {
-        true_values: true_values.clone(),
-        false_values: false_values.clone(),
-        unknown_as: options.unknown_as,
-    }))
+    Ok(Some(mapping))
 }
 
 fn validate_identifier(
@@ -382,11 +378,12 @@ mod tests {
         assert_eq!(
             validated.parse_as,
             Some(ValidatedParseAs::ParsedString(StringCodec::MappedBool(
-                BoolStringMapping {
-                    true_values: vec!["Y".to_owned(), "Yes".to_owned()],
-                    false_values: vec!["N".to_owned(), "No".to_owned()],
-                    unknown_as: Some(false),
-                }
+                BoolStringMapping::try_new(
+                    vec!["Y".to_owned(), "Yes".to_owned()],
+                    vec!["N".to_owned(), "No".to_owned()],
+                    Some(false),
+                )
+                .expect("boolean string mapping should be valid")
             )))
         );
     }
@@ -480,11 +477,8 @@ mod tests {
         assert_eq!(
             parameter.parse_as,
             Some(ValidatedParseAs::ParsedString(StringCodec::MappedBool(
-                BoolStringMapping {
-                    true_values: vec!["Y".to_owned()],
-                    false_values: vec!["N".to_owned()],
-                    unknown_as: None,
-                }
+                BoolStringMapping::try_new(vec!["Y".to_owned()], vec!["N".to_owned()], None,)
+                    .expect("boolean string mapping should be valid")
             )))
         );
 
@@ -548,6 +542,100 @@ mod tests {
             )))
         );
         assert_eq!(validated.explicit_integer_type, Some(IntegerType::U16));
+    }
+
+    #[test]
+    fn allows_auto_integer_type_for_integer_and_integer_range_schemas() {
+        let integer_schema = schema_with_satay(json!({ "integer-type": "auto" }));
+        let validated_integer = validate_type_satay(
+            &integer_schema,
+            Some(OasSchemaType::Integer),
+            "Count",
+            false,
+        )
+        .unwrap();
+        assert_eq!(validated_integer.explicit_integer_type, None);
+
+        let mut range_schema = schema_with_satay(json!({
+            "parse-as": "integer-range",
+            "integer-type": "auto",
+        }));
+        range_schema.minimum = Some(1.into());
+        range_schema.maximum = Some(60.into());
+        let validated_range = validate_type_satay(
+            &range_schema,
+            Some(OasSchemaType::String),
+            "RangeFilter.age",
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(
+            validated_range.parse_as,
+            Some(ValidatedParseAs::Range(RangeScalar::Integer(
+                IntegerType::U8
+            )))
+        );
+        assert_eq!(validated_range.explicit_integer_type, None);
+    }
+
+    #[test]
+    fn rejects_auto_integer_type_where_absence_is_allowed() {
+        for (schema_type, expected_kind) in [
+            (Some(OasSchemaType::String), "string"),
+            (Some(OasSchemaType::Number), "number"),
+            (Some(OasSchemaType::Boolean), "boolean"),
+            (None, "missing"),
+        ] {
+            let auto_schema = schema_with_satay(json!({ "integer-type": "auto" }));
+            let error = validation_error(validate_type_satay(
+                &auto_schema,
+                schema_type,
+                "Value",
+                false,
+            ));
+
+            assert!(matches!(
+                error,
+                ValidationError::SatayIntegerTypeRequiresInteger {
+                    context,
+                    integer_type,
+                    kind,
+                } if context == "Value"
+                    && integer_type == "auto"
+                    && kind == expected_kind
+            ));
+
+            let absent_schema = schema_with_satay(json!({}));
+            validate_type_satay(&absent_schema, schema_type, "Value", false)
+                .expect("an absent integer type has no placement restriction");
+        }
+    }
+
+    #[test]
+    fn reports_empty_none_if_before_inapplicable_integer_type() {
+        for integer_type in ["i32", "auto"] {
+            let schema = schema_with_satay(json!({
+                "integer-type": integer_type,
+                "none-if": [],
+            }));
+
+            let error = validation_error(validate_type_satay(
+                &schema,
+                Some(OasSchemaType::String),
+                "User.id",
+                true,
+            ));
+
+            assert!(
+                matches!(
+                    &error,
+                    ValidationError::EmptySatayNoneIf { context }
+                        if context == "User.id"
+                ),
+                "unexpected error for integer type {integer_type}: {error:?}"
+            );
+        }
     }
 
     #[test]

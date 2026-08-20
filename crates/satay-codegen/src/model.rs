@@ -1,4 +1,7 @@
-use std::fmt::{self, Display};
+use std::{
+    collections::BTreeSet,
+    fmt::{self, Display},
+};
 
 #[derive(Debug)]
 pub(crate) struct Api {
@@ -150,9 +153,60 @@ pub(crate) struct FloatLimit {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BoolStringMapping {
-    pub(crate) true_values: Vec<String>,
-    pub(crate) false_values: Vec<String>,
-    pub(crate) unknown_as: Option<bool>,
+    true_values: Vec<String>,
+    false_values: Vec<String>,
+    unknown_as: Option<bool>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BoolStringMappingError {
+    EmptyTrueValues,
+    EmptyFalseValues,
+    OverlappingValue(String),
+}
+
+impl BoolStringMapping {
+    pub(crate) fn try_new(
+        true_values: Vec<String>,
+        false_values: Vec<String>,
+        unknown_as: Option<bool>,
+    ) -> Result<Self, BoolStringMappingError> {
+        if true_values.is_empty() {
+            return Err(BoolStringMappingError::EmptyTrueValues);
+        }
+        if false_values.is_empty() {
+            return Err(BoolStringMappingError::EmptyFalseValues);
+        }
+        let true_value_set = true_values
+            .iter()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+
+        if let Some(value) = false_values
+            .iter()
+            .find(|value| true_value_set.contains(value.as_str()))
+        {
+            return Err(BoolStringMappingError::OverlappingValue(value.clone()));
+        }
+
+        Ok(Self {
+            true_values,
+            false_values,
+            unknown_as,
+        })
+    }
+
+    pub(crate) fn true_values(&self) -> &[String] {
+        &self.true_values
+    }
+
+    pub(crate) fn false_values(&self) -> &[String] {
+        &self.false_values
+    }
+
+    pub(crate) fn unknown_as(&self) -> Option<bool> {
+        self.unknown_as
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -470,5 +524,69 @@ impl HttpMethod {
             Self::Put => "put",
             Self::Trace => "trace",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BoolStringMapping, BoolStringMappingError};
+
+    #[test]
+    fn bool_string_mapping_preserves_values_and_unknown_as() {
+        let mapping = BoolStringMapping::try_new(
+            vec!["yes".to_owned(), "true".to_owned(), "yes".to_owned()],
+            vec!["no".to_owned(), "false".to_owned(), "no".to_owned()],
+            Some(true),
+        )
+        .expect("mapping should be valid");
+
+        assert_eq!(
+            mapping.true_values(),
+            ["yes".to_owned(), "true".to_owned(), "yes".to_owned()]
+        );
+        assert_eq!(
+            mapping.false_values(),
+            ["no".to_owned(), "false".to_owned(), "no".to_owned()]
+        );
+        assert_eq!(mapping.unknown_as(), Some(true));
+    }
+
+    #[test]
+    fn bool_string_mapping_rejects_empty_true_values() {
+        assert_eq!(
+            BoolStringMapping::try_new(vec![], vec!["no".to_owned()], None),
+            Err(BoolStringMappingError::EmptyTrueValues)
+        );
+    }
+
+    #[test]
+    fn bool_string_mapping_rejects_empty_false_values() {
+        assert_eq!(
+            BoolStringMapping::try_new(vec!["yes".to_owned()], vec![], None),
+            Err(BoolStringMappingError::EmptyFalseValues)
+        );
+    }
+
+    #[test]
+    fn bool_string_mapping_reports_the_first_overlap_in_false_value_order() {
+        assert_eq!(
+            BoolStringMapping::try_new(
+                vec!["first-in-true".to_owned(), "first-in-false".to_owned()],
+                vec!["first-in-false".to_owned(), "first-in-true".to_owned()],
+                Some(false),
+            ),
+            Err(BoolStringMappingError::OverlappingValue(
+                "first-in-false".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn bool_string_mapping_preserves_none_unknown_as() {
+        let mapping =
+            BoolStringMapping::try_new(vec!["yes".to_owned()], vec!["no".to_owned()], None)
+                .expect("mapping should be valid");
+
+        assert_eq!(mapping.unknown_as(), None);
     }
 }

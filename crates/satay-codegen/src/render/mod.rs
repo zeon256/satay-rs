@@ -1,6 +1,6 @@
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
-use syn::{Ident, LitStr, parse_quote};
+use syn::{Ident, Item, LitStr, parse_quote};
 use tracing::info;
 
 use crate::ident::type_ident;
@@ -148,7 +148,7 @@ fn render_top_mod(api: &Api) -> syn::File {
     }
 
     if !api.operations.is_empty() {
-        items.push(syn::Item::Mod(render_operations_mod(api)));
+        items.push(Item::Mod(render_operations_mod(api)));
     }
 
     syn::File {

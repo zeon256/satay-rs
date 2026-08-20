@@ -309,13 +309,13 @@ fn parsed_string_value_expr(
             let ref_arg = ref_arg(base, base_kind);
             let canonical_true = lit_str(
                 mapping
-                    .true_values
+                    .true_values()
                     .first()
                     .expect("validated true-values list is non-empty"),
             );
             let canonical_false = lit_str(
                 mapping
-                    .false_values
+                    .false_values()
                     .first()
                     .expect("validated false-values list is non-empty"),
             );
