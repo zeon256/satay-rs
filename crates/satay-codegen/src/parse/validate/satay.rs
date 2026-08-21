@@ -5,8 +5,8 @@ use serde_json::Value as JsonValue;
 
 use super::super::reference::schema_type_wire;
 use super::super::satay::{
-    SatayIdentifier, SataySchemaOptions, parse_range_scalar, parse_satay_enum_variants,
-    parse_satay_parse_as, satay_parse_as_wire, schema_options, validate_satay_integer_type,
+    SatayIdentifier, SatayIntegerTypeWire, SataySchemaOptions, parse_range_scalar,
+    parse_satay_enum_variants, satay_parse_as_wire, schema_options, validate_satay_integer_type,
 };
 use super::constraint::parse_integer_type;
 use super::{NonEmptySentinels, ValidatedFieldDecoding};
@@ -31,6 +31,12 @@ pub(crate) struct ValidatedSataySchema {
 }
 
 #[derive(Debug, Clone)]
+pub(super) struct ValidatedEnumSatay {
+    pub(super) explicit_variants: BTreeMap<String, String>,
+    pub(super) property_options: Option<ValidatedPropertyOptions>,
+}
+
+#[derive(Debug, Clone)]
 pub(super) struct ValidatedPropertyOptions {
     pub(super) field_decoding: ValidatedFieldDecoding,
     pub(super) ignore: bool,
@@ -51,14 +57,6 @@ impl ValidatedPropertyOptions {
 enum SatayValidationContext {
     Value,
     Property,
-}
-
-pub(super) fn reject_property_options_on_value_schema(
-    schema: &OasObjectSchema,
-    context: &str,
-) -> Result<(), ValidationError> {
-    let options = schema_options(schema, context)?.unwrap_or_default();
-    reject_property_options_on_value(&options, context)
 }
 
 pub(super) fn validate_value_satay(
@@ -89,69 +87,56 @@ fn validate_type_satay(
     validation_context: SatayValidationContext,
 ) -> Result<ValidatedSataySchema, ValidationError> {
     let options = schema_options(schema, context)?.unwrap_or_default();
-    let parse_as = parse_satay_parse_as(&options);
-    let integer_type_wire = options.integer_type_wire();
-    let sentinels = options
-        .none_if
-        .as_ref()
-        .map(|values| {
-            NonEmptySentinels::new(values.clone()).map_err(|_| ValidationError::EmptySatayNoneIf {
-                context: context.to_owned(),
-            })
-        })
-        .transpose()?;
+    let SataySchemaOptions {
+        parse_as,
+        integer_type,
+        treat_error_as_none,
+        none_if,
+        true_values,
+        false_values,
+        unknown_as,
+        enum_variants,
+        ignore,
+        identifier,
+    } = &options;
+    if enum_variants.is_some() {
+        return Err(ValidationError::SatayEnumVariantsRequireEnum {
+            context: context.to_owned(),
+        });
+    }
+
+    let parse_as = (*parse_as).map(|wire| wire.into_parse_as());
+    let integer_type_wire = *integer_type;
+    let explicit_integer_type = match integer_type_wire {
+        Some(SatayIntegerTypeWire::Auto) | None => None,
+        Some(wire) => Some(wire.into_integer_type()),
+    };
+    let sentinels = validate_sentinels(none_if.as_deref(), context)?;
     let (treat_error_as_none, ignore, identifier) = match validation_context {
         SatayValidationContext::Value => {
-            reject_property_options_on_value(&options, context)?;
+            reject_property_options_on_value(
+                *treat_error_as_none,
+                none_if.as_deref(),
+                *ignore,
+                identifier.as_ref(),
+                context,
+            )?;
             (false, false, None)
         }
         SatayValidationContext::Property => (
-            options.treat_error_as_none.unwrap_or(false),
-            options.ignore.unwrap_or(false),
-            options.identifier.clone(),
+            treat_error_as_none.unwrap_or(false),
+            ignore.unwrap_or(false),
+            identifier.clone(),
         ),
     };
-    validate_satay_integer_type(schema_type, parse_as, integer_type_wire, context)?;
-
-    let directive = if let Some(parse_as) = parse_as {
-        match (schema_type, parse_as) {
-            (Some(OasSchemaType::String), ParseAs::IntegerRange | ParseAs::NumberRange) => {
-                ValidatedTypeDirective::Range(parse_range_scalar(
-                    schema,
-                    parse_as,
-                    options.integer_type(),
-                    context,
-                )?)
-            }
-            (Some(OasSchemaType::String), parse_as) => {
-                ValidatedTypeDirective::ParsedString(StringCodec::Standard(parse_as))
-            }
-            (Some(OasSchemaType::Integer), ParseAs::Bool) => {
-                ValidatedTypeDirective::ParsedIntegerBool
-            }
-            _ => {
-                return Err(ValidationError::SatayParseAsRequiresString {
-                    context: context.to_owned(),
-                    parse_as: satay_parse_as_wire(parse_as).to_owned(),
-                    kind: schema_type
-                        .map(schema_type_wire)
-                        .unwrap_or("missing")
-                        .to_owned(),
-                });
-            }
-        }
-    } else if schema_type == Some(OasSchemaType::Integer) && integer_type_wire.is_some() {
-        let integer_type = if schema.format.as_deref() == Some("unixtime") {
-            // Preserve integer-type presence in the validated directive;
-            // unixtime format conversion remains authoritative downstream.
-            options.integer_type().unwrap_or(IntegerType::I64)
-        } else {
-            parse_integer_type(schema, context, options.integer_type())?
-        };
-        ValidatedTypeDirective::Integer(integer_type)
-    } else {
-        ValidatedTypeDirective::AsDeclared
-    };
+    let directive = validate_type_directive(
+        schema,
+        schema_type,
+        parse_as,
+        integer_type_wire,
+        explicit_integer_type,
+        context,
+    )?;
 
     if sentinels.is_some() && !matches!(&directive, ValidatedTypeDirective::ParsedString(_)) {
         return Err(ValidationError::SatayNoneIfRequiresParsedString {
@@ -167,7 +152,14 @@ fn validate_type_satay(
     let none_if = sentinels
         .as_ref()
         .map_or(&[][..], NonEmptySentinels::as_slice);
-    let bool_string_mapping = validate_bool_string_mapping(&options, &directive, none_if, context)?;
+    let bool_string_mapping = validate_bool_string_mapping(
+        true_values.as_deref(),
+        false_values.as_deref(),
+        *unknown_as,
+        &directive,
+        none_if,
+        context,
+    )?;
     let directive = match (directive, bool_string_mapping) {
         (ValidatedTypeDirective::ParsedString(_), Some(mapping)) => {
             ValidatedTypeDirective::ParsedString(StringCodec::MappedBool(mapping))
@@ -181,6 +173,10 @@ fn validate_type_satay(
         None if treat_error_as_none => ValidatedFieldDecoding::Lossy,
         None => ValidatedFieldDecoding::Strict,
     };
+
+    if matches!(validation_context, SatayValidationContext::Property) {
+        reject_options_with_ignore(&options, context)?;
+    }
 
     let property_options = match validation_context {
         SatayValidationContext::Value => None,
@@ -197,15 +193,79 @@ fn validate_type_satay(
     })
 }
 
+fn validate_sentinels(
+    values: Option<&[String]>,
+    context: &str,
+) -> Result<Option<NonEmptySentinels>, ValidationError> {
+    values
+        .map(|values| {
+            NonEmptySentinels::new(values.to_vec()).map_err(|_| ValidationError::EmptySatayNoneIf {
+                context: context.to_owned(),
+            })
+        })
+        .transpose()
+}
+
+fn validate_type_directive(
+    schema: &OasObjectSchema,
+    schema_type: Option<OasSchemaType>,
+    parse_as: Option<ParseAs>,
+    integer_type_wire: Option<SatayIntegerTypeWire>,
+    explicit_integer_type: Option<IntegerType>,
+    context: &str,
+) -> Result<ValidatedTypeDirective, ValidationError> {
+    validate_satay_integer_type(schema_type, parse_as, integer_type_wire, context)?;
+
+    if let Some(parse_as) = parse_as {
+        return match (schema_type, parse_as) {
+            (Some(OasSchemaType::String), ParseAs::IntegerRange | ParseAs::NumberRange) => {
+                Ok(ValidatedTypeDirective::Range(parse_range_scalar(
+                    schema,
+                    parse_as,
+                    explicit_integer_type,
+                    context,
+                )?))
+            }
+            (Some(OasSchemaType::String), parse_as) => Ok(ValidatedTypeDirective::ParsedString(
+                StringCodec::Standard(parse_as),
+            )),
+            (Some(OasSchemaType::Integer), ParseAs::Bool) => {
+                Ok(ValidatedTypeDirective::ParsedIntegerBool)
+            }
+            _ => Err(ValidationError::SatayParseAsRequiresString {
+                context: context.to_owned(),
+                parse_as: satay_parse_as_wire(parse_as).to_owned(),
+                kind: schema_type
+                    .map(schema_type_wire)
+                    .unwrap_or("missing")
+                    .to_owned(),
+            }),
+        };
+    }
+
+    if schema_type == Some(OasSchemaType::Integer) && integer_type_wire.is_some() {
+        let integer_type = if schema.format.as_deref() == Some("unixtime") {
+            // Preserve integer-type presence in the validated directive;
+            // unixtime format conversion remains authoritative downstream.
+            explicit_integer_type.unwrap_or(IntegerType::I64)
+        } else {
+            parse_integer_type(schema, context, explicit_integer_type)?
+        };
+        return Ok(ValidatedTypeDirective::Integer(integer_type));
+    }
+
+    Ok(ValidatedTypeDirective::AsDeclared)
+}
+
 fn validate_bool_string_mapping(
-    options: &SataySchemaOptions,
+    true_values: Option<&[String]>,
+    false_values: Option<&[String]>,
+    unknown_as: Option<bool>,
     directive: &ValidatedTypeDirective,
     none_if: &[String],
     context: &str,
 ) -> Result<Option<BoolStringMapping>, ValidationError> {
-    let configured = options.true_values.is_some()
-        || options.false_values.is_some()
-        || options.unknown_as.is_some();
+    let configured = true_values.is_some() || false_values.is_some() || unknown_as.is_some();
     if !configured {
         return Ok(None);
     }
@@ -218,34 +278,31 @@ fn validate_bool_string_mapping(
         });
     }
 
-    let (Some(true_values), Some(false_values)) =
-        (options.true_values.as_ref(), options.false_values.as_ref())
-    else {
+    let (Some(true_values), Some(false_values)) = (true_values, false_values) else {
         return Err(ValidationError::IncompleteSatayBoolMapping {
             context: context.to_owned(),
         });
     };
-    let mapping = BoolStringMapping::try_new(
-        true_values.clone(),
-        false_values.clone(),
-        options.unknown_as,
-    )
-    .map_err(|error| match error {
-        BoolStringMappingError::EmptyTrueValues => ValidationError::EmptySatayBoolMapping {
-            context: context.to_owned(),
-            keyword: "true-values",
-        },
-        BoolStringMappingError::EmptyFalseValues => ValidationError::EmptySatayBoolMapping {
-            context: context.to_owned(),
-            keyword: "false-values",
-        },
-        BoolStringMappingError::OverlappingValue(value) => {
-            ValidationError::OverlappingSatayBoolMapping {
-                context: context.to_owned(),
-                value,
-            }
-        }
-    })?;
+    let mapping =
+        BoolStringMapping::try_new(true_values.to_vec(), false_values.to_vec(), unknown_as)
+            .map_err(|error| match error {
+                BoolStringMappingError::EmptyTrueValues => ValidationError::EmptySatayBoolMapping {
+                    context: context.to_owned(),
+                    keyword: "true-values",
+                },
+                BoolStringMappingError::EmptyFalseValues => {
+                    ValidationError::EmptySatayBoolMapping {
+                        context: context.to_owned(),
+                        keyword: "false-values",
+                    }
+                }
+                BoolStringMappingError::OverlappingValue(value) => {
+                    ValidationError::OverlappingSatayBoolMapping {
+                        context: context.to_owned(),
+                        value,
+                    }
+                }
+            })?;
 
     if let Some(value) = none_if.iter().find(|value| {
         mapping.true_values().contains(value) || mapping.false_values().contains(value)
@@ -260,27 +317,30 @@ fn validate_bool_string_mapping(
 }
 
 fn reject_property_options_on_value(
-    options: &SataySchemaOptions,
+    treat_error_as_none: Option<bool>,
+    none_if: Option<&[String]>,
+    ignore: Option<bool>,
+    identifier: Option<&SatayIdentifier>,
     context: &str,
 ) -> Result<(), ValidationError> {
-    if options.treat_error_as_none.is_some() {
+    if treat_error_as_none.is_some() {
         return Err(
             ValidationError::SatayTreatErrorAsNoneRequiresObjectProperty {
                 context: context.to_owned(),
             },
         );
     }
-    if options.none_if.is_some() {
+    if none_if.is_some() {
         return Err(ValidationError::SatayNoneIfRequiresStructField {
             context: context.to_owned(),
         });
     }
-    if options.ignore.is_some() {
+    if ignore.is_some() {
         return Err(ValidationError::SatayIgnoreRequiresObjectProperty {
             context: context.to_owned(),
         });
     }
-    if options.identifier.is_some() {
+    if identifier.is_some() {
         return Err(ValidationError::SatayIdentifierRequiresObjectProperty {
             context: context.to_owned(),
         });
@@ -289,42 +349,151 @@ fn reject_property_options_on_value(
     Ok(())
 }
 
-pub(super) fn reject_enum_variants_without_enum(
-    schema: &OasObjectSchema,
+fn reject_options_with_ignore(
+    options: &SataySchemaOptions,
     context: &str,
 ) -> Result<(), ValidationError> {
-    let options = schema_options(schema, context)?.unwrap_or_default();
-    if options.enum_variants.is_some() {
-        return Err(ValidationError::SatayEnumVariantsRequireEnum {
+    if options.ignore != Some(true) {
+        return Ok(());
+    }
+
+    let conflicting_keyword = options
+        .treat_error_as_none
+        .as_ref()
+        .map(|_| "treat-error-as-none")
+        .or_else(|| options.none_if.as_ref().map(|_| "none-if"))
+        .or_else(|| options.true_values.as_ref().map(|_| "true-values"))
+        .or_else(|| options.false_values.as_ref().map(|_| "false-values"))
+        .or_else(|| options.unknown_as.as_ref().map(|_| "unknown-as"))
+        .or_else(|| options.enum_variants.as_ref().map(|_| "enum-variants"))
+        .or_else(|| options.parse_as.as_ref().map(|_| "parse-as"))
+        .or_else(|| options.integer_type.as_ref().map(|_| "integer-type"))
+        .or_else(|| options.identifier.as_ref().map(|_| "identifier"));
+    if let Some(keyword) = conflicting_keyword {
+        return Err(ValidationError::SatayOptionConflictsWithIgnore {
             context: context.to_owned(),
+            keyword,
         });
     }
 
     Ok(())
 }
 
-pub(super) fn validate_enum_satay(
+pub(super) fn validate_value_enum_satay(
     schema: &OasObjectSchema,
     enum_values: &[JsonValue],
     context: &str,
-) -> Result<BTreeMap<String, String>, ValidationError> {
+) -> Result<ValidatedEnumSatay, ValidationError> {
+    validate_enum_satay(schema, enum_values, context, SatayValidationContext::Value)
+}
+
+pub(super) fn validate_property_enum_satay(
+    schema: &OasObjectSchema,
+    enum_values: &[JsonValue],
+    context: &str,
+) -> Result<ValidatedEnumSatay, ValidationError> {
+    validate_enum_satay(
+        schema,
+        enum_values,
+        context,
+        SatayValidationContext::Property,
+    )
+}
+
+fn validate_enum_satay(
+    schema: &OasObjectSchema,
+    enum_values: &[JsonValue],
+    context: &str,
+    validation_context: SatayValidationContext,
+) -> Result<ValidatedEnumSatay, ValidationError> {
     let options = schema_options(schema, context)?.unwrap_or_default();
-    if let Some(parse_as) = parse_satay_parse_as(&options) {
+    let SataySchemaOptions {
+        parse_as,
+        integer_type,
+        treat_error_as_none,
+        none_if,
+        true_values,
+        false_values,
+        unknown_as,
+        enum_variants,
+        ignore,
+        identifier,
+    } = &options;
+
+    if matches!(validation_context, SatayValidationContext::Value) {
+        reject_property_options_on_value(
+            *treat_error_as_none,
+            none_if.as_deref(),
+            *ignore,
+            identifier.as_ref(),
+            context,
+        )?;
+    }
+
+    if let Some(parse_as) = (*parse_as).map(|wire| wire.into_parse_as()) {
         return Err(ValidationError::SatayParseAsWithEnum {
             context: context.to_owned(),
             parse_as: satay_parse_as_wire(parse_as).to_owned(),
         });
     }
+    if none_if
+        .as_ref()
+        .is_some_and(|sentinels| sentinels.is_empty())
+    {
+        return Err(ValidationError::EmptySatayNoneIf {
+            context: context.to_owned(),
+        });
+    }
+    let unsupported_keyword = integer_type
+        .as_ref()
+        .map(|_| "integer-type")
+        .or_else(|| none_if.as_ref().map(|_| "none-if"))
+        .or_else(|| true_values.as_ref().map(|_| "true-values"))
+        .or_else(|| false_values.as_ref().map(|_| "false-values"))
+        .or_else(|| unknown_as.as_ref().map(|_| "unknown-as"));
+    if let Some(keyword) = unsupported_keyword {
+        return Err(ValidationError::SatayOptionUnsupportedWithEnum {
+            context: context.to_owned(),
+            keyword,
+        });
+    }
 
     let mut wire_names = BTreeSet::new();
+    let mut all_values_are_strings = true;
     for value in enum_values {
         let Some(value) = value.as_str() else {
-            return Ok(BTreeMap::new());
+            all_values_are_strings = false;
+            break;
         };
         wire_names.insert(value.to_owned());
     }
+    let explicit_variants = if all_values_are_strings {
+        parse_satay_enum_variants(enum_variants.as_ref(), context, &wire_names)?
+    } else {
+        BTreeMap::new()
+    };
 
-    parse_satay_enum_variants(&options, context, &wire_names)
+    if matches!(validation_context, SatayValidationContext::Property) {
+        reject_options_with_ignore(&options, context)?;
+    }
+
+    let property_options = match validation_context {
+        SatayValidationContext::Value => None,
+        SatayValidationContext::Property => Some(ValidatedPropertyOptions {
+            field_decoding: if treat_error_as_none.unwrap_or(false) {
+                ValidatedFieldDecoding::Lossy
+            } else {
+                ValidatedFieldDecoding::Strict
+            },
+            ignore: ignore.unwrap_or(false),
+            identifier: identifier.clone(),
+        }),
+    };
+
+    Ok(ValidatedEnumSatay {
+        explicit_variants,
+        property_options,
+    })
 }
 
 #[cfg(test)]
@@ -773,7 +942,9 @@ mod tests {
         }));
         schema.enum_values = vec![json!("in-progress"), json!("done")];
 
-        let variants = validate_enum_satay(&schema, &schema.enum_values, "Task.status").unwrap();
+        let validated =
+            validate_value_enum_satay(&schema, &schema.enum_values, "Task.status").unwrap();
+        let variants = &validated.explicit_variants;
 
         assert_eq!(
             variants.get("in-progress").map(String::as_str),
@@ -792,7 +963,7 @@ mod tests {
         }));
         schema.enum_values = vec![json!("active")];
 
-        let error = validation_error(validate_enum_satay(
+        let error = validation_error(validate_value_enum_satay(
             &schema,
             &schema.enum_values,
             "Task.status",
@@ -810,7 +981,11 @@ mod tests {
         for mappings in [json!({}), json!({ "active": "Active" })] {
             let schema = schema_with_satay(json!({ "enum-variants": mappings }));
 
-            let error = validation_error(reject_enum_variants_without_enum(&schema, "Task.status"));
+            let error = validation_error(validate_value_satay(
+                &schema,
+                Some(OasSchemaType::String),
+                "Task.status",
+            ));
 
             assert!(matches!(
                 error,
@@ -825,7 +1000,7 @@ mod tests {
         let mut schema = schema_with_satay(json!({ "parse-as": "date" }));
         schema.enum_values = vec![json!("active")];
 
-        let error = validation_error(validate_enum_satay(
+        let error = validation_error(validate_value_enum_satay(
             &schema,
             &schema.enum_values,
             "Task.status",
@@ -836,6 +1011,32 @@ mod tests {
             ValidationError::SatayParseAsWithEnum { context, parse_as }
                 if context == "Task.status" && parse_as == "date"
         ));
+    }
+
+    #[test]
+    fn retains_property_options_for_enum_properties() {
+        let mut schema = schema_with_satay(json!({
+            "treat-error-as-none": true,
+            "ignore": false,
+            "identifier": "task-status",
+        }));
+        schema.enum_values = vec![json!("active")];
+
+        let validated =
+            validate_property_enum_satay(&schema, &schema.enum_values, "Task.status").unwrap();
+        let property = validated
+            .property_options
+            .expect("property enum validation retains property options");
+
+        assert!(matches!(
+            property.field_decoding,
+            ValidatedFieldDecoding::Lossy
+        ));
+        assert!(!property.ignore);
+        assert_eq!(
+            property.identifier.as_ref().map(SatayIdentifier::words),
+            Some(["task".to_owned(), "status".to_owned()].as_slice())
+        );
     }
 
     #[test]

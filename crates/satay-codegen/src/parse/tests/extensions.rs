@@ -458,6 +458,193 @@ components:
 }
 
 #[test]
+fn rejects_inapplicable_x_satay_options_on_component_enums() {
+    for (option, expected_keyword) in [
+        ("integer-type: auto", "integer-type"),
+        ("true-values: [Y]", "true-values"),
+        ("false-values: [N]", "false-values"),
+        ("unknown-as: false", "unknown-as"),
+    ] {
+        let err = parse_invalid(&format!(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {{}}
+components:
+  schemas:
+    Status:
+      type: string
+      enum: [ready]
+      x-satay:
+        {option}
+"#
+        ));
+
+        assert!(matches!(
+            err,
+            ValidationError::SatayOptionUnsupportedWithEnum { context, keyword }
+                if context == "schema `Status`" && keyword == expected_keyword
+        ));
+    }
+}
+
+#[test]
+fn rejects_inapplicable_x_satay_options_on_ignored_enum_properties() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Record:
+      type: object
+      properties:
+        status:
+          type: integer
+          enum: [1]
+          x-satay:
+            ignore: true
+            integer-type: auto
+"#,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::SatayOptionUnsupportedWithEnum {
+            context,
+            keyword: "integer-type",
+        } if context == "property `Record.status`"
+    ));
+}
+
+#[test]
+fn rejects_x_satay_type_options_on_component_structs() {
+    let spec = |option: &str| {
+        format!(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {{}}
+components:
+  schemas:
+    Record:
+      type: object
+      properties:
+        value:
+          type: string
+      x-satay:
+        {option}
+"#
+        )
+    };
+
+    assert!(matches!(
+        parse_invalid(&spec("parse-as: u8")),
+        ValidationError::SatayParseAsRequiresString {
+            context,
+            parse_as,
+            kind,
+        } if context == "schema `Record`" && parse_as == "u8" && kind == "object"
+    ));
+    assert!(matches!(
+        parse_invalid(&spec("integer-type: auto")),
+        ValidationError::SatayIntegerTypeRequiresInteger {
+            context,
+            integer_type,
+            kind,
+        } if context == "schema `Record`" && integer_type == "auto" && kind == "object"
+    ));
+    assert!(matches!(
+        parse_invalid(&spec("true-values: [Y]")),
+        ValidationError::SatayBoolMappingRequiresParsedStringBool { context }
+            if context == "schema `Record`"
+    ));
+}
+
+#[test]
+fn rejects_all_type_options_on_property_ref_siblings() {
+    for (option, expected_keyword) in [
+        ("parse-as: u8", "parse-as"),
+        ("integer-type: auto", "integer-type"),
+        ("none-if: []", "none-if"),
+        ("true-values: []", "true-values"),
+        ("false-values: []", "false-values"),
+        ("unknown-as: false", "unknown-as"),
+        ("enum-variants: {}", "enum-variants"),
+    ] {
+        let err = parse_invalid(&format!(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {{}}
+components:
+  schemas:
+    Value:
+      type: string
+    Record:
+      type: object
+      properties:
+        value:
+          $ref: '#/components/schemas/Value'
+          x-satay:
+            ignore: true
+            {option}
+"#
+        ));
+
+        assert!(matches!(
+            err,
+            ValidationError::UnsupportedRefSiblingKeyword { context, keyword }
+                if context == "property `Record.value`"
+                    && keyword == format!("x-satay.{expected_keyword}")
+        ));
+    }
+}
+
+#[test]
+fn rejects_property_options_on_value_ref_siblings_by_keyword() {
+    for (option, expected_keyword) in [
+        ("treat-error-as-none: false", "treat-error-as-none"),
+        ("ignore: false", "ignore"),
+        ("identifier: value", "identifier"),
+    ] {
+        let err = parse_invalid(&format!(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {{}}
+components:
+  schemas:
+    Value:
+      type: string
+    Alias:
+      $ref: '#/components/schemas/Value'
+      x-satay:
+        {option}
+"#
+        ));
+
+        assert!(matches!(
+            err,
+            ValidationError::UnsupportedRefSiblingKeyword { context, keyword }
+                if context == "schema `Alias`"
+                    && keyword == format!("x-satay.{expected_keyword}")
+        ));
+    }
+}
+
+#[test]
 fn rejects_x_satay_enum_variants_using_reserved_fallback_names() {
     let err = parse_invalid(
         r#"
@@ -715,6 +902,139 @@ components:
 }
 
 #[test]
+fn rejects_x_satay_ignore_true_with_inline_property_options() {
+    for (property_schema, expected_keyword) in [
+        (
+            r#"          type: string
+          x-satay:
+            ignore: true
+            identifier: value"#,
+            "identifier",
+        ),
+        (
+            r#"          type: string
+          x-satay:
+            ignore: true
+            treat-error-as-none: true"#,
+            "treat-error-as-none",
+        ),
+        (
+            r#"          type: string
+          x-satay:
+            ignore: true
+            parse-as: u32"#,
+            "parse-as",
+        ),
+        (
+            r#"          type: string
+          x-satay:
+            ignore: true
+            parse-as: u32
+            none-if: ['']"#,
+            "none-if",
+        ),
+    ] {
+        let err = parse_invalid(&format!(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {{}}
+components:
+  schemas:
+    Record:
+      type: object
+      properties:
+        value:
+{property_schema}
+"#
+        ));
+        let message = err.to_string();
+
+        match err {
+            ValidationError::SatayOptionConflictsWithIgnore { context, keyword } => {
+                assert_eq!(context, "property `Record.value`");
+                assert_eq!(keyword, expected_keyword);
+            }
+            other => panic!("unexpected error: {other}"),
+        }
+        assert_eq!(
+            message,
+            format!(
+                "property `Record.value` cannot combine x-satay.ignore `true` with x-satay.{expected_keyword}"
+            )
+        );
+    }
+}
+
+#[test]
+fn rejects_x_satay_ignore_true_with_enum_variants() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Record:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ready]
+          x-satay:
+            ignore: true
+            enum-variants:
+              ready: ReadyState
+"#,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::SatayOptionConflictsWithIgnore {
+            context,
+            keyword: "enum-variants",
+        } if context == "property `Record.status`"
+    ));
+}
+
+#[test]
+fn rejects_x_satay_ignore_true_with_property_ref_option_presence() {
+    let err = parse_invalid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Value:
+      type: string
+    Record:
+      type: object
+      properties:
+        value:
+          $ref: '#/components/schemas/Value'
+          x-satay:
+            ignore: true
+            treat-error-as-none: false
+"#,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::SatayOptionConflictsWithIgnore {
+            context,
+            keyword: "treat-error-as-none",
+        } if context == "property `Record.value`"
+    ));
+}
+
+#[test]
 fn omits_x_satay_ignored_object_properties() {
     let api = parse_valid(
         r#"
@@ -750,6 +1070,8 @@ components:
           type: string
           x-satay:
             ignore: false
+            treat-error-as-none: false
+            identifier: kept
         BusStopCode:
           type: string
 "#,
@@ -761,6 +1083,7 @@ components:
     };
     assert_eq!(fields.len(), 2);
     assert_eq!(field(fields, "retainedMetadata").ty, TypeRef::String);
+    assert_eq!(field(fields, "retainedMetadata").rust_name, "kept");
     assert_eq!(field(fields, "BusStopCode").ty, TypeRef::String);
 }
 

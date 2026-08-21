@@ -32,24 +32,6 @@ pub(crate) struct SataySchemaOptions {
     pub(crate) identifier: Option<SatayIdentifier>,
 }
 
-impl SataySchemaOptions {
-    pub(crate) fn parse_as(&self) -> Option<ParseAs> {
-        self.parse_as.map(SatayParseAsWire::into_parse_as)
-    }
-
-    pub(crate) fn integer_type_wire(&self) -> Option<SatayIntegerTypeWire> {
-        self.integer_type
-    }
-
-    pub(crate) fn integer_type(&self) -> Option<IntegerType> {
-        match self.integer_type_wire() {
-            Some(SatayIntegerTypeWire::Auto) => None,
-            Some(wire) => Some(wire.into_integer_type()),
-            None => None,
-        }
-    }
-}
-
 /// A target-neutral property identifier represented as canonical words.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "String")]
@@ -151,7 +133,7 @@ pub(crate) enum SatayParseAsWire {
 }
 
 impl SatayParseAsWire {
-    fn into_parse_as(self) -> ParseAs {
+    pub(super) fn into_parse_as(self) -> ParseAs {
         match self {
             Self::U8 => ParseAs::U8,
             Self::U16 => ParseAs::U16,
@@ -191,7 +173,7 @@ pub(crate) enum SatayIntegerTypeWire {
 }
 
 impl SatayIntegerTypeWire {
-    fn into_integer_type(self) -> IntegerType {
+    pub(super) fn into_integer_type(self) -> IntegerType {
         match self {
             Self::U8 => IntegerType::U8,
             Self::U16 => IntegerType::U16,
@@ -231,11 +213,11 @@ pub(crate) fn operation_options(
 }
 
 pub(super) fn parse_satay_enum_variants(
-    options: &SataySchemaOptions,
+    mappings: Option<&BTreeMap<String, String>>,
     context: &str,
     enum_values: &BTreeSet<String>,
 ) -> Result<BTreeMap<String, String>, ValidationError> {
-    let Some(mappings) = options.enum_variants.as_ref() else {
+    let Some(mappings) = mappings else {
         return Ok(BTreeMap::new());
     };
 
@@ -261,10 +243,6 @@ pub(super) fn parse_satay_enum_variants(
     }
 
     Ok(explicit)
-}
-
-pub(super) fn parse_satay_parse_as(options: &SataySchemaOptions) -> Option<ParseAs> {
-    options.parse_as()
 }
 
 pub(super) fn validate_satay_integer_type(
@@ -411,8 +389,16 @@ mod tests {
             .expect("valid extension")
             .expect("present extension");
 
-        assert_eq!(options.parse_as(), Some(ParseAs::U32));
-        assert_eq!(options.integer_type(), Some(IntegerType::U16));
+        assert_eq!(
+            options.parse_as.map(SatayParseAsWire::into_parse_as),
+            Some(ParseAs::U32)
+        );
+        assert_eq!(
+            options
+                .integer_type
+                .map(SatayIntegerTypeWire::into_integer_type),
+            Some(IntegerType::U16)
+        );
         assert_eq!(options.treat_error_as_none, Some(true));
         assert_eq!(options.none_if, Some(vec![String::new(), "-".to_owned()]));
         assert_eq!(
@@ -442,24 +428,17 @@ mod tests {
             .expect("valid extension")
             .expect("present extension");
 
+        assert_eq!(auto_options.integer_type, Some(SatayIntegerTypeWire::Auto));
         assert_eq!(
-            auto_options.integer_type_wire(),
-            Some(SatayIntegerTypeWire::Auto)
-        );
-        assert_eq!(
-            auto_options
-                .integer_type_wire()
-                .map(satay_integer_type_wire),
+            auto_options.integer_type.map(satay_integer_type_wire),
             Some("auto")
         );
-        assert_eq!(auto_options.integer_type(), None);
 
         let absent_schema = schema_with_satay(json!({}));
         let absent_options = schema_options(&absent_schema, "schema `Count`")
             .expect("valid extension")
             .expect("present extension");
-        assert_eq!(absent_options.integer_type_wire(), None);
-        assert_eq!(absent_options.integer_type(), None);
+        assert_eq!(absent_options.integer_type, None);
     }
 
     #[test]
