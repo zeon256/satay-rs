@@ -160,6 +160,8 @@ Serialization is intentionally lossy: an ignored property can never be supplied 
 
 The property's schema and references are still validated. Unlike operation-level `x-satay.skip`, `ignore` does not bypass validation or remove the containing operation or schema; it only prevents the validated property from reaching the generated model. `ignore` is valid only directly on object properties, including beside a property `$ref`. Placement validation is presence-based, so `ignore: false` is also rejected outside an object property.
 
+When `ignore: true`, `ignore` must be the only schema-level key in that property's `x-satay` object. Combining it with any other schema-level option, such as `identifier`, `integer-type`, or `parse-as`, is rejected because generation and decoding options cannot affect a property omitted from the public model. `ignore: false` is equivalent to omitting `ignore` and may coexist normally with other applicable schema-level options.
+
 ## Standard `unixtime` Format
 
 Satay supports the OpenAPI format registry's `unixtime` format on `type: integer` and `type: string` schemas. Both generate `satay_runtime::OffsetDateTime` and represent Unix timestamp seconds.
@@ -334,6 +336,8 @@ Type:
 ```
 
 This generates `SingleDecker`, `DoubleDecker`, `Bendy`, and `Unknown` variants with `serde(rename = "...")` attributes where needed. The `Unknown` variant in this example is an ordinary declared variant for the empty string, not a fallback for undeclared wire values.
+
+`enum-variants` is the only type-level `x-satay` option that applies when `enum` or a supported string `const` is present. Satay rejects `parse-as`, `integer-type`, `none-if`, and boolean string-mapping options on enums instead of discarding them. Property-only options such as `ignore`, `identifier`, and `treat-error-as-none` may still be combined with an inline enum object property because they apply to the field boundary, not the enum type.
 
 ## `treat-error-as-none`
 

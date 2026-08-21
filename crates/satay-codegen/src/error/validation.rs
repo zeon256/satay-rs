@@ -91,6 +91,18 @@ pub enum ValidationError {
     #[error("{context} cannot combine x-satay.parse-as `{parse_as}` with enum values")]
     SatayParseAsWithEnum { context: String, parse_as: String },
 
+    /// An `x-satay` type option was combined with enum values even though the
+    /// option has no enum consumer.
+    ///
+    /// Error message: `{context} uses x-satay.{keyword} with enum values, but that option does not apply to enums`
+    #[error(
+        "{context} uses x-satay.{keyword} with enum values, but that option does not apply to enums"
+    )]
+    SatayOptionUnsupportedWithEnum {
+        context: String,
+        keyword: &'static str,
+    },
+
     /// An `x-satay.enum-variants` entry points at a value that is not in the enum.
     ///
     /// Error message: `{context}.x-satay.enum-variants contains `{wire_name}`, which is not declared in the enum`
@@ -232,6 +244,15 @@ pub enum ValidationError {
     /// Error message: `{context} uses x-satay.ignore outside an object property`
     #[error("{context} uses x-satay.ignore outside an object property")]
     SatayIgnoreRequiresObjectProperty { context: String },
+
+    /// `x-satay.ignore: true` was combined with another schema-level `x-satay` option.
+    ///
+    /// Error message: `{context} cannot combine x-satay.ignore `true` with x-satay.{keyword}`
+    #[error("{context} cannot combine x-satay.ignore `true` with x-satay.{keyword}")]
+    SatayOptionConflictsWithIgnore {
+        context: String,
+        keyword: &'static str,
+    },
 
     /// `x-satay.identifier` was applied outside an object property.
     ///

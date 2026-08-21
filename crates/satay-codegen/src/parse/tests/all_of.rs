@@ -86,6 +86,38 @@ components:
 }
 
 #[test]
+fn rejects_x_satay_on_all_of_reference_branch() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Base:
+      type: object
+      properties:
+        id:
+          type: string
+    Broken:
+      allOf:
+        - $ref: '#/components/schemas/Base'
+          x-satay:
+            integer-type: auto
+"##,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::UnsupportedRefSiblingKeyword { context, keyword }
+            if context == "schema `Broken`.allOf[0]"
+                && keyword == "x-satay.integer-type"
+    ));
+}
+
+#[test]
 fn parses_inline_all_of_array_items_into_generated_struct_ir() {
     let api = parse_valid(
         r##"

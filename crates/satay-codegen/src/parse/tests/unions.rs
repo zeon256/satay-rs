@@ -464,6 +464,68 @@ components:
 }
 
 #[test]
+fn rejects_x_satay_on_plain_union_reference_branch() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Value:
+      type: object
+      properties:
+        id:
+          type: string
+    Broken:
+      anyOf:
+        - $ref: '#/components/schemas/Value'
+          x-satay:
+            parse-as: u8
+        - type: string
+"##,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::UnsupportedRefSiblingKeyword { context, keyword }
+            if context == "schema `Broken`.anyOf[0]"
+                && keyword == "x-satay.parse-as"
+    ));
+}
+
+#[test]
+fn rejects_x_satay_options_on_plain_union_null_branch() {
+    for option in ["parse-as: u8", "other: true"] {
+        let err = parse_invalid(&format!(
+            r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {{}}
+components:
+  schemas:
+    Broken:
+      anyOf:
+        - type: string
+        - type: 'null'
+          x-satay:
+            {option}
+"#
+        ));
+
+        assert!(matches!(
+            err,
+            ValidationError::UnsupportedAnyOfBranch { context, index }
+                if context == "schema `Broken`" && index == 1
+        ));
+    }
+}
+
+#[test]
 fn parses_any_of_with_inline_primitive_branches() {
     let api = parse_valid(
         r#"
@@ -1941,6 +2003,45 @@ components:
         }
         other => panic!("unexpected error: {other}"),
     }
+}
+
+#[test]
+fn rejects_unknown_x_satay_option_on_discriminator_reference_branch() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Dog:
+      type: object
+      properties:
+        name:
+          type: string
+    Cat:
+      type: object
+      properties:
+        name:
+          type: string
+    Pet:
+      oneOf:
+        - $ref: '#/components/schemas/Dog'
+          x-satay:
+            other: true
+        - $ref: '#/components/schemas/Cat'
+      discriminator:
+        propertyName: kind
+"##,
+    );
+
+    assert!(matches!(
+        err,
+        ValidationError::InvalidExtension { context, path, .. }
+            if context == "schema `Pet`.oneOf[0]" && path == "x-satay.other"
+    ));
 }
 
 #[test]

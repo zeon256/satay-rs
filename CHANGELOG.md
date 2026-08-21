@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - *(codegen)* reject property-only `x-satay` keys on value schemas by presence, including explicit `false`, while retaining them beside object-property `$ref` schemas
+- *(codegen)* reject every present but inapplicable schema `x-satay` key across component structs, enums, and `$ref` siblings instead of silently discarding it
+- *(codegen)* reject `x-satay.ignore: true` combined with any other schema-level `x-satay` key; `ignore: false` remains combinable
 
 ## [0.16.1](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.16.0...satay-codegen-v0.16.1) - 2026-08-18
 
