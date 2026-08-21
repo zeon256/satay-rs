@@ -4,9 +4,8 @@ mod reachability;
 mod satay;
 mod schema;
 
-use std::mem;
-
 use super::resolve::ResolvedDocument;
+use super::satay::SatayIdentifier;
 use crate::error::ValidationError;
 use crate::model::{
     Enum, HttpMethod, IntegerType, ParameterLocation, ParseAs, PathSegment, RangeScalar,
@@ -38,6 +37,7 @@ pub(crate) enum ValidatedComponentKind {
 pub(crate) struct ValidatedField {
     pub(crate) wire_name: String,
     pub(crate) description: Option<String>,
+    pub(crate) identifier: Option<SatayIdentifier>,
     pub(crate) required: bool,
     pub(crate) value: ValidatedFieldValue,
 }
@@ -59,6 +59,19 @@ impl ValidatedFieldValue {
             Self::SentinelParsedString { ty, .. } => ty.as_type(),
         }
     }
+
+    fn from_type(ty: ValidatedType, decoding: ValidatedFieldDecoding) -> Self {
+        match decoding {
+            ValidatedFieldDecoding::Strict => Self::Strict(ty),
+            ValidatedFieldDecoding::Lossy => Self::Lossy(ty),
+            ValidatedFieldDecoding::Sentinel(sentinels) => {
+                let Ok(ty) = ValidatedParsedString::try_from_type(ty) else {
+                    unreachable!("sentinel decoding is validated only for parsed strings")
+                };
+                Self::SentinelParsedString { ty, sentinels }
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -74,9 +87,6 @@ pub(crate) struct ValidatedType {
     pub(crate) nullable: bool,
     pub(crate) validation: Option<Validation>,
     pub(crate) description: Option<String>,
-    field_decoding: ValidatedFieldDecoding,
-    pub(crate) ignore: bool,
-    pub(crate) identifier_words: Option<Vec<String>>,
 }
 
 impl ValidatedType {
@@ -86,23 +96,6 @@ impl ValidatedType {
             nullable: false,
             validation: None,
             description: None,
-            field_decoding: ValidatedFieldDecoding::Strict,
-            ignore: false,
-            identifier_words: None,
-        }
-    }
-
-    pub(crate) fn into_field_value(mut self) -> ValidatedFieldValue {
-        let decoding = mem::replace(&mut self.field_decoding, ValidatedFieldDecoding::Strict);
-        match decoding {
-            ValidatedFieldDecoding::Strict => ValidatedFieldValue::Strict(self),
-            ValidatedFieldDecoding::Lossy => ValidatedFieldValue::Lossy(self),
-            ValidatedFieldDecoding::Sentinel(sentinels) => {
-                let Ok(ty) = ValidatedParsedString::try_from_type(self) else {
-                    unreachable!("sentinel decoding is validated only for parsed strings")
-                };
-                ValidatedFieldValue::SentinelParsedString { ty, sentinels }
-            }
         }
     }
 
@@ -256,9 +249,6 @@ impl ValidatedParsedString {
                 nullable,
                 validation: None,
                 description,
-                field_decoding: ValidatedFieldDecoding::Strict,
-                ignore: false,
-                identifier_words: None,
             },
         }
     }
@@ -418,27 +408,28 @@ mod tests {
         assert!(ty.nullable);
         assert_eq!(ty.description.as_deref(), Some("creation timestamp"));
         assert!(ty.validation.is_none());
-        assert!(matches!(ty.field_decoding, ValidatedFieldDecoding::Strict));
-        assert!(!ty.ignore);
-        assert!(ty.identifier_words.is_none());
     }
 
     #[test]
     fn field_values_encode_exclusive_decoding_modes() {
-        let strict = ValidatedType::named("StrictValue".to_owned()).into_field_value();
+        let strict = ValidatedFieldValue::from_type(
+            ValidatedType::named("StrictValue".to_owned()),
+            ValidatedFieldDecoding::Strict,
+        );
         assert!(matches!(strict, ValidatedFieldValue::Strict(_)));
 
-        let mut lossy_ty = ValidatedType::named("LossyValue".to_owned());
-        lossy_ty.field_decoding = ValidatedFieldDecoding::Lossy;
-        let lossy = lossy_ty.into_field_value();
+        let lossy = ValidatedFieldValue::from_type(
+            ValidatedType::named("LossyValue".to_owned()),
+            ValidatedFieldDecoding::Lossy,
+        );
         assert!(matches!(lossy, ValidatedFieldValue::Lossy(_)));
 
-        let mut sentinel_ty =
-            ValidatedParsedString::new(StringCodec::Standard(ParseAs::F64), false, None).ty;
-        sentinel_ty.field_decoding = ValidatedFieldDecoding::Sentinel(
-            NonEmptySentinels::new(vec!["NA".to_owned()]).unwrap(),
+        let sentinel = ValidatedFieldValue::from_type(
+            ValidatedParsedString::new(StringCodec::Standard(ParseAs::F64), false, None).ty,
+            ValidatedFieldDecoding::Sentinel(
+                NonEmptySentinels::new(vec!["NA".to_owned()]).unwrap(),
+            ),
         );
-        let sentinel = sentinel_ty.into_field_value();
         assert!(matches!(
             sentinel,
             ValidatedFieldValue::SentinelParsedString { .. }

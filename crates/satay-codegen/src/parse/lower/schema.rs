@@ -158,12 +158,12 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
         let mut used = BTreeSet::new();
         let mut parsed = Vec::with_capacity(fields.len());
 
-        for field in fields.iter().filter(|field| !field.value.ty().ignore) {
+        for field in fields {
             let validated_ty = field.value.ty();
-            let identifier = validated_ty
-                .identifier_words
+            let identifier = field
+                .identifier
                 .as_ref()
-                .map(|words| words.join("-"))
+                .map(|identifier| identifier.words().join("-"))
                 .unwrap_or_else(|| field.wire_name.clone());
             let ty = self.parse_type_ref_with_hint(
                 validated_ty,
@@ -179,7 +179,10 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
             };
             parsed.push(Field {
                 wire_name: field.wire_name.clone(),
-                identifier_words: validated_ty.identifier_words.clone(),
+                identifier_words: field
+                    .identifier
+                    .as_ref()
+                    .map(|identifier| identifier.words().to_vec()),
                 rust_name: unique_ident(field_ident(&identifier), &mut used),
                 description: field.description.clone(),
                 ty,

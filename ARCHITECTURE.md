@@ -122,14 +122,12 @@ Schema decisions are carried by `ValidatedType`:
 - `nullable`: whether the OpenAPI schema allows `null`.
 - `validation`: normalized string, integer, number, or array constraints that will render as `nutype` newtypes.
 - `description`: the OpenAPI description, filtered to `None` when blank.
-- `treat_error_as_none`: validated `x-satay.treat-error-as-none` metadata for struct fields.
-- `none_if`: ordered sentinel strings for strict optional decoding of parsed string fields.
-- `ignore`: validated `x-satay.ignore` metadata for object properties that lowering must omit.
-- `identifier_words`: canonical target-neutral words from `x-satay.identifier`, retained independently of the OpenAPI wire key.
+
+Property-only decisions are represented at the property boundary. A transient `ValidatedProperty` distinguishes included fields from ignored wire properties. Included `ValidatedField` values retain the validated `SatayIdentifier` newtype and encode decoding as exactly one of strict, lossy, or parsed-string sentinel handling. Ignored properties remain in this transient form through `allOf` wire-name duplicate validation, then are removed before identifier-collision checks and lowering.
 
 Validation responsibilities are split by file:
 
-- `validate/schema.rs` validates component schemas and inline type schemas, rejects unsupported schema shapes, validates enum shape, validates references, and records constraints on `ValidatedType`. Ordinary schemas enter through `validate_value_schema`; object properties enter through the property-specific stack validator. Array items and `additionalProperties` values always return to value context rather than inheriting property capabilities.
+- `validate/schema.rs` validates component schemas and inline type schemas, rejects unsupported schema shapes, validates enum shape, validates references, and records constraints on `ValidatedType`. Ordinary schemas enter through `validate_value_schema`; object properties enter through the property-specific stack validator and become included or ignored property results. Array items and `additionalProperties` values always return to value context rather than inheriting property capabilities.
 - `validate/operation.rs` validates paths, operation parameters, request bodies, responses, status codes, path placeholders, and JSON media-type requirements.
 - `validate/constraint.rs` parses and normalizes string, integer, number, and array constraints for `nutype` rendering. It also infers integer types from bounds when no explicit `x-satay.integer-type` is provided.
 - `parse/satay.rs` is the authoritative home for typed schema and operation `x-satay` wire contracts, their `schema_options` and `operation_options` accessors, and lower-level parsing helpers shared by validation. The wire types use owned strings so validation does not need to carry extension-value lifetimes.
@@ -290,7 +288,7 @@ Important IR conventions:
 - `Field.treat_error_as_none` forces `Option<T>` plus custom serde handling even when a property is required in OpenAPI.
 - `Field.none_if` forces `Option<T>` and generated field-specific serde helpers that preserve the configured string parser while recognizing exact sentinel strings.
 
-Properties with `ValidatedType.ignore == true` are filtered out while lowering validated struct fields, before the codegen `Field` IR is built. Rendering therefore has no ignored-field branch and never revisits `x-satay` extension data.
+Ignored properties are removed after validated `allOf` branches have checked duplicate wire names and before the codegen `Field` IR is built. Lowering receives only included `ValidatedField` values, translates their identifier newtypes and decoding modes into the existing `Field` representation, and never revisits `x-satay` extension data.
 
 ## Rendering Stage
 
