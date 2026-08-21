@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.3](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.16.1...satay-codegen-v0.16.3) - 2026-08-21
+
+### Other
+
+- *(codegen)* audit x-satay option consumption ([#180](https://github.com/zeon256/satay-rs/pull/180))
+- *(codegen)* move property metadata to validated fields ([#179](https://github.com/zeon256/satay-rs/pull/179))
+- *(codegen)* use explicit validation contexts ([#178](https://github.com/zeon256/satay-rs/pull/178))
+- *(codegen)* model field decoding as mutually exclusive modes ([#177](https://github.com/zeon256/satay-rs/pull/177))
+- *(codegen)* restrict enum variant mappings to enum validation ([#176](https://github.com/zeon256/satay-rs/pull/176))
+- *(codegen)* make validated type directives mutually exclusive ([#175](https://github.com/zeon256/satay-rs/pull/175))
+- *(codegen)* add checked x-satay validation primitives ([#181](https://github.com/zeon256/satay-rs/pull/181))
+
 ## [0.16.2](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.16.1...satay-codegen-v0.16.2) - 2026-08-21
 
 ### Other
