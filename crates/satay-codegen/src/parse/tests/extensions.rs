@@ -847,6 +847,39 @@ components:
 }
 
 #[test]
+fn ignored_properties_do_not_participate_in_identifier_collisions() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Record:
+      type: object
+      properties:
+        value:
+          type: string
+          x-satay:
+            ignore: true
+        display:
+          type: string
+          x-satay:
+            identifier: value
+"#,
+    );
+
+    let record = component(&api, "Record");
+    let ComponentKind::Struct(fields) = &record.kind else {
+        panic!("expected Record struct");
+    };
+    assert_eq!(fields.len(), 1);
+    assert_eq!(field(fields, "display").rust_name, "value");
+}
+
+#[test]
 fn parses_target_neutral_property_identifiers_into_ir() {
     let api = parse_valid(
         r#"

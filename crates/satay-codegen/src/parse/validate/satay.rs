@@ -5,8 +5,8 @@ use serde_json::Value as JsonValue;
 
 use super::super::reference::schema_type_wire;
 use super::super::satay::{
-    SataySchemaOptions, parse_range_scalar, parse_satay_enum_variants, parse_satay_parse_as,
-    satay_parse_as_wire, schema_options, validate_satay_integer_type,
+    SatayIdentifier, SataySchemaOptions, parse_range_scalar, parse_satay_enum_variants,
+    parse_satay_parse_as, satay_parse_as_wire, schema_options, validate_satay_integer_type,
 };
 use super::constraint::parse_integer_type;
 use super::{NonEmptySentinels, ValidatedFieldDecoding};
@@ -27,9 +27,24 @@ pub(crate) enum ValidatedTypeDirective {
 #[derive(Debug, Clone)]
 pub(crate) struct ValidatedSataySchema {
     pub(crate) directive: ValidatedTypeDirective,
+    pub(super) property_options: Option<ValidatedPropertyOptions>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct ValidatedPropertyOptions {
     pub(super) field_decoding: ValidatedFieldDecoding,
-    pub(crate) ignore: bool,
-    pub(crate) identifier_words: Option<Vec<String>>,
+    pub(super) ignore: bool,
+    pub(super) identifier: Option<SatayIdentifier>,
+}
+
+impl ValidatedPropertyOptions {
+    pub(super) fn strict() -> Self {
+        Self {
+            field_decoding: ValidatedFieldDecoding::Strict,
+            ignore: false,
+            identifier: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -85,7 +100,7 @@ fn validate_type_satay(
             })
         })
         .transpose()?;
-    let (treat_error_as_none, ignore, identifier_words) = match validation_context {
+    let (treat_error_as_none, ignore, identifier) = match validation_context {
         SatayValidationContext::Value => {
             reject_property_options_on_value(&options, context)?;
             (false, false, None)
@@ -93,10 +108,7 @@ fn validate_type_satay(
         SatayValidationContext::Property => (
             options.treat_error_as_none.unwrap_or(false),
             options.ignore.unwrap_or(false),
-            options
-                .identifier
-                .as_ref()
-                .map(|identifier| identifier.words().to_vec()),
+            options.identifier.clone(),
         ),
     };
     validate_satay_integer_type(schema_type, parse_as, integer_type_wire, context)?;
@@ -170,11 +182,18 @@ fn validate_type_satay(
         None => ValidatedFieldDecoding::Strict,
     };
 
+    let property_options = match validation_context {
+        SatayValidationContext::Value => None,
+        SatayValidationContext::Property => Some(ValidatedPropertyOptions {
+            field_decoding,
+            ignore,
+            identifier,
+        }),
+    };
+
     Ok(ValidatedSataySchema {
         directive,
-        field_decoding,
-        ignore,
-        identifier_words,
+        property_options,
     })
 }
 
@@ -355,10 +374,7 @@ mod tests {
             validated.directive,
             ValidatedTypeDirective::ParsedString(StringCodec::Standard(ParseAs::OffsetDateTime))
         );
-        assert!(matches!(
-            validated.field_decoding,
-            ValidatedFieldDecoding::Strict
-        ));
+        assert!(validated.property_options.is_none());
     }
 
     #[test]
@@ -829,6 +845,8 @@ mod tests {
 
             let property =
                 validate_property_satay(&schema, Some(OasSchemaType::String), "User.nickname")
+                    .unwrap()
+                    .property_options
                     .unwrap();
             assert!(
                 matches!(property.field_decoding, ValidatedFieldDecoding::Lossy) == value,
@@ -855,6 +873,8 @@ mod tests {
 
             let property =
                 validate_property_satay(&schema, Some(OasSchemaType::String), "User.metadata")
+                    .unwrap()
+                    .property_options
                     .unwrap();
             assert_eq!(property.ignore, value);
 
@@ -876,10 +896,13 @@ mod tests {
         let schema = schema_with_satay(json!({ "identifier": "request-id" }));
 
         let property =
-            validate_property_satay(&schema, Some(OasSchemaType::String), "User.request").unwrap();
+            validate_property_satay(&schema, Some(OasSchemaType::String), "User.request")
+                .unwrap()
+                .property_options
+                .unwrap();
         assert_eq!(
-            property.identifier_words,
-            Some(vec!["request".to_owned(), "id".to_owned()])
+            property.identifier.as_ref().map(SatayIdentifier::words),
+            Some(["request".to_owned(), "id".to_owned()].as_slice())
         );
 
         let error = validation_error(validate_value_satay(

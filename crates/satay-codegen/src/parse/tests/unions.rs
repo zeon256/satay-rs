@@ -2142,7 +2142,7 @@ components:
             assert_eq!(property, "kind");
             assert_eq!(
                 expected,
-                "a required non-null singleton string enum or string const"
+                "a strict, required, non-null singleton string enum or string const"
             );
         }
         other => panic!("unexpected error: {other}"),
@@ -2382,7 +2382,7 @@ components:
             assert_eq!(property, "kind");
             assert_eq!(
                 expected,
-                "a required non-null singleton string enum or string const"
+                "a strict, required, non-null singleton string enum or string const"
             );
         }
         other => panic!("unexpected error: {other}"),
@@ -2444,7 +2444,7 @@ components:
             assert_eq!(property, "kind");
             assert_eq!(
                 expected,
-                "a required non-null singleton string enum or string const"
+                "a strict, required, non-null singleton string enum or string const"
             );
         }
         other => panic!("unexpected error: {other}"),
@@ -2502,7 +2502,62 @@ components:
             assert_eq!(property, "kind");
             assert_eq!(
                 expected,
-                "a required non-null singleton string enum or string const"
+                "a strict, required, non-null singleton string enum or string const"
+            );
+        }
+        other => panic!("unexpected error: {other}"),
+    }
+}
+
+#[test]
+fn rejects_lossy_embedded_discriminator_property() {
+    let err = parse_invalid(
+        r##"
+openapi: 3.1.0
+info:
+  title: Test API
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Dog:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          const: dog
+          x-satay:
+            treat-error-as-none: true
+    Cat:
+      type: object
+      required: [kind]
+      properties:
+        kind:
+          type: string
+          const: cat
+    Pet:
+      oneOf:
+        - $ref: '#/components/schemas/Dog'
+        - $ref: '#/components/schemas/Cat'
+      discriminator:
+        propertyName: kind
+"##,
+    );
+
+    match err {
+        ValidationError::InvalidDiscriminatorProperty {
+            context,
+            schema,
+            property,
+            expected,
+        } => {
+            assert_eq!(context, "schema `Pet`");
+            assert_eq!(schema, "Dog");
+            assert_eq!(property, "kind");
+            assert_eq!(
+                expected,
+                "a strict, required, non-null singleton string enum or string const"
             );
         }
         other => panic!("unexpected error: {other}"),

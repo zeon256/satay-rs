@@ -213,7 +213,7 @@ components:
 }
 
 #[test]
-fn rejects_all_of_with_duplicate_properties_across_branches() {
+fn rejects_all_of_duplicate_even_when_first_property_is_ignored() {
     let err = parse_invalid(
         r##"
 openapi: 3.1.0
@@ -234,6 +234,8 @@ components:
       properties:
         id:
           type: string
+          x-satay:
+            ignore: true
     Broken:
       allOf:
         - $ref: '#/components/schemas/Base'
