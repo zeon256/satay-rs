@@ -11,8 +11,8 @@ use crate::ident::{
 };
 use crate::model::{
     ApiGroup, ApiKeyLocation, ApiKeySecurityScheme, GroupOperation, Operation as SatayOperation,
-    Parameter, ParameterLocation, RequestBody, ResponseCase, ResponseProjection, ResponseStatus,
-    is_array_type,
+    Parameter, ParameterDefault, ParameterLocation, RequestBody, ResponseCase, ResponseProjection,
+    ResponseStatus, TypeRef, is_array_type,
 };
 use crate::parse::registry::TypeRegistry;
 use crate::parse::validate::{
@@ -302,6 +302,11 @@ fn parse_parameter(
         });
     }
 
+    let default = parameter
+        .default
+        .as_ref()
+        .map(|default| lower_parameter_default(default, &ty));
+
     Ok(Parameter {
         location: parameter.location,
         wire_name: parameter.wire_name.clone(),
@@ -309,7 +314,19 @@ fn parse_parameter(
         description: parameter.description.clone(),
         ty,
         required: parameter.required,
+        default,
     })
+}
+
+fn lower_parameter_default(default: &ParameterDefault, ty: &TypeRef) -> ParameterDefault {
+    match (default, ty) {
+        (
+            ParameterDefault::EnumVariant { wire_value, .. }
+            | ParameterDefault::OpenEnum(wire_value),
+            TypeRef::String,
+        ) => ParameterDefault::String(wire_value.clone()),
+        _ => default.clone(),
+    }
 }
 
 fn deduplicate_parameter_fields(parameters: &mut [Parameter]) {

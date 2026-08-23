@@ -8,8 +8,8 @@ use super::resolve::ResolvedDocument;
 use super::satay::SatayIdentifier;
 use crate::error::ValidationError;
 use crate::model::{
-    Enum, HttpMethod, IntegerType, ParameterLocation, ParseAs, PathSegment, RangeScalar,
-    ResponseStatus, StringCodec, Validation,
+    Enum, HttpMethod, IntegerType, ParameterDefault, ParameterLocation, ParseAs, PathSegment,
+    RangeScalar, ResponseStatus, StringCodec, Validation,
 };
 
 #[derive(Debug)]
@@ -320,6 +320,7 @@ pub(crate) struct ValidatedParameter {
     pub(crate) description: Option<String>,
     pub(crate) ty: ValidatedType,
     pub(crate) required: bool,
+    pub(crate) default: Option<ParameterDefault>,
 }
 
 #[derive(Debug)]

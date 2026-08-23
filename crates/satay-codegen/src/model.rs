@@ -364,6 +364,20 @@ pub(crate) enum PathSegment {
     Parameter(String),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ParameterDefault {
+    String(String),
+    Integer(i128),
+    F32(f32),
+    F64(f64),
+    Bool(bool),
+    EnumVariant {
+        wire_value: String,
+        rust_name: String,
+    },
+    OpenEnum(String),
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct Parameter {
     pub(crate) location: ParameterLocation,
@@ -372,6 +386,7 @@ pub(crate) struct Parameter {
     pub(crate) description: Option<String>,
     pub(crate) ty: TypeRef,
     pub(crate) required: bool,
+    pub(crate) default: Option<ParameterDefault>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

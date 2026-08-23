@@ -677,6 +677,16 @@ pub enum ValidationError {
     #[error("{context} parameter `{wire_name}` must declare schema")]
     MissingParameterSchema { context: String, wire_name: String },
 
+    /// A parameter schema declares a default that cannot be represented by the generated input.
+    ///
+    /// Error message: `parameter `{wire_name}` has invalid default {value}: {reason}`
+    #[error("parameter `{wire_name}` has invalid default {value}: {reason}")]
+    InvalidParameterDefault {
+        wire_name: String,
+        value: String,
+        reason: String,
+    },
+
     /// A parameter is nullable, which is not supported.
     ///
     /// Error message: `parameter `{wire_name}` is nullable; nullable parameters are not supported`
