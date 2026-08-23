@@ -13,6 +13,7 @@ mod identifiers;
 mod ignore;
 mod integers;
 mod maps;
+mod parameters;
 mod parse_as;
 mod rejections;
 mod responses;

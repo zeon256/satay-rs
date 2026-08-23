@@ -22,6 +22,7 @@ Satay targets OpenAPI 3.1.x and a small, typed subset.
 - JSON request bodies using `application/json` or structured JSON media types such as `application/problem+json`.
 - Generated `<operation>_parts` functions that return `satay_runtime::RequestParts<B>` without requiring an HTTP client.
 - Generated input constructors and chainable setters for optional operation inputs.
+- Optional scalar query and header parameters apply valid schema `default` values when generated inputs are constructed. Numeric, string, boolean, and string-enum defaults are supported; explicit setters override them. Invalid defaults and defaults on unsupported parameter shapes are rejected during generation.
 - Generated `SERVER_URL` from the first OpenAPI `servers` entry.
 - Generated `encode_<operation>` helpers, behind the generated crate's `json` feature, that produce `http::Request<Vec<u8>>`.
 - Generated `decode_<operation>_response` helpers, behind the generated crate's `json` feature, that decode known JSON responses and preserve unknown statuses as `UnexpectedStatus(http::StatusCode, Vec<u8>)`.

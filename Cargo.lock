@@ -1794,6 +1794,7 @@ dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
+ "regex",
  "satay-oas3",
  "serde",
  "serde_json",

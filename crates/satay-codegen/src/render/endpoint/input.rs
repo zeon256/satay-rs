@@ -1,10 +1,10 @@
 use std::collections::BTreeSet;
 
-use proc_macro2::TokenStream;
+use proc_macro2::{Literal, TokenStream};
 use quote::quote;
 use syn::parse_quote;
 
-use crate::model::{Field, Operation, TypeRef};
+use crate::model::{Field, Operation, ParameterDefault, TypeRef};
 
 use super::super::types::structs;
 use super::super::{
@@ -45,6 +45,14 @@ pub(super) fn render_input_impl(operation: &Operation) -> syn::ItemImpl {
             } else {
                 quote!(#name)
             }
+        } else if let Some(default) = operation
+            .parameters
+            .iter()
+            .find(|parameter| parameter.rust_name == field.rust_name)
+            .and_then(|parameter| parameter.default.as_ref())
+        {
+            let value = render_parameter_default(default, &field.ty);
+            quote!(#name: Some(#value))
         } else {
             quote!(#name: None)
         }
@@ -81,6 +89,46 @@ pub(super) fn render_input_default_impl(operation: &Operation) -> Option<syn::It
             }
         }
     ))
+}
+
+fn render_parameter_default(default: &ParameterDefault, ty: &TypeRef) -> TokenStream {
+    if let TypeRef::Constrained { rust_name, inner } = ty {
+        let rust_name = ident(rust_name);
+        let value = render_parameter_default(default, inner);
+        return quote!(
+            #rust_name::try_new(#value)
+                .expect("parameter default was validated by satay-codegen")
+        );
+    }
+
+    match (default, ty) {
+        (ParameterDefault::String(value), TypeRef::String) => {
+            quote!(String::from(#value))
+        }
+        (ParameterDefault::Integer(value), TypeRef::Integer(_)) => {
+            let value = Literal::i128_unsuffixed(*value);
+            quote!(#value)
+        }
+        (ParameterDefault::F32(value), TypeRef::F32) => {
+            let value = Literal::f32_unsuffixed(*value);
+            quote!(#value)
+        }
+        (ParameterDefault::F64(value), TypeRef::F64) => {
+            let value = Literal::f64_unsuffixed(*value);
+            quote!(#value)
+        }
+        (ParameterDefault::Bool(value), TypeRef::Bool) => quote!(#value),
+        (ParameterDefault::EnumVariant { rust_name, .. }, TypeRef::Named(name)) => {
+            let name = ident(name);
+            let variant = ident(rust_name);
+            quote!(#name::#variant)
+        }
+        (ParameterDefault::OpenEnum(value), TypeRef::Named(name)) => {
+            let name = ident(name);
+            quote!(#name::Other(String::from(#value)))
+        }
+        _ => unreachable!("validated parameter default must match its lowered type"),
+    }
 }
 
 fn render_input_setter(field: &Field) -> TokenStream {

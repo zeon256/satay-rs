@@ -1,3 +1,5 @@
+use regex::Regex;
+use serde_json::Value as JsonValue;
 use std::collections::BTreeSet;
 
 use oas3::{
@@ -13,6 +15,7 @@ use super::super::helpers::{json_media_type, optional_description};
 use super::super::reference::schema_type_and_nullable;
 use super::super::resolve::ResolvedDocument;
 use super::super::satay::{SatayOperationOptions, SatayOutputOptions, operation_options};
+use super::constraint::parse_validation;
 use super::schema::{
     inline_union_null_branch, reject_any_of_sibling_keywords, reject_plain_one_of_sibling_keywords,
     schema_uses_all_of, schema_uses_any_of, validate_value_schema,
@@ -21,8 +24,12 @@ use super::{
     ValidatedOperation, ValidatedParameter, ValidatedRequestBody, ValidatedResponse,
     ValidatedResponseProjection, ValidatedType, ValidatedTypeKind,
 };
-use crate::error::ValidationError;
-use crate::model::{HttpMethod, ParameterLocation, PathSegment, ResponseStatus};
+use crate::ident::variant_ident;
+use crate::model::{
+    Enum, EnumFallback, HttpMethod, IntegerType, ParameterDefault, ParameterLocation, PathSegment,
+    ResponseStatus, TypeRef, Validation,
+};
+use crate::{error::ValidationError, model::FloatLimit};
 
 pub(super) fn validate_operations(
     document: &ResolvedDocument<'_>,
@@ -205,7 +212,7 @@ fn validate_parameter(
         });
     }
 
-    let schema =
+    let declared_schema =
         parameter
             .schema
             .as_ref()
@@ -225,7 +232,8 @@ fn validate_parameter(
     };
 
     let schema_context = format!("parameter `{wire_name}`");
-    let schema = peel_nullable_parameter_schema(schema, required, location, &schema_context)?;
+    let (schema, nullable_schema_peeled) =
+        peel_nullable_parameter_schema(declared_schema, required, location, &schema_context)?;
 
     if schema_uses_all_of(document, schema)? {
         return Err(ValidationError::UnsupportedComposition {
@@ -235,6 +243,7 @@ fn validate_parameter(
     }
 
     let mut ty = validate_value_schema(document, schema, &schema_context)?;
+    let default_allows_null = ty.is_nullable() || nullable_schema_peeled;
 
     if ty.is_nullable() {
         if !required
@@ -254,36 +263,20 @@ fn validate_parameter(
         }
     }
 
-    if ty.contains_inline_struct() {
-        return Err(ValidationError::UnsupportedComposition {
-            context: schema_context,
-            keyword: "allOf",
-        });
-    }
-
-    if ty.contains_any_of() || schema_uses_any_of(document, schema)? {
-        return Err(ValidationError::AnyOfParameterUnsupported {
-            wire_name: wire_name.clone(),
-        });
-    }
-
-    if ty.contains_map_or_json_value() {
-        return Err(ValidationError::MapParameterUnsupported {
-            wire_name: wire_name.clone(),
-        });
-    }
-
-    if location == ParameterLocation::Path && ty.is_array() {
-        return Err(ValidationError::ArrayPathParameterUnsupported {
-            wire_name: wire_name.clone(),
-        });
-    }
-
-    if location == ParameterLocation::Header && ty.is_array() {
-        return Err(ValidationError::ArrayHeaderParameterUnsupported {
-            wire_name: wire_name.clone(),
-        });
-    }
+    validate_parameter_encoding(document, schema, &ty, location, &wire_name, &schema_context)?;
+    let default = if required {
+        None
+    } else {
+        validate_parameter_default(
+            document,
+            declared_schema,
+            schema,
+            &ty,
+            default_allows_null,
+            &wire_name,
+            &schema_context,
+        )?
+    };
 
     Ok(ValidatedParameter {
         location,
@@ -291,7 +284,44 @@ fn validate_parameter(
         description: optional_description(&parameter.description),
         ty,
         required,
+        default,
     })
+}
+fn validate_parameter_encoding(
+    document: &ResolvedDocument<'_>,
+    schema: &OasSchema,
+    ty: &ValidatedType,
+    location: ParameterLocation,
+    wire_name: &str,
+    context: &str,
+) -> Result<(), ValidationError> {
+    if ty.contains_inline_struct() {
+        return Err(ValidationError::UnsupportedComposition {
+            context: context.to_owned(),
+            keyword: "allOf",
+        });
+    }
+    if ty.contains_any_of() || schema_uses_any_of(document, schema)? {
+        return Err(ValidationError::AnyOfParameterUnsupported {
+            wire_name: wire_name.to_owned(),
+        });
+    }
+    if ty.contains_map_or_json_value() {
+        return Err(ValidationError::MapParameterUnsupported {
+            wire_name: wire_name.to_owned(),
+        });
+    }
+    if location == ParameterLocation::Path && ty.is_array() {
+        return Err(ValidationError::ArrayPathParameterUnsupported {
+            wire_name: wire_name.to_owned(),
+        });
+    }
+    if location == ParameterLocation::Header && ty.is_array() {
+        return Err(ValidationError::ArrayHeaderParameterUnsupported {
+            wire_name: wire_name.to_owned(),
+        });
+    }
+    Ok(())
 }
 
 /// Returns the non-null branch of an optional query/header parameter shaped
@@ -302,26 +332,26 @@ fn peel_nullable_parameter_schema<'a>(
     required: bool,
     location: ParameterLocation,
     context: &str,
-) -> Result<&'a OasSchema, ValidationError> {
+) -> Result<(&'a OasSchema, bool), ValidationError> {
     if required
         || !matches!(
             location,
             ParameterLocation::Query | ParameterLocation::Header
         )
     {
-        return Ok(schema);
+        return Ok((schema, false));
     }
     if schema.reference().is_some() {
-        return Ok(schema);
+        return Ok((schema, false));
     }
     let Some(object) = schema.as_object() else {
-        return Ok(schema);
+        return Ok((schema, false));
     };
 
     let (branches, is_any_of) = match (object.any_of.as_slice(), object.one_of.as_slice()) {
         (branches @ [_, _], []) => (branches, true),
         ([], branches @ [_, _]) => (branches, false),
-        _ => return Ok(schema),
+        _ => return Ok((schema, false)),
     };
 
     let is_null_branch =
@@ -330,7 +360,7 @@ fn peel_nullable_parameter_schema<'a>(
     let non_null_branch = match (is_null_branch(&branches[0]), is_null_branch(&branches[1])) {
         (false, true) => &branches[0],
         (true, false) => &branches[1],
-        _ => return Ok(schema),
+        _ => return Ok((schema, false)),
     };
 
     if is_any_of {
@@ -339,7 +369,336 @@ fn peel_nullable_parameter_schema<'a>(
         reject_plain_one_of_sibling_keywords(object, context)?;
     }
 
-    Ok(non_null_branch)
+    Ok((non_null_branch, true))
+}
+fn validate_parameter_default(
+    document: &ResolvedDocument<'_>,
+    declared_schema: &OasSchema,
+    effective_schema: &OasSchema,
+    ty: &ValidatedType,
+    allows_null: bool,
+    wire_name: &str,
+    context: &str,
+) -> Result<Option<ParameterDefault>, ValidationError> {
+    let resolved_schema = document.resolve_schema(effective_schema, context)?;
+    let value = declared_schema
+        .as_object()
+        .and_then(|schema| schema.default.as_ref())
+        .or_else(|| {
+            effective_schema
+                .as_object()
+                .and_then(|schema| schema.default.as_ref())
+        })
+        .or_else(|| {
+            resolved_schema
+                .as_object()
+                .and_then(|schema| schema.default.as_ref())
+        });
+    let Some(value) = value else {
+        return Ok(None);
+    };
+
+    if value.is_null() {
+        return if allows_null {
+            Ok(None)
+        } else {
+            Err(invalid_parameter_default(
+                wire_name,
+                value,
+                "null is not valid for this parameter",
+            ))
+        };
+    }
+
+    let resolved_ty;
+    let ty = if matches!(ty.kind, ValidatedTypeKind::Named(_)) {
+        resolved_ty = validate_value_schema(document, resolved_schema, context)?;
+        &resolved_ty
+    } else {
+        ty
+    };
+
+    let default = parse_parameter_default(value, ty, wire_name)?;
+    let enum_validation = match &ty.kind {
+        ValidatedTypeKind::Enum(_) => resolved_schema
+            .as_object()
+            .map(|schema| parse_validation(schema, &TypeRef::String, context))
+            .transpose()?
+            .flatten(),
+        _ => None,
+    };
+    let validation = ty.validation.as_ref().or(enum_validation.as_ref());
+
+    validate_parameter_default_constraints(&default, validation)
+        .map_err(|reason| invalid_parameter_default(wire_name, value, reason))?;
+    Ok(Some(default))
+}
+fn parse_parameter_default(
+    value: &JsonValue,
+    ty: &ValidatedType,
+    wire_name: &str,
+) -> Result<ParameterDefault, ValidationError> {
+    match &ty.kind {
+        ValidatedTypeKind::String => Ok(ParameterDefault::String(
+            value
+                .as_str()
+                .ok_or_else(|| {
+                    invalid_parameter_default(wire_name, value, "expected a JSON string")
+                })?
+                .to_owned(),
+        )),
+        ValidatedTypeKind::Integer(integer_type) => {
+            parse_integer_parameter_default(value, *integer_type, wire_name)
+        }
+        ValidatedTypeKind::F32 => parse_number_parameter_default(value, true, wire_name),
+        ValidatedTypeKind::F64 => parse_number_parameter_default(value, false, wire_name),
+        ValidatedTypeKind::Bool => Ok(ParameterDefault::Bool(value.as_bool().ok_or_else(
+            || invalid_parameter_default(wire_name, value, "expected a JSON boolean"),
+        )?)),
+        ValidatedTypeKind::Enum(enum_) => parse_enum_parameter_default(value, enum_, wire_name),
+        ValidatedTypeKind::ParsedString(_) | ValidatedTypeKind::ParsedInteger(_) => {
+            Err(invalid_parameter_default(
+                wire_name,
+                value,
+                "defaults for x-satay parsed parameters are not supported",
+            ))
+        }
+        ValidatedTypeKind::Array(_) => Err(invalid_parameter_default(
+            wire_name,
+            value,
+            "array parameter defaults are not supported",
+        )),
+        ValidatedTypeKind::Range(_) => Err(invalid_parameter_default(
+            wire_name,
+            value,
+            "range parameter defaults are not supported",
+        )),
+        ValidatedTypeKind::Named(_)
+        | ValidatedTypeKind::Map(_)
+        | ValidatedTypeKind::JsonValue
+        | ValidatedTypeKind::AnyOf(_)
+        | ValidatedTypeKind::InlineStruct(_) => Err(invalid_parameter_default(
+            wire_name,
+            value,
+            "default is not supported for this parameter type",
+        )),
+    }
+}
+
+fn parse_integer_parameter_default(
+    value: &JsonValue,
+    integer_type: IntegerType,
+    wire_name: &str,
+) -> Result<ParameterDefault, ValidationError> {
+    let integer = parameter_default_integer(value)
+        .ok_or_else(|| invalid_parameter_default(wire_name, value, "expected a JSON integer"))?;
+    if integer < integer_type.min_value() || integer > integer_type.max_value() {
+        return Err(invalid_parameter_default(
+            wire_name,
+            value,
+            format!(
+                "value is outside the generated integer range {}..={}",
+                integer_type.min_value(),
+                integer_type.max_value()
+            ),
+        ));
+    }
+    Ok(ParameterDefault::Integer(integer))
+}
+
+fn parse_number_parameter_default(
+    value: &JsonValue,
+    is_f32: bool,
+    wire_name: &str,
+) -> Result<ParameterDefault, ValidationError> {
+    let number = value
+        .as_f64()
+        .filter(|number| number.is_finite())
+        .ok_or_else(|| {
+            invalid_parameter_default(wire_name, value, "expected a finite JSON number")
+        })?;
+    if is_f32 {
+        let number = number as f32;
+        if !number.is_finite() {
+            return Err(invalid_parameter_default(
+                wire_name,
+                value,
+                "value is outside the generated f32 range",
+            ));
+        }
+        Ok(ParameterDefault::F32(number))
+    } else {
+        Ok(ParameterDefault::F64(number))
+    }
+}
+
+fn parse_enum_parameter_default(
+    value: &JsonValue,
+    enum_: &Enum,
+    wire_name: &str,
+) -> Result<ParameterDefault, ValidationError> {
+    let wire_value = value.as_str().ok_or_else(|| {
+        invalid_parameter_default(wire_name, value, "expected a JSON string enum value")
+    })?;
+    let default_empty_variant = variant_ident("");
+    match enum_
+        .variants
+        .iter()
+        .find(|variant| variant.wire_name == wire_value)
+    {
+        Some(variant)
+            if enum_.variants.len() > 1
+                && variant.wire_name.is_empty()
+                && variant.rust_name == default_empty_variant =>
+        {
+            Err(invalid_parameter_default(
+                wire_name,
+                value,
+                "empty enum default cannot be represented by the generated parameter enum",
+            ))
+        }
+        Some(variant) => Ok(ParameterDefault::EnumVariant {
+            wire_value: wire_value.to_owned(),
+            rust_name: variant.rust_name.clone(),
+        }),
+        None if enum_.fallback == EnumFallback::OtherString => {
+            Ok(ParameterDefault::OpenEnum(wire_value.to_owned()))
+        }
+        None => Err(invalid_parameter_default(
+            wire_name,
+            value,
+            "value is not a declared enum variant",
+        )),
+    }
+}
+
+fn parameter_default_integer(value: &JsonValue) -> Option<i128> {
+    value
+        .as_i64()
+        .map(i128::from)
+        .or_else(|| value.as_u64().map(i128::from))
+}
+
+fn validate_parameter_default_constraints(
+    default: &ParameterDefault,
+    validation: Option<&Validation>,
+) -> Result<(), String> {
+    let Some(validation) = validation else {
+        return Ok(());
+    };
+
+    match (default, validation) {
+        (
+            ParameterDefault::String(value)
+            | ParameterDefault::EnumVariant {
+                wire_value: value, ..
+            }
+            | ParameterDefault::OpenEnum(value),
+            Validation::String {
+                min_length,
+                max_length,
+                pattern,
+            },
+        ) => {
+            let length = u64::try_from(value.chars().count()).unwrap_or(u64::MAX);
+            if min_length.is_some_and(|minimum| length < minimum) {
+                return Err(format!("string length {length} is below minLength"));
+            }
+            if max_length.is_some_and(|maximum| length > maximum) {
+                return Err(format!("string length {length} exceeds maxLength"));
+            }
+            if let Some(pattern) = pattern {
+                let regex = Regex::new(pattern)
+                    .map_err(|error| format!("schema pattern is invalid: {error}"))?;
+                if !regex.is_match(value) {
+                    return Err(format!("string does not match pattern `{pattern}`"));
+                }
+            }
+        }
+        (ParameterDefault::Integer(value), Validation::Integer { minimum, maximum }) => {
+            if minimum.is_some_and(|limit| {
+                if limit.exclusive {
+                    *value <= limit.value
+                } else {
+                    *value < limit.value
+                }
+            }) {
+                return Err("integer is below the schema minimum".to_owned());
+            }
+            if maximum.is_some_and(|limit| {
+                if limit.exclusive {
+                    *value >= limit.value
+                } else {
+                    *value > limit.value
+                }
+            }) {
+                return Err("integer exceeds the schema maximum".to_owned());
+            }
+        }
+        (ParameterDefault::F32(value), Validation::Number { minimum, maximum }) => {
+            validate_number_default_constraints(f64::from(*value), *minimum, *maximum, true)?;
+        }
+        (ParameterDefault::F64(value), Validation::Number { minimum, maximum }) => {
+            validate_number_default_constraints(*value, *minimum, *maximum, false)?;
+        }
+        (_, Validation::Array { .. }) => {
+            unreachable!("array parameter defaults are rejected before constraint validation")
+        }
+        _ => unreachable!("validated parameter default constraints must match the parameter type"),
+    }
+
+    Ok(())
+}
+
+fn validate_number_default_constraints(
+    value: f64,
+    minimum: Option<FloatLimit>,
+    maximum: Option<FloatLimit>,
+    is_f32: bool,
+) -> Result<(), String> {
+    let generated_value = |value: f64| {
+        if is_f32 {
+            f64::from(value as f32)
+        } else {
+            value
+        }
+    };
+    let value = generated_value(value);
+
+    if minimum.is_some_and(|limit| {
+        let minimum = generated_value(limit.value);
+        if limit.exclusive {
+            value <= minimum
+        } else {
+            value < minimum
+        }
+    }) {
+        return Err("number is below the schema minimum".to_owned());
+    }
+    if maximum.is_some_and(|limit| {
+        let maximum = generated_value(limit.value);
+        if limit.exclusive {
+            value >= maximum
+        } else {
+            value > maximum
+        }
+    }) {
+        return Err("number exceeds the schema maximum".to_owned());
+    }
+
+    Ok(())
+}
+
+fn invalid_parameter_default(
+    wire_name: &str,
+    value: &JsonValue,
+    reason: impl Into<String>,
+) -> ValidationError {
+    ValidationError::InvalidParameterDefault {
+        wire_name: wire_name.to_owned(),
+        value: value.to_string(),
+        reason: reason.into(),
+    }
 }
 
 fn validate_request_body(
