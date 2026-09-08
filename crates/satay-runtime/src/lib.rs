@@ -11,6 +11,7 @@ pub use serde_json::Value as JsonValue;
 use time::Month;
 use time::format_description::well_known::Rfc3339;
 pub use time::{Date, OffsetDateTime, PrimitiveDateTime, Time};
+pub use url::Url;
 
 use tracing::{debug, instrument};
 
@@ -711,6 +712,7 @@ pub mod serde_string {
         };
     }
 
+    string_from_str_module!(as_url, crate::Url);
     string_from_str_module!(as_u8, u8);
     string_from_str_module!(as_u16, u16);
     string_from_str_module!(as_u32, u32);
@@ -2160,6 +2162,40 @@ mod tests {
 
         let decoded = serde_json::from_value::<Value>(encoded).unwrap();
         assert_eq!(decoded.at, at);
+    }
+
+    #[cfg(all(feature = "serde", feature = "json"))]
+    #[test]
+    fn serde_string_url_round_trips_and_rejects_invalid_values() {
+        #[derive(Debug, serde::Serialize, serde::Deserialize)]
+        struct Links {
+            #[serde(with = "crate::serde_string::as_url")]
+            url: Url,
+            #[serde(default, with = "crate::serde_string::as_url::option")]
+            optional: Option<Url>,
+        }
+
+        let links: Links = serde_json::from_str(
+            r#"{"url":"https://EXAMPLE.com:443/path","optional":"mailto:hello@example.com"}"#,
+        )
+        .unwrap();
+        assert_eq!(links.url.as_str(), "https://example.com/path");
+        assert_eq!(links.optional.as_ref().unwrap().scheme(), "mailto");
+        assert_eq!(
+            serde_json::to_value(&links).unwrap()["url"],
+            "https://example.com/path"
+        );
+        for optional in ["null", "\"/relative\"", "42"] {
+            let json = format!(r#"{{"url":"https://example.com/","optional":{optional}}}"#);
+            let result = serde_json::from_str::<Links>(&json);
+            if optional == "null" {
+                assert!(result.unwrap().optional.is_none());
+            } else {
+                assert!(result.is_err());
+            }
+        }
+        assert!(serde_json::from_str::<Links>(r#"{"url":"/relative"}"#).is_err());
+        assert!(serde_json::from_str::<Links>(r#"{"url":42}"#).is_err());
     }
 
     #[cfg(all(feature = "serde", feature = "json"))]

@@ -8,7 +8,7 @@ use super::super::satay::{
     SatayIdentifier, SatayIntegerTypeWire, SataySchemaOptions, parse_range_scalar,
     parse_satay_enum_variants, satay_parse_as_wire, schema_options, validate_satay_integer_type,
 };
-use super::constraint::parse_integer_type;
+use super::constraint::{parse_integer_type, reject_keyword};
 use super::{NonEmptySentinels, ValidatedFieldDecoding};
 use crate::error::ValidationError;
 use crate::model::{
@@ -252,6 +252,17 @@ fn validate_type_directive(
             parse_integer_type(schema, context, explicit_integer_type)?
         };
         return Ok(ValidatedTypeDirective::Integer(integer_type));
+    }
+
+    if schema_type == Some(OasSchemaType::String) && schema.format.as_deref() == Some("uri") {
+        // URL parsing normalizes the input, so string constraints cannot be
+        // discarded or applied to the normalized URL as an equivalent check.
+        reject_keyword(schema.pattern.is_some(), "pattern", context)?;
+        reject_keyword(schema.min_length.is_some(), "minLength", context)?;
+        reject_keyword(schema.max_length.is_some(), "maxLength", context)?;
+        return Ok(ValidatedTypeDirective::ParsedString(StringCodec::Standard(
+            ParseAs::Url,
+        )));
     }
 
     Ok(ValidatedTypeDirective::AsDeclared)

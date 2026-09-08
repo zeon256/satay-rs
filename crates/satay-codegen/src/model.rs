@@ -326,6 +326,7 @@ pub(crate) enum ParseAs {
     NaiveDateTime,
     OffsetDateTime,
     UnixTime,
+    Url,
     Time,
     IntegerRange,
     NumberRange,
