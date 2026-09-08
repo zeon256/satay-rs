@@ -2719,3 +2719,96 @@ components:
     assert_eq!(api.operations.len(), 1);
     component(&api, "Unused");
 }
+
+#[test]
+fn uri_format_parses_strings_and_preserves_explicit_overrides() {
+    let api = parse_valid(
+        r#"
+openapi: 3.1.0
+info:
+  title: URL formats
+  version: 1.0.0
+paths: {}
+components:
+  schemas:
+    Record:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+        reference:
+          type: string
+          format: uri-reference
+        plain:
+          type: string
+        override:
+          type: string
+          format: uri
+          x-satay:
+            parse-as: u32
+        flag:
+          type: boolean
+          format: uri
+"#,
+    );
+    let ComponentKind::Struct(fields) = &component(&api, "Record").kind else {
+        panic!("expected Record struct");
+    };
+    assert_eq!(
+        field(fields, "url").ty,
+        TypeRef::ParsedString(StringCodec::Standard(ParseAs::Url))
+    );
+    assert_eq!(field(fields, "reference").ty, TypeRef::String);
+    assert_eq!(field(fields, "plain").ty, TypeRef::String);
+    assert_eq!(
+        field(fields, "override").ty,
+        TypeRef::ParsedString(StringCodec::Standard(ParseAs::U32))
+    );
+    assert_eq!(field(fields, "flag").ty, TypeRef::Bool);
+}
+
+#[test]
+fn rejects_string_constraints_on_uri_conversion() {
+    for (keyword, value) in [
+        ("pattern", "'^https://'"),
+        ("minLength", "0"),
+        ("maxLength", "32"),
+    ] {
+        for (schema, context) in [
+            (
+                format!(
+                    "    Link:\n      type: string\n      format: uri\n      {keyword}: {value}\n"
+                ),
+                "schema `Link`",
+            ),
+            (
+                format!(
+                    "    Record:\n      type: object\n      properties:\n        link:\n          type: [string, 'null']\n          format: uri\n          {keyword}: {value}\n"
+                ),
+                "property `Record.link`",
+            ),
+            (
+                format!(
+                    "    Links:\n      type: array\n      items:\n        type: string\n        format: uri\n        {keyword}: {value}\n"
+                ),
+                "schema `Links` items",
+            ),
+            (
+                format!(
+                    "    Links:\n      type: object\n      additionalProperties:\n        type: string\n        format: uri\n        {keyword}: {value}\n"
+                ),
+                "schema `Links` additionalProperties",
+            ),
+        ] {
+            let err = parse_invalid(&format!(
+                "openapi: 3.1.0\ninfo:\n  title: Constrained URLs\n  version: 1.0.0\npaths: {{}}\ncomponents:\n  schemas:\n{schema}"
+            ));
+            assert!(matches!(
+                err,
+                ValidationError::UnsupportedKeyword { context: actual_context, keyword: actual_keyword }
+                    if actual_context == context && actual_keyword == keyword
+            ));
+        }
+    }
+}

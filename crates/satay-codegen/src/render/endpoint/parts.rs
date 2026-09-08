@@ -331,6 +331,7 @@ fn parsed_string_value_expr(
 fn parsed_value_expr(base: syn::Expr, parse_as: ParseAs, base_kind: ValueBase) -> syn::Expr {
     let ref_arg = ref_arg(base.clone(), base_kind);
     match parse_as {
+        ParseAs::Url => parse_quote!(#base.as_str()),
         ParseAs::Date => parse_quote!(&satay_runtime::format_date(#ref_arg)),
         ParseAs::NaiveDateTime => {
             parse_quote!(&satay_runtime::format_naive_datetime(#ref_arg))

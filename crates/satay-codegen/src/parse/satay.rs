@@ -319,6 +319,7 @@ pub(super) fn satay_parse_as_wire(parse_as: ParseAs) -> &'static str {
         ParseAs::F32 => "f32",
         ParseAs::F64 => "f64",
         ParseAs::Bool => "bool",
+        ParseAs::Url => "url",
         ParseAs::Date => "date",
         ParseAs::NaiveDateTime => "naive-datetime",
         ParseAs::OffsetDateTime => "offset-datetime",

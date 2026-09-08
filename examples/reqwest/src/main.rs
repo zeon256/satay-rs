@@ -20,6 +20,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     match response {
         GetBusArrivalResponse::Ok(arrival) => {
+            println!("Metadata host: {:?}", arrival.odata_metadata.host_str());
             println!("{arrival:?}");
         }
         GetBusArrivalResponse::UnexpectedStatus(status, body) => {
@@ -68,6 +69,11 @@ mod tests {
         let GetBusArrivalResponse::Ok(arrival) = response else {
             panic!("expected 200 OK bus arrival response");
         };
+        assert_eq!(
+            arrival.odata_metadata.host_str(),
+            Some("datamall2.mytransport.sg")
+        );
+        assert_eq!(arrival.odata_metadata.scheme(), "https");
         assert_eq!(arrival.bus_stop_code, 83139);
         assert!(arrival.services.is_empty());
 

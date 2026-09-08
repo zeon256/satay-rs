@@ -11,3 +11,7 @@ LTA_ACCOUNT_KEY=your-key cargo run -- 83139 15
 ```
 
 Arguments are optional. The first argument is `BusStopCode`, and the second is `ServiceNo`.
+
+String schemas with `format: uri` become `satay_runtime::Url`. The `odata.metadata` field in this example is parsed automatically, so `arrival.odata_metadata.host_str()` returns the metadata host. Invalid or relative URLs fail deserialization; absolute URLs such as HTTPS and `mailto:` are supported. Serialization uses the URL crate's normalized representation.
+
+URI-to-URL conversion rejects schemas containing `pattern`, `minLength`, or `maxLength` during code generation because preserving those string constraints is not yet supported.

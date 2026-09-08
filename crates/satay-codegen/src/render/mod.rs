@@ -286,6 +286,7 @@ pub fn parse_as_rust_type(parse_as: ParseAs) -> syn::Type {
         ParseAs::F32 => parse_quote!(f32),
         ParseAs::F64 => parse_quote!(f64),
         ParseAs::Bool => parse_quote!(bool),
+        ParseAs::Url => parse_quote!(satay_runtime::Url),
         ParseAs::Date => parse_quote!(satay_runtime::Date),
         ParseAs::NaiveDateTime => parse_quote!(satay_runtime::PrimitiveDateTime),
         ParseAs::OffsetDateTime => parse_quote!(satay_runtime::OffsetDateTime),
@@ -312,6 +313,7 @@ pub fn parse_as_string_serde_leaf(parse_as: ParseAs) -> &'static str {
         ParseAs::F32 => "as_f32",
         ParseAs::F64 => "as_f64",
         ParseAs::Bool => "as_bool",
+        ParseAs::Url => "as_url",
         ParseAs::Date => "as_date",
         ParseAs::NaiveDateTime => "as_naive_datetime",
         ParseAs::OffsetDateTime => "as_offset_datetime",
@@ -339,6 +341,7 @@ pub fn parse_as_integer_serde_leaf(parse_as: ParseAs) -> &'static str {
         | ParseAs::I64
         | ParseAs::F32
         | ParseAs::F64
+        | ParseAs::Url
         | ParseAs::Date
         | ParseAs::NaiveDateTime
         | ParseAs::OffsetDateTime
