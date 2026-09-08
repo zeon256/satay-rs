@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.4](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.16.3...satay-codegen-v0.16.4) - 2026-09-08
+
+### Added
+
+- *(codegen,runtime)* add uri support
+
 ## [0.16.3](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.16.2...satay-codegen-v0.16.3) - 2026-08-25
 
 ### Added
