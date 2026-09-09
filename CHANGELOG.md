@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.16.4...satay-codegen-v0.17.0) - 2026-09-09
+
+### Added
+
+- *(codegen,runtime)* [**breaking**] add generic string storage and buffered responses
+
 ### Changed
 
 - **Breaking:** actions expose `RequestBody` and `Response<'de>` associated types; `send_with()` requires the new `OwnedAction` contract and continues to return an owned decoded response. Generated actions implement both contracts.
