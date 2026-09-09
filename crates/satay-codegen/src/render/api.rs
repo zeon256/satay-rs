@@ -48,6 +48,7 @@ pub(super) fn render_api_file(api: &Api, root_module: RootModule) -> syn::File {
         items.push(Item::Struct(render_action_struct(operation)));
         items.push(Item::Impl(render_action_impl(operation)));
         items.push(Item::Impl(render_action_trait_impl(operation)));
+        items.push(Item::Impl(render_owned_action_trait_impl(operation)));
     }
 
     syn::File {
@@ -314,15 +315,33 @@ fn render_action_trait_impl(operation: &Operation) -> syn::ItemImpl {
 
     parse_quote!(
         impl satay_runtime::Action for #action<'_> {
-            type Response = #response;
+            type RequestBody = Vec<u8>;
+            type Response<'de> = #response;
 
             fn request(self) -> Result<http::Request<Vec<u8>>, satay_runtime::Error> {
                 self.request()
             }
 
-            fn decode<B: AsRef<[u8]>>(
-                response: satay_runtime::ResponseParts<B>,
-            ) -> Result<Self::Response, satay_runtime::Error> {
+            fn decode(
+                response: satay_runtime::ResponseParts<&[u8]>,
+            ) -> Result<Self::Response<'_>, satay_runtime::Error> {
+                Self::decode(response)
+            }
+        }
+    )
+}
+
+fn render_owned_action_trait_impl(operation: &Operation) -> syn::ItemImpl {
+    let action = action_ident(operation);
+    let response = super::ident(&operation.response_name);
+
+    parse_quote!(
+        impl satay_runtime::OwnedAction for #action<'_> {
+            type OwnedResponse = #response;
+
+            fn decode_owned(
+                response: satay_runtime::ResponseParts<&[u8]>,
+            ) -> Result<Self::OwnedResponse, satay_runtime::Error> {
                 Self::decode(response)
             }
         }
@@ -355,8 +374,8 @@ fn render_action_impl(operation: &Operation) -> syn::ItemImpl {
                 #request_expr
             }
 
-            pub fn decode<B: AsRef<[u8]>>(
-                response: satay_runtime::ResponseParts<B>,
+            pub fn decode(
+                response: satay_runtime::ResponseParts<&[u8]>,
             ) -> Result<#response, satay_runtime::Error> {
                 #decode_fn(response)
             }

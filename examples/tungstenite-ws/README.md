@@ -13,7 +13,7 @@ The local WebSocket server returns a canned JSON response so the example does no
   should ideally end up with.
 - `src/transport.rs`: the client-side WebSocket transport adapter. It turns a
   Satay action into a request, sends it over WebSocket, receives a response, and
-  asks Satay to decode it.
+  uses `OwnedAction` to return an owned decoded model.
 - `src/wire.rs`: the request/response envelope shared by both sides. This is not
   a Satay type; it is the example protocol used to carry HTTP-shaped data over a
   WebSocket message.
@@ -28,11 +28,12 @@ Sans-IO boundary:
 
 ```rust
 let request: http::Request<Vec<u8>> = action.request()?;
-let decoded = ActionType::decode(satay_runtime::ResponseParts {
+let parts = satay_runtime::ResponseParts {
     status,
     headers,
     body,
-})?;
+};
+let decoded = ActionType::decode(parts.as_bytes())?;
 ```
 
 That means the transport only needs to preserve the parts Satay cares about:

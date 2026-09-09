@@ -23,7 +23,7 @@ mod tests {
     #[test]
     fn constructs_request_parts_without_io() {
         let parts = operations::get_user::get_user_parts(
-            GetUserInput::new("user/42").include_details(true),
+            GetUserInput::<String>::new("user/42").include_details(true),
         )
         .expect("request parts");
 
@@ -50,7 +50,7 @@ mod tests {
     #[test]
     fn encodes_json_request_body() {
         let request = operations::update_user::encode_update_user(
-            UpdateUserInput::new("42")
+            UpdateUserInput::<String>::new("42")
             .notify(false)
             .body(UpdateUserRequest {
                 age: None,
@@ -69,7 +69,7 @@ mod tests {
         let body: serde_json::Value = serde_json::from_slice(request.body()).unwrap();
         assert_eq!(body, serde_json::json!({ "name": "Ada" }));
 
-        let empty_request = operations::update_user::encode_update_user(UpdateUserInput::new("42"))
+        let empty_request = operations::update_user::encode_update_user(UpdateUserInput::<String>::new("42"))
         .expect("encoded request without body");
         assert_eq!(empty_request.uri(), "/users/42");
         assert!(empty_request
@@ -86,7 +86,7 @@ mod tests {
             headers: http::HeaderMap::new(),
             body: br#"{"id":"42","name":"Ada","status":"active","age":36,"tags":["admin"]}"#.to_vec(),
         };
-        let decoded = operations::get_user::GetUserAction::decode(response)
+        let decoded = operations::get_user::GetUserAction::<String>::decode(response.as_bytes())
             .expect("decoded response");
 
         match decoded {
@@ -108,7 +108,7 @@ mod tests {
             headers: http::HeaderMap::new(),
             body: b"server exploded".to_vec(),
         };
-        let decoded = operations::get_user::decode_get_user_response(response)
+        let decoded: GetUserResponse = operations::get_user::decode_get_user_response(response.as_bytes())
             .expect("decoded response");
 
         match decoded {
@@ -208,7 +208,7 @@ mod tests {
             headers: http::HeaderMap::new(),
             body: br#"{"value":42}"#.to_vec(),
         };
-        let decoded = PsiAction::decode(response).expect("decoded response");
+        let decoded = PsiAction::<String>::decode(response.as_bytes()).expect("decoded response");
 
         assert_eq!(decoded, PsiOperationResponse::Ok(PsiResponse { value: 42 }));
     }
@@ -323,7 +323,7 @@ mod tests {
             body: br#"{"id":"42","name":"Ada","nickname":null,"age":36,"score":0.5}"#.to_vec(),
         };
 
-        let decoded = operations::get_user::decode_get_user_response(response)
+        let decoded: GetUserResponse = operations::get_user::decode_get_user_response(response.as_bytes())
             .expect("nullable nickname accepted");
         match decoded {
             GetUserResponse::Ok(user) => assert!(user.nickname.is_none()),
@@ -338,7 +338,7 @@ mod tests {
             body: br#"{"id":"42","name":"Ada","nickname":null,"age":131,"score":0.5}"#.to_vec(),
         };
 
-        let err = operations::get_user::decode_get_user_response(response)
+        let err = operations::get_user::decode_get_user_response(response.as_bytes())
             .expect_err("invalid age rejected");
         assert!(err.to_string().contains("JSON error"));
     }

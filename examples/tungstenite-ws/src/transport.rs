@@ -59,14 +59,15 @@ pub(crate) trait TungsteniteActionExt: satay_runtime::Action + Sized {
     fn send_over_ws<'a>(
         self,
         transport: &'a mut TungsteniteTransport,
-    ) -> impl future::Future<Output = Result<Self::Response, Error>> + 'a
+    ) -> impl future::Future<Output = Result<Self::OwnedResponse, Error>> + 'a
     where
-        Self: 'a,
+        Self: satay_runtime::OwnedAction + 'a,
+        Self::RequestBody: Into<Vec<u8>>,
     {
         async move {
-            let request = self.request()?;
+            let request = self.request()?.map(Into::into);
             let response = transport.round_trip(request).await?;
-            Ok(Self::decode(response)?)
+            Ok(satay_runtime::BufferedResponse::<Self, _>::new(response).decode_owned()?)
         }
     }
 }

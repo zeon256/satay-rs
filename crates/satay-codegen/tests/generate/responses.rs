@@ -134,9 +134,9 @@ fn wildcard_range_generates_status_carrying_variant_after_exact_arms() {
     let response = find_enum(&parts, "GetUserResponse");
     assert_eq!(
         norm(&variant(response, "ClientError").fields),
-        norm_str("(http::StatusCode, ErrorResponse)")
+        norm_str("(http::StatusCode, ErrorResponse<S>)")
     );
-    assert_eq!(norm(&variant(response, "Ok").fields), norm_str("(User)"));
+    assert_eq!(norm(&variant(response, "Ok").fields), norm_str("(User<S>)"));
     assert!(matches!(variant(response, "NotFound").fields, Fields::Unit));
 
     // Exact-status arms must precede the covering range arm so 404 shadows
@@ -174,7 +174,7 @@ mod tests {
             headers: http::HeaderMap::new(),
             body: br#"{"message":"slow down"}"#.to_vec(),
         };
-        let decoded = operations::get_user::decode_get_user_response(response)
+        let decoded: GetUserResponse = operations::get_user::decode_get_user_response(response.as_bytes())
             .expect("decoded response");
 
         match decoded {
@@ -193,7 +193,7 @@ mod tests {
             headers: http::HeaderMap::new(),
             body: Vec::new(),
         };
-        let decoded = operations::get_user::decode_get_user_response(response)
+        let decoded: GetUserResponse = operations::get_user::decode_get_user_response(response.as_bytes())
             .expect("decoded response");
 
         assert!(matches!(decoded, GetUserResponse::NotFound));
@@ -206,7 +206,7 @@ mod tests {
             headers: http::HeaderMap::new(),
             body: b"boom".to_vec(),
         };
-        let decoded = operations::get_user::decode_get_user_response(response)
+        let decoded: GetUserResponse = operations::get_user::decode_get_user_response(response.as_bytes())
             .expect("decoded response");
 
         match decoded {
@@ -237,13 +237,13 @@ fn response_projection_generates_public_payload_types_and_projected_decoders() {
     let services_response = find_enum(&services_parts, "GetServicesResponse");
     assert_eq!(
         norm(&variant(services_response, "Ok").fields),
-        norm_str("(Vec<Service>)")
+        norm_str("(Vec<Service<S>>)")
     );
     let services_json = parse_rust(find_file(&files, "get_services/json.rs"));
     let services_decode = norm(find_fn(&services_json, "decode_get_services_response"));
     assert!(
         services_decode.contains(&norm_str(
-            "satay_runtime::from_projected_json_slice::<Vec<Service>,>(body.as_ref(), \"value\", None)?"
+            "satay_runtime::from_projected_json_slice::<Vec<Service<S>>,>(body, \"value\", None)?"
         )),
         "{services_decode}"
     );
@@ -252,12 +252,12 @@ fn response_projection_generates_public_payload_types_and_projected_decoders() {
     let links_response = find_enum(&links_parts, "GetLinksResponse");
     assert_eq!(
         norm(&variant(links_response, "Ok").fields),
-        norm_str("(Vec<String>)")
+        norm_str("(Vec<S>)")
     );
     let links_json = parse_rust(find_file(&files, "get_links/json.rs"));
     let links_decode = norm(find_fn(&links_json, "decode_get_links_response"));
     assert!(links_decode.contains(&norm_str(
-        "satay_runtime::from_projected_json_slice::<Vec<String>,>(body.as_ref(), \"value\", Some(\"Link\"))?"
+        "satay_runtime::from_projected_json_slice::<Vec<S>,>(body, \"value\", Some(\"Link\"))?"
     )));
 }
 
@@ -289,7 +289,7 @@ mod tests {
                 ]
             }"#.to_vec(),
         };
-        let decoded = operations::get_services::decode_get_services_response(response)
+        let decoded: GetServicesResponse = operations::get_services::decode_get_services_response(response.as_bytes())
             .expect("projected services");
 
         match decoded {
@@ -314,7 +314,7 @@ mod tests {
                 ]
             }"#.to_vec(),
         };
-        let decoded = operations::get_links::decode_get_links_response(response)
+        let decoded: GetLinksResponse = operations::get_links::decode_get_links_response(response.as_bytes())
             .expect("projected links");
 
         match decoded {

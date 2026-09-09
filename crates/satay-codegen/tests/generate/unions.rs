@@ -95,10 +95,10 @@ components:
     assert_attr_contains(&union.attrs, "cfg_attr", "serde(untagged)");
 
     assert_eq!(variant_names(union), ["User", "Organization"]);
-    assert_eq!(norm(&variant(union, "User").fields), norm_str("(User)"));
+    assert_eq!(norm(&variant(union, "User").fields), norm_str("(User<S>)"));
     assert_eq!(
         norm(&variant(union, "Organization").fields),
-        norm_str("(Organization)")
+        norm_str("(Organization<S>)")
     );
 }
 
@@ -375,18 +375,15 @@ fn one_of_generates_nullable_inline_primitive_union_branch() {
 
     let types_rs = parse_rust(find_file(&files, "types.rs"));
     let message = find_struct(&types_rs, "Message");
-    assert_field(message, "content", "Option<MessageContent>");
+    assert_field(message, "content", "Option<MessageContent<S>>");
 
     let content = find_enum(&types_rs, "MessageContent");
     assert_attr_contains(&content.attrs, "cfg_attr", "serde(untagged)");
     assert_eq!(variant_names(content), ["String", "Array"]);
-    assert_eq!(
-        norm(&variant(content, "String").fields),
-        norm_str("(String)")
-    );
+    assert_eq!(norm(&variant(content, "String").fields), norm_str("(S)"));
     assert_eq!(
         norm(&variant(content, "Array").fields),
-        norm_str("(Vec<ContentPart>)")
+        norm_str("(Vec<ContentPart<S>>)")
     );
 }
 
@@ -732,7 +729,7 @@ mod tests {
             body: br#"{"id":"1","slug":"specific"}"#.to_vec(),
         };
 
-        let decoded = operations::get_entity::decode_get_entity_response(response)
+        let decoded: GetEntityResponse = operations::get_entity::decode_get_entity_response(response.as_bytes())
             .expect("decoded response");
         match decoded {
             GetEntityResponse::Ok(Entity::Loose(value)) => {
@@ -837,7 +834,7 @@ mod tests {
             body: br#"{"tools":[{"type":"function","function":"lookup"}]}"#.to_vec(),
         };
 
-        let decoded = operations::get_assistant::decode_get_assistant_response(response)
+        let decoded: GetAssistantResponse = operations::get_assistant::decode_get_assistant_response(response.as_bytes())
             .expect("decoded response");
         match decoded {
             GetAssistantResponse::Ok(value) => match &value.tools[0] {
@@ -912,7 +909,7 @@ mod tests {
 
     #[test]
     fn absent_optional_content_serializes_as_absent() {
-        let value = Message { content: None };
+        let value: Message = Message { content: None };
         let encoded = serde_json::to_value(value).expect("serialized message");
 
         assert_eq!(encoded, serde_json::json!({}));
@@ -1012,7 +1009,7 @@ mod tests {
             body: br#""auto""#.to_vec(),
         };
 
-        let decoded = operations::get_format::decode_get_format_response(response)
+        let decoded: GetFormatResponse = operations::get_format::decode_get_format_response(response.as_bytes())
             .expect("decoded response");
         match decoded {
             GetFormatResponse::Ok(AssistantsApiResponseFormatOption::Auto(value)) => {
@@ -1030,7 +1027,7 @@ mod tests {
             body: br#"{"type":"json_object"}"#.to_vec(),
         };
 
-        let decoded = operations::get_format::decode_get_format_response(response)
+        let decoded: GetFormatResponse = operations::get_format::decode_get_format_response(response.as_bytes())
             .expect("decoded response");
         match decoded {
             GetFormatResponse::Ok(AssistantsApiResponseFormatOption::ResponseFormatJsonObject(value)) => {
@@ -1134,7 +1131,7 @@ mod tests {
             body: br#""auto""#.to_vec(),
         };
 
-        let decoded = operations::get_tool_choice::decode_get_tool_choice_response(response)
+        let decoded: GetToolChoiceResponse = operations::get_tool_choice::decode_get_tool_choice_response(response.as_bytes())
             .expect("decoded response");
         match decoded {
             GetToolChoiceResponse::Ok(AssistantsApiToolChoiceOption::Enum(value)) => {
@@ -1152,7 +1149,7 @@ mod tests {
             body: br#"{"type":"function","function":{"name":"my_function"}}"#.to_vec(),
         };
 
-        let decoded = operations::get_tool_choice::decode_get_tool_choice_response(response)
+        let decoded: GetToolChoiceResponse = operations::get_tool_choice::decode_get_tool_choice_response(response.as_bytes())
             .expect("decoded response");
         match decoded {
             GetToolChoiceResponse::Ok(
@@ -1170,7 +1167,7 @@ mod tests {
 
     #[test]
     fn one_of_inline_multi_value_serializes_string_branch() {
-        let value = AssistantsApiToolChoiceOption::Enum(
+        let value: AssistantsApiToolChoiceOption = AssistantsApiToolChoiceOption::Enum(
             AssistantsApiToolChoiceOptionEnum::Required,
         );
         let encoded = serde_json::to_value(value).expect("serialized tool choice");
@@ -1264,7 +1261,7 @@ mod tests {
             body: br#"{"kind":"cat","name":"Milo","lives":9}"#.to_vec(),
         };
 
-        let decoded = operations::get_pet::decode_get_pet_response(response)
+        let decoded: GetPetResponse = operations::get_pet::decode_get_pet_response(response.as_bytes())
             .expect("decoded response");
         match decoded {
             GetPetResponse::Ok(Pet::Cat(value)) => {
@@ -1389,7 +1386,7 @@ mod tests {
             body: br#"{"id":"call_1","type":"custom","custom":"payload"}"#.to_vec(),
         };
 
-        let decoded = operations::get_tool::decode_get_tool_response(response)
+        let decoded: GetToolResponse = operations::get_tool::decode_get_tool_response(response.as_bytes())
             .expect("decoded response");
         match decoded {
             GetToolResponse::Ok(ToolCall::CustomToolCall(value)) => {
@@ -1513,7 +1510,7 @@ mod tests {
             body: br#"{"id":"call_1","type":"custom","custom":"payload"}"#.to_vec(),
         };
 
-        let decoded = operations::get_tool::decode_get_tool_response(response)
+        let decoded: GetToolResponse = operations::get_tool::decode_get_tool_response(response.as_bytes())
             .expect("decoded response");
         match decoded {
             GetToolResponse::Ok(ToolCall::CustomToolCall(value)) => {

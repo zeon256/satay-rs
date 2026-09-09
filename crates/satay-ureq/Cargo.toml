@@ -10,6 +10,7 @@ documentation = "https://docs.rs/satay-ureq"
 rust-version.workspace = true
 
 [dependencies]
+http.workspace = true
 satay-runtime.workspace = true
 ureq = "3"
 thiserror.workspace = true

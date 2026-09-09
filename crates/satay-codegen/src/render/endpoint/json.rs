@@ -29,15 +29,15 @@ pub(super) fn render_decode_function(operation: &Operation) -> syn::ItemFn {
         .collect::<Vec<_>>();
 
     parse_quote!(
-        pub fn #decode_fn<B: AsRef<[u8]>>(
-            response: satay_runtime::ResponseParts<B>,
+        pub fn #decode_fn(
+            response: satay_runtime::ResponseParts<&[u8]>,
         ) -> Result<#response_name, satay_runtime::Error> {
             let status = response.status;
             match status.as_u16() {
                 #(#arms)*
                 _ => {
                     let body = response.body;
-                    Ok(#response_name::UnexpectedStatus(status, body.as_ref().to_vec()))
+                    Ok(#response_name::UnexpectedStatus(status, body.to_vec()))
                 }
             }
         }
@@ -97,7 +97,7 @@ fn render_decode_arm(response: &ResponseCase, response_name: &syn::Ident) -> syn
 
 fn render_decode_body(response: &ResponseCase, body: &syn::Type) -> syn::Expr {
     let Some(projection) = response.projection.as_ref() else {
-        return parse_quote!(satay_runtime::from_json_slice::<#body>(body.as_ref())?);
+        return parse_quote!(satay_runtime::from_json_slice::<#body>(body)?);
     };
 
     let unwrap_field = &projection.unwrap_field;
@@ -107,7 +107,7 @@ fn render_decode_body(response: &ResponseCase, body: &syn::Type) -> syn::Expr {
     };
     parse_quote!(
         satay_runtime::from_projected_json_slice::<#body>(
-            body.as_ref(),
+            body,
             #unwrap_field,
             #map_field,
         )?

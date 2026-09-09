@@ -305,7 +305,7 @@ mod tests {
             body: br#"{"id":"42","value":"1.25","count":"7","monitored":0,"seenAt":"2024-08-14T16:41:48+08:00","startsAt":"0620","noServiceAt":"","aliasId":"42","frequency":"14-17","tolerance":"1.5-2.75"}"#
                 .to_vec(),
         };
-        let decoded = operations::get_reading::decode_get_reading_response(response)
+        let decoded: GetReadingResponse = operations::get_reading::decode_get_reading_response(response.as_bytes())
             .expect("decoded response");
 
         match decoded {

@@ -18,9 +18,11 @@ quote.workspace = true
 regex.workspace = true
 serde = { workspace = true }
 serde_json.workspace = true
-syn.workspace = true
+syn = { workspace = true, features = ["visit-mut"] }
 thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+# Pre-fetch the dependency used by generated crates before their offline resolution.
+compact_str = { version = "0.9", features = ["serde"] }
 tempfile.workspace = true

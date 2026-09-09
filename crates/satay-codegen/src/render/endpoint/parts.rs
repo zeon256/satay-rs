@@ -261,7 +261,7 @@ fn array_values_expr(base: syn::Expr, ty: &TypeRef, base_kind: ArrayValueBase) -
 
 fn value_expr(base: syn::Expr, ty: &TypeRef, base_kind: ValueBase) -> syn::Expr {
     match ty.non_option() {
-        TypeRef::String => parse_quote!(#base.as_str()),
+        TypeRef::String => parse_quote!(AsRef::<str>::as_ref(&#base)),
         TypeRef::ParsedString(codec) => parsed_string_value_expr(base, codec, base_kind),
         TypeRef::ParsedInteger(parse_as) => parsed_value_expr(base, *parse_as, base_kind),
         TypeRef::Named(_) => parse_quote!(#base.as_ref()),

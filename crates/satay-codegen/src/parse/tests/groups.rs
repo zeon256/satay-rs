@@ -86,6 +86,7 @@ info:
 tags:
   - name: api
   - name: base-url
+  - name: string-storage
   - name: get-user
   - name: bus-service
   - name: bus_service
@@ -93,7 +94,7 @@ paths:
   /user:
     get:
       operationId: getUser
-      tags: [api, base-url, get-user, bus-service, bus_service]
+      tags: [api, base-url, string-storage, get-user, bus-service, bus_service]
       responses:
         '204':
           description: No content
@@ -114,6 +115,7 @@ paths:
         [
             "api_2",
             "base_url_2",
+            "string_storage_2",
             "get_user_2",
             "bus_service",
             "bus_service_2",

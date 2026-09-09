@@ -101,9 +101,9 @@ fn render_open_enum_serialize_impl(name: &syn::Ident) -> syn::Item {
     syn::parse_quote!(
         #[cfg(feature = "serde")]
         impl serde::Serialize for #name {
-            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+            fn serialize<Serializer>(&self, serializer: Serializer) -> Result<Serializer::Ok, Serializer::Error>
             where
-                S: serde::Serializer,
+                Serializer: serde::Serializer,
             {
                 serializer.serialize_str(self.as_str())
             }

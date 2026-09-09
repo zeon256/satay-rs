@@ -40,12 +40,12 @@ fn property_identifiers_render_with_rust_casing_and_wire_renames() {
     }
 
     assert_field(bus_stop, "bus_stop_code", "u32");
-    assert_field(bus_stop, "road_name", "String");
-    assert_field(bus_stop, "desc", "String");
+    assert_field(bus_stop, "road_name", "S");
+    assert_field(bus_stop, "desc", "S");
     assert_field(bus_stop, "lat", "f64");
     assert_field(bus_stop, "long", "f64");
-    assert_field(bus_stop, "request_id", "String");
-    assert_field(bus_stop, "r#type", "String");
+    assert_field(bus_stop, "request_id", "S");
+    assert_field(bus_stop, "r#type", "S");
 }
 
 #[test]

@@ -5,6 +5,7 @@ use tracing::info;
 
 use crate::ident::type_ident;
 use crate::model::{Api, Field, IntegerType, Operation, ParseAs, RangeScalar, TypeRef};
+use crate::render::storage::StorageGenerics;
 use crate::{GenerateOptions, RootModule};
 
 const PREAMBLE: &str = "\
@@ -33,6 +34,7 @@ pub(crate) fn render_api(api: &Api, options: GenerateOptions) -> Vec<GeneratedFi
         "rendering API"
     );
     let mut files = vec![];
+    let storage = StorageGenerics::new(api);
 
     let root_module = match options.root_module {
         RootModule::ModRs => "mod.rs",
@@ -48,21 +50,21 @@ pub(crate) fn render_api(api: &Api, options: GenerateOptions) -> Vec<GeneratedFi
         let types_file = types::render_types_file(api);
         files.push(GeneratedFile {
             relative_path: "types.rs".to_owned(),
-            contents: format_file(types_file),
+            contents: format_file(storage.apply(types_file)),
         });
     }
 
     let api_file = api::render_api_file(api, options.root_module);
     files.push(GeneratedFile {
         relative_path: "api.rs".to_owned(),
-        contents: format_file(api_file),
+        contents: format_file(storage.apply(api_file)),
     });
 
     for group in &api.groups {
         let group_file = group::render_group_file(api, group);
         files.push(GeneratedFile {
             relative_path: format!("{}.rs", group.rust_name),
-            contents: format_file(group_file),
+            contents: format_file(storage.apply(group_file)),
         });
     }
 
@@ -77,13 +79,13 @@ pub(crate) fn render_api(api: &Api, options: GenerateOptions) -> Vec<GeneratedFi
         let parts_file = endpoint::render_endpoint_parts_file(api, operation);
         files.push(GeneratedFile {
             relative_path: format!("{dir}/parts.rs"),
-            contents: format_file(parts_file),
+            contents: format_file(storage.apply(parts_file)),
         });
 
         let json_file = endpoint::render_endpoint_json_file(api, operation);
         files.push(GeneratedFile {
             relative_path: format!("{dir}/json.rs"),
-            contents: format_file(json_file),
+            contents: format_file(storage.apply(json_file)),
         });
     }
 
@@ -431,6 +433,7 @@ pub fn input_field(field: &str) -> syn::Expr {
 mod api;
 mod endpoint;
 mod group;
+mod storage;
 mod types;
 
 #[cfg(test)]

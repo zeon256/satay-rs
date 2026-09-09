@@ -1,7 +1,10 @@
 #![forbid(unsafe_code)]
 
-use std::fmt;
 use std::str::FromStr;
+use std::{
+    fmt::{self, Debug, Formatter},
+    marker,
+};
 
 use http::header::{self, CONTENT_TYPE, HeaderName, HeaderValue};
 #[cfg(feature = "json")]
@@ -14,6 +17,14 @@ pub use time::{Date, OffsetDateTime, PrimitiveDateTime, Time};
 pub use url::Url;
 
 use tracing::{debug, instrument};
+
+/// Operations required of dynamic strings in generated models and builders.
+///
+/// Serde bounds are applied separately by generated codecs. Implemented
+/// automatically for compatible containers, including `String` and `Box<str>`.
+pub trait StringStorage: AsRef<str> + From<String> + Clone + Debug + Eq + Ord {}
+
+impl<T> StringStorage for T where T: AsRef<str> + From<String> + Clone + Debug + Eq + Ord {}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestParts<B> {
@@ -28,6 +39,80 @@ pub struct ResponseParts<B> {
     pub status: http::StatusCode,
     pub headers: http::HeaderMap,
     pub body: B,
+}
+
+impl<B: AsRef<[u8]>> ResponseParts<B> {
+    /// Borrows the body while retaining owned HTTP metadata in the returned parts.
+    pub fn as_bytes(&self) -> ResponseParts<&[u8]> {
+        ResponseParts {
+            status: self.status,
+            headers: self.headers.clone(),
+            body: self.body.as_ref(),
+        }
+    }
+}
+
+/// A transport-owned response whose decoded model may borrow its body.
+pub struct BufferedResponse<A, B> {
+    parts: ResponseParts<B>,
+    action: marker::PhantomData<fn() -> A>,
+}
+
+impl<A, B: Debug> Debug for BufferedResponse<A, B> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BufferedResponse")
+            .field("parts", &self.parts)
+            .finish()
+    }
+}
+
+impl<A, B> BufferedResponse<A, B> {
+    /// Associates transport response parts with their action's decoder.
+    pub fn new(parts: ResponseParts<B>) -> Self {
+        Self {
+            parts,
+            action: marker::PhantomData,
+        }
+    }
+
+    /// Inspects the status, headers, and original body container.
+    pub fn parts(&self) -> &ResponseParts<B> {
+        &self.parts
+    }
+
+    /// Recovers the original transport response without decoding.
+    pub fn into_parts(self) -> ResponseParts<B> {
+        self.parts
+    }
+}
+
+impl<A: Action, B: AsRef<[u8]>> BufferedResponse<A, B> {
+    /// Decodes a model borrowing this response, if supported by the action.
+    ///
+    /// # Errors
+    /// Returns the action's decoding error for invalid response data.
+    pub fn decode(&self) -> Result<A::Response<'_>, Error> {
+        A::decode(self.parts.as_bytes())
+    }
+}
+
+impl<A: OwnedAction, B: AsRef<[u8]>> BufferedResponse<A, B> {
+    /// Decodes an owned response and releases the transport buffer.
+    ///
+    /// # Errors
+    /// Returns the action's decoding error for invalid response data.
+    pub fn decode_owned(self) -> Result<A::OwnedResponse, Error> {
+        let ResponseParts {
+            status,
+            headers,
+            body,
+        } = self.parts;
+        A::decode_owned(ResponseParts {
+            status,
+            headers,
+            body: body.as_ref(),
+        })
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -86,21 +171,39 @@ pub enum ParseNaiveDateTimeError {
 }
 
 pub trait Action {
-    type Response;
+    /// Container produced when encoding the request.
+    type RequestBody;
+    /// Decoded response, potentially borrowing the supplied body.
+    type Response<'de>;
 
     /// Builds the HTTP request for this action.
     ///
     /// # Errors
     ///
     /// Returns an error if request construction or required input validation fails.
-    fn request(self) -> Result<http::Request<Vec<u8>>, Error>;
+    fn request(self) -> Result<http::Request<Self::RequestBody>, Error>;
 
     /// Decodes the HTTP response body into this action's response type.
     ///
     /// # Errors
     ///
     /// Returns an error if the response is invalid or cannot be decoded.
-    fn decode<B: AsRef<[u8]>>(response: ResponseParts<B>) -> Result<Self::Response, Error>;
+    fn decode(response: ResponseParts<&[u8]>) -> Result<Self::Response<'_>, Error>;
+}
+
+/// An action that can decode a response independently of the input buffer's lifetime.
+///
+/// Transports use this contract for their one-step `send_with` methods. Actions
+/// that only support borrowing can implement [`Action`] alone and use buffering.
+pub trait OwnedAction: Action {
+    /// Decoded value that can outlive the HTTP response buffer.
+    type OwnedResponse;
+
+    /// Decodes without retaining references to the supplied response body.
+    ///
+    /// # Errors
+    /// Returns an error if the response is invalid or cannot be decoded.
+    fn decode_owned(response: ResponseParts<&[u8]>) -> Result<Self::OwnedResponse, Error>;
 }
 
 /// Converts request parts into an HTTP request.
@@ -168,18 +271,22 @@ where
     T: serde::Serialize,
 {
     debug!("building JSON HTTP request");
+
     let body = serde_json::to_vec(&body)?;
     let mut request = http::Request::builder()
         .method(method)
         .uri(uri)
         .body(body)?;
+
     *request.headers_mut() = headers;
+
     if !request.headers().contains_key(CONTENT_TYPE) {
         request.headers_mut().insert(
             CONTENT_TYPE,
             http::HeaderValue::from_static("application/json"),
         );
     }
+
     Ok(request)
 }
 
@@ -224,9 +331,9 @@ where
 /// Returns an error if the body is not valid JSON for `T`.
 #[cfg(feature = "json")]
 #[instrument(skip_all)]
-pub fn from_json_slice<T>(body: &[u8]) -> Result<T, Error>
+pub fn from_json_slice<'de, T>(body: &'de [u8]) -> Result<T, Error>
 where
-    T: de::DeserializeOwned,
+    T: serde::Deserialize<'de>,
 {
     debug!("deserializing JSON response");
     Ok(serde_json::from_slice(body)?)
@@ -2445,5 +2552,77 @@ mod tests {
         }
 
         assert!(serde_json::from_str::<Value>(r#"{"at":9223372036854775807}"#).is_err());
+    }
+}
+
+#[cfg(all(test, feature = "json"))]
+mod buffered_response_tests {
+    use super::*;
+    use std::borrow::Cow;
+
+    struct BorrowingAction;
+
+    #[derive(Debug, serde::Deserialize)]
+    struct Record<'a> {
+        #[serde(borrow)]
+        name: Cow<'a, str>,
+    }
+
+    impl Action for BorrowingAction {
+        type RequestBody = Box<[u8]>;
+        type Response<'de> = Record<'de>;
+
+        fn request(self) -> Result<http::Request<Self::RequestBody>, Error> {
+            Ok(http::Request::new(Box::from(&b"{}"[..])))
+        }
+
+        fn decode(parts: ResponseParts<&[u8]>) -> Result<Record<'_>, Error> {
+            assert_eq!(parts.status, http::StatusCode::OK);
+            assert_eq!(parts.headers["x-request-id"], "test");
+            from_json_slice(parts.body)
+        }
+    }
+
+    impl OwnedAction for BorrowingAction {
+        type OwnedResponse = String;
+
+        fn decode_owned(response: ResponseParts<&[u8]>) -> Result<String, Error> {
+            Ok(Self::decode(response)?.name.into_owned())
+        }
+    }
+
+    #[test]
+    fn borrows_unescaped_strings_from_a_custom_buffer_and_preserves_parts() {
+        let body: Box<[u8]> = Box::from(&br#"{"name":"Mochi"}"#[..]);
+        let original_ptr = body.as_ptr();
+        let response = BufferedResponse::<BorrowingAction, _>::new(ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::from_iter([(
+                HeaderName::from_static("x-request-id"),
+                http::HeaderValue::from_static("test"),
+            )]),
+            body,
+        });
+        let record = response.decode().unwrap();
+        assert!(matches!(record.name, Cow::Borrowed("Mochi")));
+        assert_eq!(record.name.as_ptr(), response.parts().body[9..].as_ptr());
+        assert!(matches!(response.decode().unwrap().name, Cow::Borrowed(_)));
+        drop(record);
+        let parts = response.into_parts();
+        assert_eq!(parts.body.as_ptr(), original_ptr);
+        assert_eq!(parts.headers["x-request-id"], "test");
+        let owned = BufferedResponse::<BorrowingAction, _>::new(parts)
+            .decode_owned()
+            .unwrap();
+        assert_eq!(owned, "Mochi");
+        let request = BorrowingAction.request().unwrap();
+        assert_eq!(&**request.body(), b"{}");
+    }
+
+    #[test]
+    fn escaped_strings_are_owned_and_invalid_json_is_reported_at_decode() {
+        let record: Record<'_> = from_json_slice(br#"{"name":"Mo\u0063hi"}"#).unwrap();
+        assert!(matches!(record.name, Cow::Owned(ref value) if value == "Mochi"));
+        assert!(from_json_slice::<Record<'_>>(b"invalid").is_err());
     }
 }
