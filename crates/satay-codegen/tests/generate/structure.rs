@@ -52,7 +52,7 @@ fn simple_fixture_generates_expected_file_structure() {
     assert!(is_pub(&new_fn.vis));
     assert_eq!(
         norm(&new_fn.sig),
-        norm_str("fn new(user_id: impl Into<String>) -> Self")
+        norm_str("fn new(user_id: impl Into<S>) -> Self")
     );
     find_method(&parts, "GetUserInput", "include_details");
     find_enum(&parts, "GetUserResponse");
@@ -97,7 +97,7 @@ fn operation_tags_generate_namespaced_api_groups() {
         let method = find_method(&api, "Api", group);
         assert_eq!(
             norm(&method.sig),
-            norm_str(&format!("fn {group}(&self) -> {group}::Api<'_>")),
+            norm_str(&format!("fn {group}(&self) -> {group}::Api<'_, S>")),
         );
     }
     assert!(!has_method(&api, "Api", "get_bus_arrival"));
@@ -105,12 +105,12 @@ fn operation_tags_generate_namespaced_api_groups() {
     let list_stops_new = find_method(&api, "ListBusStopsAction", "new");
     assert_eq!(
         norm(&list_stops_new.sig),
-        norm_str("fn new(api_2: &'a Api, api: impl Into<String>) -> Self"),
+        norm_str("fn new(api_2: &'a Api<S>, api: impl Into<S>) -> Self"),
     );
     assert!(contains_tokens(list_stops_new, "api: api_2"));
     assert!(contains_tokens(
         list_stops_new,
-        "ListBusStopsInput::new(api)"
+        "ListBusStopsInput::<S>::new(api)"
     ));
     let get_arrival_new = find_method(&api, "GetBusArrivalAction", "new");
     assert!(contains_tokens(get_arrival_new, "api,"));
@@ -141,7 +141,7 @@ fn operation_tags_generate_namespaced_api_groups() {
     let get_arrival = find_method(&bus, "Api", "get_arrival");
     assert_eq!(
         norm(&get_arrival.sig),
-        norm_str("fn get_arrival(&self, bus_stop_code: u32) -> GetBusArrivalAction<'a>",),
+        norm_str("fn get_arrival(&self, bus_stop_code: u32) -> GetBusArrivalAction<'a, S>",),
     );
     assert_doc(&get_arrival.attrs, "Get the next arrival.");
     assert_doc(&get_arrival.attrs, "# Arguments");
@@ -198,7 +198,7 @@ fn lib_root_module_option_emits_lib_rs_instead_of_mod_rs() {
     );
     assert_eq!(
         norm(&find_method(&api_rs, "Api", "users").sig),
-        norm_str("fn users(&self) -> users::Api<'_>"),
+        norm_str("fn users(&self) -> users::Api<'_, S>"),
     );
     assert!(!files.iter().any(|file| file.relative_path == "mod.rs"));
     assert!(
@@ -279,9 +279,9 @@ components:
     let user = find_struct(&types_rs, "User");
     assert_doc(&user.attrs, "A user record.");
     assert_doc(&field(user, "id").attrs, "Stable ID.");
-    assert_field(user, "id", "String");
+    assert_field(user, "id", "S");
     assert_doc(&field(user, "name").attrs, "Display name.");
-    assert_field(user, "name", "Option<String>");
+    assert_field(user, "name", "Option<S>");
     assert_doc(&field(user, "code").attrs, "Reusable user code.");
     assert_field(user, "code", "UserCode");
     assert_doc(&field(user, "home_code").attrs, "Home user code.");
@@ -291,7 +291,7 @@ components:
     let input = find_struct(&parts_rs, "GetUserInput");
     assert_doc(&input.attrs, "Fetch a user.");
     assert_doc(&field(input, "user_id").attrs, "User identifier.");
-    assert_field(input, "user_id", "String");
+    assert_field(input, "user_id", "S");
     assert_doc(
         &field(input, "include_details").attrs,
         "Include detailed fields.",
@@ -299,7 +299,7 @@ components:
     let response = find_enum(&parts_rs, "GetUserResponse");
     let ok = variant(response, "Ok");
     assert_doc(&ok.attrs, "User found.");
-    assert_eq!(norm(&ok.fields), norm_str("(User)"));
+    assert_eq!(norm(&ok.fields), norm_str("(User<S>)"));
 }
 
 #[test]

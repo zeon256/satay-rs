@@ -14,6 +14,11 @@ default = []
 blocking = ["reqwest/blocking"]
 
 [dependencies]
+bytes.workspace = true
 satay-runtime.workspace = true
 reqwest = { version = "0.13.3", default-features = false }
 thiserror.workspace = true
+
+[dev-dependencies]
+http.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }

@@ -56,7 +56,7 @@ mod tests {
         assert!(query.contains("BusStopCode=83139"));
         assert!(query.contains("ServiceNo=15"));
 
-        let response = GetBusArrivalAction::decode(satay_runtime::ResponseParts {
+        let response = GetBusArrivalAction::<String>::decode(satay_runtime::ResponseParts {
             status: http::StatusCode::OK,
             headers: http::HeaderMap::new(),
             body: br#"{

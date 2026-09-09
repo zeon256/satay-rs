@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         body: response.bytes().await?,
     };
 
-    match GetBusArrivalAction::decode(response)? {
+    match GetBusArrivalAction::<String>::decode(response.as_bytes())? {
         GetBusArrivalResponse::Ok(arrival) => {
             println!(
                 "{} services for bus stop {}",

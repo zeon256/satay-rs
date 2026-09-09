@@ -100,7 +100,7 @@ let request: http::Request<Vec<u8>> = action.request()?;
 // Send `request` with reqwest, ureq, hyper, tests, WASM, WebSocket, or your own transport.
 
 let response = satay_runtime::ResponseParts { status, headers, body };
-let decoded = generated::GetBusArrivalAction::decode(response)?;
+let decoded = generated::GetBusArrivalAction::<String>::decode(response.as_bytes())?;
 ```
  
 ## What It Generates

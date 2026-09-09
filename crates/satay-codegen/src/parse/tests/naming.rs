@@ -101,6 +101,10 @@ components:
       type: apiKey
       in: query
       name: base_url
+    storageKey:
+      type: apiKey
+      in: header
+      name: string_storage
     httpKey:
       type: apiKey
       in: query
@@ -112,6 +116,10 @@ components:
     assert_eq!(api_key_rust_name(&api, "apply"), "apply_2");
     assert_eq!(api_key_rust_name(&api, "base_url"), "base_url_2");
     assert_eq!(api_key_rust_name(&api, "http"), "http_2");
+    assert_eq!(
+        api_key_rust_name(&api, "string_storage"),
+        "string_storage_2"
+    );
 }
 
 #[test]

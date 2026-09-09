@@ -57,6 +57,15 @@ pub(super) fn render_endpoint_parts_file(api: &Api, operation: &Operation) -> sy
 
 pub(super) fn render_endpoint_json_file(api: &Api, operation: &Operation) -> syn::File {
     let mut items = vec![];
+    if operation
+        .responses
+        .iter()
+        .any(|response| response.body.as_ref().is_some_and(TypeRef::contains_map))
+    {
+        items.push(parse_quote!(
+            use std::collections::BTreeMap;
+        ));
+    }
     if let Some(use_types) = build_json_types_use(api, operation) {
         items.push(Item::Use(use_types));
     }

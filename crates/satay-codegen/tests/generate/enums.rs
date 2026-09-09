@@ -177,7 +177,7 @@ components:
 
     let types_rs = parse_rust(find_file(&files, "types.rs"));
     let transcription = find_struct(&types_rs, "AudioTranscription");
-    assert_field(transcription, "model", "Option<AudioTranscriptionModel>");
+    assert_field(transcription, "model", "Option<AudioTranscriptionModel<S>>");
 
     let model = find_enum(&types_rs, "AudioTranscriptionModel");
     assert_doc(&model.attrs, "Known transcription models.");
@@ -199,14 +199,14 @@ components:
         norm(&model_as_str.sig),
         norm_str("fn as_str(&self) -> &str")
     );
-    assert_eq!(norm(&variant(model, "Other").fields), norm_str("(String)"));
+    assert_eq!(norm(&variant(model, "Other").fields), norm_str("(S)"));
     assert!(contains_tokens(
         &types_rs,
-        "impl serde::Serialize for AudioTranscriptionModel"
+        "serde::Serialize for AudioTranscriptionModel<S>"
     ));
     assert!(contains_tokens(
         &types_rs,
-        "impl < 'de > serde::Deserialize < 'de > for AudioTranscriptionModel"
+        "serde::Deserialize<'de> for AudioTranscriptionModel<S>"
     ));
     // Regression for #155: must not emit the long UFCS path that fires the
     // `minimal_imports` lint; reference `Deserialize` unqualified instead.
@@ -216,7 +216,7 @@ components:
     ));
     assert!(contains_tokens(
         &types_rs,
-        "String :: deserialize ( deserializer )"
+        "S :: deserialize ( deserializer )"
     ));
 }
 
@@ -256,7 +256,7 @@ components:
         variant_names(model),
         ["ClaudeSonnet5", "ClaudeHaiku45", "Other"]
     );
-    assert_eq!(norm(&variant(model, "Other").fields), norm_str("(String)"));
+    assert_eq!(norm(&variant(model, "Other").fields), norm_str("(S)"));
     assert!(contains_tokens(
         &types_rs,
         r#"Self::ClaudeSonnet5 => "claude-sonnet-5""#
@@ -304,11 +304,11 @@ components:
 
     let types_rs = parse_rust(find_file(&files, "types.rs"));
     let event = find_struct(&types_rs, "Event");
-    assert_field(event, "reason", "Option<EventReason>");
+    assert_field(event, "reason", "Option<EventReason<S>>");
 
     let reason = find_enum(&types_rs, "EventReason");
     assert_eq!(variant_names(reason), ["ContentFilter", "Other_2", "Other"]);
-    assert_eq!(norm(&variant(reason, "Other").fields), norm_str("(String)"));
+    assert_eq!(norm(&variant(reason, "Other").fields), norm_str("(S)"));
 }
 
 #[test]
@@ -339,7 +339,7 @@ mod tests {
             headers: http::HeaderMap::new(),
             body: json,
         };
-        let decoded = operations::get_item::decode_get_item_response(response)
+        let decoded: GetItemResponse = operations::get_item::decode_get_item_response(response.as_bytes())
             .expect("decoded response");
         match decoded {
             GetItemResponse::Ok(item) => {
@@ -362,7 +362,7 @@ mod tests {
             headers: http::HeaderMap::new(),
             body: json,
         };
-        assert!(operations::get_item::decode_get_item_response(response).is_err());
+        assert!(operations::get_item::decode_get_item_response::<String>(response.as_bytes()).is_err());
     }
 }
 "##;
@@ -429,7 +429,7 @@ mod tests {
             body: br#"{"model":"gpt-4o-transcribe"}"#.to_vec(),
         };
 
-        let decoded = operations::get_transcription::decode_get_transcription_response(response)
+        let decoded: GetTranscriptionResponse = operations::get_transcription::decode_get_transcription_response(response.as_bytes())
             .expect("decoded response");
         match decoded {
             GetTranscriptionResponse::Ok(value) => {
@@ -450,7 +450,7 @@ mod tests {
             body: br#"{"model":"gpt-custom-transcribe"}"#.to_vec(),
         };
 
-        let decoded = operations::get_transcription::decode_get_transcription_response(response)
+        let decoded: GetTranscriptionResponse = operations::get_transcription::decode_get_transcription_response(response.as_bytes())
             .expect("decoded response");
         match decoded {
             GetTranscriptionResponse::Ok(value) => {

@@ -63,10 +63,10 @@ components:
     let child = find_struct(&types_rs, "Child");
     assert_doc(&child.attrs, "A flattened child.");
     assert_eq!(field_names(child), ["id", "tag", "name", "nickname"]);
-    assert_field(child, "id", "String");
-    assert_field(child, "tag", "String");
-    assert_field(child, "name", "String");
-    assert_field(child, "nickname", "Option<String>");
+    assert_field(child, "id", "S");
+    assert_field(child, "tag", "S");
+    assert_field(child, "name", "S");
+    assert_field(child, "nickname", "Option<S>");
 }
 
 #[test]
@@ -134,7 +134,7 @@ mod tests {
             body: br#"{"id":"base-1","name":"Ada","nickname":"ace"}"#.to_vec(),
         };
 
-        let decoded = operations::get_child::decode_get_child_response(response)
+        let decoded: GetChildResponse = operations::get_child::decode_get_child_response(response.as_bytes())
             .expect("decoded response");
         match decoded {
             GetChildResponse::Ok(child) => {
@@ -249,20 +249,20 @@ components:
 
     let types_rs = parse_rust(find_file(&files, "types.rs"));
     let list = find_struct(&types_rs, "ChatCompletionMessageList");
-    assert_field(list, "data", "Vec<ChatCompletionMessageListDataItem>");
+    assert_field(list, "data", "Vec<ChatCompletionMessageListDataItem<S>>");
 
     let item = find_struct(&types_rs, "ChatCompletionMessageListDataItem");
     assert_eq!(
         field_names(item),
         ["role", "content", "id", "content_parts"]
     );
-    assert_field(item, "role", "String");
-    assert_field(item, "content", "String");
-    assert_field(item, "id", "String");
+    assert_field(item, "role", "S");
+    assert_field(item, "content", "S");
+    assert_field(item, "id", "S");
     assert_field(
         item,
         "content_parts",
-        "Option<Vec<ChatCompletionMessageListDataItemContentPartsItem>>",
+        "Option<Vec<ChatCompletionMessageListDataItemContentPartsItem<S>>>",
     );
 }
 
@@ -383,7 +383,7 @@ mod tests {
             body: br#"{"object":"list","data":[{"role":"user","content":"hello","id":"chatcmpl-1-0","content_parts":[{"type":"text","text":"hello"}]}],"first_id":"chatcmpl-1-0","last_id":"chatcmpl-1-0","has_more":false}"#.to_vec(),
         };
 
-        let decoded = operations::list_messages::decode_list_messages_response(response)
+        let decoded: ListMessagesResponse = operations::list_messages::decode_list_messages_response(response.as_bytes())
             .expect("decoded response");
         match decoded {
             ListMessagesResponse::Ok(list) => {

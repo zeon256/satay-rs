@@ -30,6 +30,7 @@ pub(super) fn parse_api_key_security_schemes(
     let mut used = BTreeSet::from([
         "apply".to_owned(),
         "base_url".to_owned(),
+        "string_storage".to_owned(),
         "http".to_owned(),
         "new".to_owned(),
     ]);
@@ -102,8 +103,12 @@ pub(super) fn parse_api_groups(
     let mut used_modules = BTreeSet::from(["api".to_owned(), "types".to_owned()]);
     used_modules.extend(operations.iter().map(|operation| operation.fn_name.clone()));
 
-    let mut used_accessors =
-        BTreeSet::from(["apply".to_owned(), "base_url".to_owned(), "new".to_owned()]);
+    let mut used_accessors = BTreeSet::from([
+        "apply".to_owned(),
+        "base_url".to_owned(),
+        "string_storage".to_owned(),
+        "new".to_owned(),
+    ]);
     used_accessors.extend(
         api_key_security_schemes
             .iter()

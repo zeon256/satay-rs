@@ -199,12 +199,12 @@ fn render_none_if_functions(field: &Field, imports: &mut BTreeSet<String>) -> [s
                 clippy::trivially_copy_pass_by_ref,
                 reason = "Serde `serialize_with` receives a reference to the field type"
             )]
-            fn #serialize_name<S>(
+            fn #serialize_name<Serializer>(
                 value: &Option<#inner_ty>,
-                serializer: S,
-            ) -> Result<S::Ok, S::Error>
+                serializer: Serializer,
+            ) -> Result<Serializer::Ok, Serializer::Error>
             where
-                S: serde::Serializer,
+                Serializer: serde::Serializer,
             {
                 #leaf_module::serialize_none_if(value, #canonical, serializer)
             }
@@ -329,12 +329,12 @@ fn render_mapped_bool_none_if_functions(
                 clippy::trivially_copy_pass_by_ref,
                 reason = "Serde `serialize_with` receives a reference to the field type"
             )]
-            fn #serialize_name<S>(
+            fn #serialize_name<Serializer>(
                 value: &Option<bool>,
-                serializer: S,
-            ) -> Result<S::Ok, S::Error>
+                serializer: Serializer,
+            ) -> Result<Serializer::Ok, Serializer::Error>
             where
-                S: serde::Serializer,
+                Serializer: serde::Serializer,
             {
                 as_bool::serialize_mapped_none_if(
                     value,
@@ -401,12 +401,12 @@ fn render_optional_mapped_bool_functions(
                 clippy::trivially_copy_pass_by_ref,
                 reason = "Serde `serialize_with` receives a reference to the field type"
             )]
-            fn #serialize_name<S>(
+            fn #serialize_name<Serializer>(
                 value: &Option<bool>,
-                serializer: S,
-            ) -> Result<S::Ok, S::Error>
+                serializer: Serializer,
+            ) -> Result<Serializer::Ok, Serializer::Error>
             where
-                S: serde::Serializer,
+                Serializer: serde::Serializer,
             {
                 as_bool_option::serialize_mapped(
                     value,
@@ -453,12 +453,12 @@ fn render_required_mapped_bool_functions(
                 clippy::trivially_copy_pass_by_ref,
                 reason = "Serde `serialize_with` receives a reference to the field type"
             )]
-            fn #serialize_name<S>(
+            fn #serialize_name<Serializer>(
                 value: &bool,
-                serializer: S,
-            ) -> Result<S::Ok, S::Error>
+                serializer: Serializer,
+            ) -> Result<Serializer::Ok, Serializer::Error>
             where
-                S: serde::Serializer,
+                Serializer: serde::Serializer,
             {
                 as_bool::serialize_mapped(
                     value,

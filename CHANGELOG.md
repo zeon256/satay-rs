@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** actions expose `RequestBody` and `Response<'de>` associated types; `send_with()` requires the new `OwnedAction` contract and continues to return an owned decoded response. Generated actions implement both contracts.
+- **Breaking:** generated dynamic strings use a generic storage parameter, defaulting to `String`; select alternatives with `Api::new().string_storage::<Box<str>>()`. Low-level callers may need explicit storage arguments.
+
+### Added
+
+- Runtime borrowed decoding and opt-in transport-owned response buffers via `send_buffered_with()`, with custom request-body support in reqwest and ureq adapters. Generated borrowing models remain deferred; constrained string newtypes retain `String`.
+
 ## [0.16.4](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.16.3...satay-codegen-v0.16.4) - 2026-09-08
 
 ### Added
