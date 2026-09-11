@@ -7,6 +7,8 @@ use oas3::spec::{
 };
 
 use super::Document;
+use super::reference::schema_component_ref;
+use super::satay::coordinate_target_reference;
 use crate::error::ValidationError;
 
 #[derive(Debug, Clone, Copy)]
@@ -187,6 +189,29 @@ fn validate_schema_refs(
     context: &str,
 ) -> Result<(), ValidationError> {
     document.resolve_schema(schema, context)?;
+    if let Some(reference) = schema.as_object().and_then(coordinate_target_reference) {
+        let target_context = format!("{context}.x-satay.target");
+        let target = schema_component_ref(reference).map_err(|source| {
+            ValidationError::ResolveReference {
+                reference: reference.to_owned(),
+                context: target_context.clone(),
+                source: Box::new(source),
+            }
+        })?;
+        let target_schema = document
+            .spec
+            .components
+            .as_ref()
+            .and_then(|components| components.schemas.get(target.name()))
+            .ok_or_else(|| ValidationError::ResolveReference {
+                reference: reference.to_owned(),
+                context: target_context.clone(),
+                source: Box::new(ValidationError::MissingJsonPointerToken {
+                    token: target.name().to_owned(),
+                }),
+            })?;
+        document.resolve_schema(target_schema, &target_context)?;
+    }
 
     for (index, subschema) in schema.subschemas().enumerate() {
         validate_schema_refs(

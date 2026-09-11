@@ -21,6 +21,9 @@ use crate::model::{IntegerType, ParseAs, RangeScalar};
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) struct SataySchemaOptions {
     pub(crate) parse_as: Option<SatayParseAsWire>,
+    pub(crate) target: Option<SatayCoordinateTarget>,
+    pub(crate) fields: Option<Vec<SatayFieldName>>,
+    pub(crate) delimiter: Option<String>,
     pub(crate) integer_type: Option<SatayIntegerTypeWire>,
     pub(crate) treat_error_as_none: Option<bool>,
     pub(crate) none_if: Option<Vec<String>>,
@@ -30,6 +33,23 @@ pub(crate) struct SataySchemaOptions {
     pub(crate) enum_variants: Option<BTreeMap<String, String>>,
     pub(crate) ignore: Option<bool>,
     pub(crate) identifier: Option<SatayIdentifier>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SatayCoordinateTarget {
+    #[serde(rename = "$ref")]
+    pub(crate) reference: String,
+}
+
+/// Extension references are not included in the OAS schema reference traversal.
+pub(super) fn coordinate_target_reference(schema: &OasObjectSchema) -> Option<&str> {
+    schema
+        .extensions
+        .get("satay")?
+        .get("target")?
+        .get("$ref")?
+        .as_str()
 }
 
 /// A target-neutral property identifier represented as canonical words.
@@ -130,11 +150,12 @@ pub(crate) enum SatayParseAsWire {
     Time,
     IntegerRange,
     NumberRange,
+    Coordinates,
 }
 
 impl SatayParseAsWire {
-    pub(super) fn into_parse_as(self) -> ParseAs {
-        match self {
+    pub(super) fn into_parse_as(self) -> Option<ParseAs> {
+        Some(match self {
             Self::U8 => ParseAs::U8,
             Self::U16 => ParseAs::U16,
             Self::U32 => ParseAs::U32,
@@ -152,7 +173,13 @@ impl SatayParseAsWire {
             Self::Time => ParseAs::Time,
             Self::IntegerRange => ParseAs::IntegerRange,
             Self::NumberRange => ParseAs::NumberRange,
-        }
+            Self::Coordinates => return None,
+        })
+    }
+
+    pub(super) fn wire_name(self) -> &'static str {
+        self.into_parse_as()
+            .map_or("coordinates", satay_parse_as_wire)
     }
 }
 
@@ -391,7 +418,7 @@ mod tests {
             .expect("present extension");
 
         assert_eq!(
-            options.parse_as.map(SatayParseAsWire::into_parse_as),
+            options.parse_as.and_then(SatayParseAsWire::into_parse_as),
             Some(ParseAs::U32)
         );
         assert_eq!(

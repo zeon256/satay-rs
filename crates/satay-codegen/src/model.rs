@@ -3,6 +3,8 @@ use std::{
     fmt::{self, Display},
 };
 
+use crate::parse::validate::ValidatedCoordinates;
+
 #[derive(Debug)]
 pub(crate) struct Api {
     pub(crate) server_url: String,
@@ -231,6 +233,98 @@ impl StringCodec {
     }
 }
 
+/// A literal delimiter whose nonempty invariant survives validation and lowering.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CoordinateDelimiter(String);
+
+impl CoordinateDelimiter {
+    pub(crate) fn new(value: String) -> Option<Self> {
+        (!value.is_empty()).then_some(Self(value))
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CoordinateCodec {
+    target: String,
+    fields: [CoordinateField; 2],
+    delimiter: CoordinateDelimiter,
+}
+
+impl CoordinateCodec {
+    pub(crate) fn from_validated(validated: &ValidatedCoordinates, target: &ComponentKind) -> Self {
+        let ComponentKind::Struct(fields) = target else {
+            unreachable!("coordinate target is validated as a generated struct")
+        };
+        Self {
+            target: validated.target().to_owned(),
+            fields: validated.field_indices().map(|index| {
+                let field = &fields[index];
+                CoordinateField {
+                    rust_name: field.rust_name.clone(),
+                    scalar: CoordinateScalar::from_validated_type(&field.ty),
+                }
+            }),
+            delimiter: validated.delimiter().clone(),
+        }
+    }
+
+    pub(crate) fn target(&self) -> &str {
+        &self.target
+    }
+
+    pub(crate) fn fields(&self) -> &[CoordinateField; 2] {
+        &self.fields
+    }
+
+    pub(crate) fn delimiter(&self) -> &str {
+        self.delimiter.as_str()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CoordinateField {
+    rust_name: String,
+    scalar: CoordinateScalar,
+}
+
+impl CoordinateField {
+    pub(crate) fn rust_name(&self) -> &str {
+        &self.rust_name
+    }
+
+    pub(crate) fn scalar(&self) -> &CoordinateScalar {
+        &self.scalar
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CoordinateScalar {
+    F32,
+    F64,
+    Constrained {
+        rust_name: String,
+        inner: Box<CoordinateScalar>,
+    },
+}
+
+impl CoordinateScalar {
+    fn from_validated_type(ty: &TypeRef) -> Self {
+        match ty {
+            TypeRef::F32 => Self::F32,
+            TypeRef::F64 => Self::F64,
+            TypeRef::Constrained { rust_name, inner } => Self::Constrained {
+                rust_name: rust_name.clone(),
+                inner: Box::new(Self::from_validated_type(inner)),
+            },
+            _ => unreachable!("coordinate fields are validated as nonnullable float scalars"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct Field {
     pub(crate) wire_name: String,
@@ -290,6 +384,7 @@ pub(crate) struct UnionVariant {
 pub(crate) enum TypeRef {
     String,
     ParsedString(StringCodec),
+    Coordinates(CoordinateCodec),
     ParsedInteger(ParseAs),
     Integer(IntegerType),
     F32,
@@ -469,6 +564,7 @@ impl TypeRef {
             Self::Constrained { inner, .. } => inner.contains_map(),
             Self::String
             | Self::ParsedString(_)
+            | Self::Coordinates(_)
             | Self::ParsedInteger(_)
             | Self::Integer(_)
             | Self::F32

@@ -249,6 +249,73 @@ pub struct Bus {
 
 The wire format stays a string: serde deserializes from a JSON string and serializes back to one. Supported string-backed `parse-as` values are `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `f32`, `f64`, `bool`, `date`, `naive-datetime`, `offset-datetime`, and `time`. Float parsing uses `fast-float`; `date` generates `satay_runtime::Date` and expects `YYYY-MM-DD` values such as `2024-07-16`; optional query parameters become `Option<satay_runtime::Date>` and encode with `satay_runtime::format_date`. `naive-datetime` generates `satay_runtime::PrimitiveDateTime` and expects `YYYY-MM-DDTHH:mm:ss` values such as `2024-07-16T23:59:00`; optional query parameters encode with `satay_runtime::format_naive_datetime`. `offset-datetime` generates `satay_runtime::OffsetDateTime`; `time` generates `satay_runtime::Time` and expects `HHMM` values such as `0620` or `2352`. Nullable `time` fields generate `Option<satay_runtime::Time>` and treat an empty string as `None`. `bool` also supports integer schemas, accepting `1`, `0`, `"1"`, `"0"`, `true`, and `false`; integer-backed bool fields serialize as `1` or `0`.
 
+## `parse-as: coordinates`
+
+Use a field-local string codec to reuse an existing generated object type rather than introduce a separate coordinate type:
+
+```yaml
+components:
+  schemas:
+    Coordinates:
+      type: object
+      required: [Latitude, Longitude]
+      properties:
+        Latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+          x-satay:
+            identifier: lat
+        Longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+          x-satay:
+            identifier: long
+    CarPark:
+      type: object
+      required: [Location]
+      properties:
+        Location:
+          type: string
+          x-satay:
+            identifier: coords
+            parse-as: coordinates
+            target:
+              $ref: "#/components/schemas/Coordinates"
+            fields: [Latitude, Longitude]
+            delimiter: " "
+            treat-error-as-none: true
+```
+
+This generates `CarPark.coords: Option<Coordinates>`. Valid location strings such as `"1.25 103.5"` construct the existing `Coordinates`, including its existing validated numeric newtypes. Other fields referencing `Coordinates` still deserialize and serialize ordinary JSON objects.
+
+### Target and separator contract
+
+- `target` must contain a local schema `$ref`. Object and numeric aliases are resolved through the existing schema pipeline.
+- `fields` must contain exactly two distinct **wire property names**, in input/output order. These are not generated Rust identifiers; `[Longitude, Latitude]` reverses the order even when the fields are renamed to `long` and `lat`.
+- The target must generate an object with precisely those two required, nonnullable, strictly decoded numeric fields. Each field must resolve to `f32` or `f64`, with optional existing numeric validation. Object `allOf` composition is supported when its resulting fields meet the same contract.
+- Numeric precision and bounds come from the target schema. Satay does not infer geographic meaning from names or add latitude/longitude bounds automatically. Non-finite values are rejected during both decoding and encoding, including for unconstrained numeric fields.
+- `delimiter` is a nonempty literal string, defaulting to one ASCII space. Use `","` for comma-separated values or a multi-character separator such as `"::"`. It is not a regex, a decimal separator, or an auto-detection rule; choose a separator that does not occur inside the numbers.
+- Input and individual components are trimmed. Exactly two nonempty components are required: extra coordinates, empty components, and repeated separators fail. With the default delimiter, `"1.25  103.5"` is invalid; a tab is not a space separator.
+- Serialization emits the configured order and delimiter with the numeric types' canonical display. Original whitespace, exponent notation, and decimal spelling are not preserved.
+
+`target`, `fields`, and `delimiter` are rejected without `parse-as: coordinates`. String constraints and `format` on the coordinate string are rejected: numeric constraints belong on the target's fields instead.
+
+### Missing, invalid, and sentinel values
+
+Without a none-handling option, invalid input fails deserialization. Required nonnullable fields produce `Coordinates`; optional or nullable fields produce `Option<Coordinates>` using the existing missing/null rules.
+
+- `none-if: ["", "-"]` makes only the listed exact strings decode as `None`; other malformed strings remain errors. A required sentinel field serializes `None` as the first configured sentinel.
+- `treat-error-as-none: true` makes missing fields, JSON null, non-string JSON, invalid pairs, and target validation failures decode as `None`. This includes strings containing four numbers: no trailing coordinates are silently discarded. `None` is omitted during serialization.
+- `none-if` and `treat-error-as-none` remain mutually exclusive. Optional fields are omitted when `None`, including optional sentinel fields.
+
+The codec may be declared directly on an object property or on a string component referenced by an object property. It is field-local: directly using a codec as a request/response body, parameter, array item, map value, union variant, or projected response value is rejected instead of falling back to object serde. Enclosing models containing coordinate fields can still be used in those supported model contexts. A generated alias itself retains the target object's serde; the owning field applies the string representation.
+
+Generated field helpers import `satay_runtime::serde_string::pair` behind `serde`. Strict and sentinel codecs need the generated crate's `serde` feature and `satay-runtime/serde`; lossy decoding additionally requires `json` and `satay-runtime/json`, as with other `treat-error-as-none` fields. Target validation newtypes use the existing `nutype` dependency. No geographic crate or additional public coordinate type is introduced.
+
 ## `true-values`, `false-values`, and `unknown-as`
 
 Use `x-satay.true-values` and `x-satay.false-values` together on an inline struct property with `type: string` and `parse-as: bool` when the API uses custom boolean strings:

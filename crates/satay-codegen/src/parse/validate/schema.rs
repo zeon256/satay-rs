@@ -18,20 +18,20 @@ use super::super::resolve::ResolvedDocument;
 use super::super::satay::{SatayIdentifier, SataySchemaOptions, schema_options};
 use super::constraint::{parse_integer_type, parse_validation, reject_keyword};
 use super::satay::{
-    ValidatedEnumSatay, ValidatedPropertyOptions, ValidatedSataySchema, ValidatedTypeDirective,
-    validate_property_enum_satay, validate_property_satay, validate_value_enum_satay,
-    validate_value_satay,
+    CoordinateSelector, SchemaDirective, ValidatedEnumSatay, ValidatedPropertyOptions,
+    ValidatedSataySchema, validate_property_enum_satay, validate_property_satay,
+    validate_value_enum_satay, validate_value_satay,
 };
 use super::{
-    ValidatedComponent, ValidatedComponentKind, ValidatedField, ValidatedFieldValue, ValidatedType,
-    ValidatedTypeKind, ValidatedUnion, ValidatedUnionTag, ValidatedUnionTagStyle,
-    ValidatedUnionVariant, ValidatedUnionVariantKind,
+    ValidatedComponent, ValidatedComponentKind, ValidatedField, ValidatedFieldValue,
+    ValidatedOperation, ValidatedType, ValidatedTypeKind, ValidatedUnion, ValidatedUnionTag,
+    ValidatedUnionTagStyle, ValidatedUnionVariant, ValidatedUnionVariantKind,
 };
 use crate::error::ValidationError;
 use crate::ident::{field_ident, type_ident, unique_ident, variant_ident};
 use crate::model::{
-    Enum, EnumFallback, EnumVariant, IntegerLimit, IntegerType, ParseAs, StringCodec, TypeRef,
-    Validation,
+    CoordinateDelimiter, Enum, EnumFallback, EnumVariant, IntegerLimit, IntegerType, ParseAs,
+    StringCodec, TypeRef, Validation,
 };
 
 /// Annotation keywords permitted beside a single `allOf`/`$ref` branch.
@@ -45,6 +45,29 @@ const ALLOWED_ANNOTATION_KEYWORDS: &[&str] = &[
     "examples",
     "example",
 ];
+
+/// A resolved generated object with two distinct, required, nonnullable float fields.
+/// Only the schema validator can construct this proof; lowering reuses its target.
+#[derive(Debug, Clone)]
+pub(crate) struct ValidatedCoordinates {
+    target: String,
+    field_indices: [usize; 2],
+    delimiter: CoordinateDelimiter,
+}
+
+impl ValidatedCoordinates {
+    pub(crate) fn target(&self) -> &str {
+        &self.target
+    }
+
+    pub(crate) fn field_indices(&self) -> [usize; 2] {
+        self.field_indices
+    }
+
+    pub(crate) fn delimiter(&self) -> &CoordinateDelimiter {
+        &self.delimiter
+    }
+}
 
 pub(super) fn validate_components(
     document: &ResolvedDocument<'_>,
@@ -341,6 +364,9 @@ fn validate_reference_siblings(
     let options = schema_options(schema, context)?.unwrap_or_default();
     let SataySchemaOptions {
         parse_as,
+        target,
+        fields,
+        delimiter,
         integer_type,
         treat_error_as_none,
         none_if,
@@ -354,6 +380,9 @@ fn validate_reference_siblings(
     let mut keyword = parse_as
         .as_ref()
         .map(|_| "parse-as")
+        .or_else(|| target.as_ref().map(|_| "target"))
+        .or_else(|| fields.as_ref().map(|_| "fields"))
+        .or_else(|| delimiter.as_ref().map(|_| "delimiter"))
         .or_else(|| integer_type.as_ref().map(|_| "integer-type"))
         .or_else(|| none_if.as_ref().map(|_| "none-if"))
         .or_else(|| true_values.as_ref().map(|_| "true-values"))
@@ -2749,6 +2778,7 @@ fn collect_type_union_targets(
         // decision about whether they can contain component references.
         ValidatedTypeKind::String
         | ValidatedTypeKind::ParsedString(_)
+        | ValidatedTypeKind::Coordinates(_)
         | ValidatedTypeKind::ParsedInteger(_)
         | ValidatedTypeKind::Integer(_)
         | ValidatedTypeKind::F32
@@ -2826,14 +2856,15 @@ fn validate_object_type_schema(
     let validated_satay = validation_context.validate_satay(schema, schema_type, context)?;
 
     let directive_kind = match &validated_satay.directive {
-        ValidatedTypeDirective::ParsedString(codec) => {
+        SchemaDirective::ParsedString(codec) => {
             Some(ValidatedTypeKind::ParsedString(codec.clone()))
         }
-        ValidatedTypeDirective::ParsedIntegerBool => {
-            Some(ValidatedTypeKind::ParsedInteger(ParseAs::Bool))
-        }
-        ValidatedTypeDirective::Range(scalar) => Some(ValidatedTypeKind::Range(*scalar)),
-        ValidatedTypeDirective::AsDeclared | ValidatedTypeDirective::Integer(_) => None,
+        SchemaDirective::ParsedIntegerBool => Some(ValidatedTypeKind::ParsedInteger(ParseAs::Bool)),
+        SchemaDirective::Range(scalar) => Some(ValidatedTypeKind::Range(*scalar)),
+        SchemaDirective::Coordinates(selector) => Some(ValidatedTypeKind::Coordinates(
+            validate_coordinates(document, selector, context, stack)?,
+        )),
+        SchemaDirective::AsDeclared | SchemaDirective::Integer(_) => None,
     };
     if let Some(kind) = directive_kind {
         let ty = ValidatedType {
@@ -2882,13 +2913,12 @@ fn validate_inline_type_kind(
                 Ok(ValidatedTypeKind::ParsedInteger(ParseAs::UnixTime))
             } else {
                 let integer_type = match &satay.directive {
-                    ValidatedTypeDirective::Integer(integer_type) => *integer_type,
-                    ValidatedTypeDirective::AsDeclared => {
-                        parse_integer_type(schema, context, None)?
-                    }
-                    ValidatedTypeDirective::ParsedString(_)
-                    | ValidatedTypeDirective::ParsedIntegerBool
-                    | ValidatedTypeDirective::Range(_) => {
+                    SchemaDirective::Integer(integer_type) => *integer_type,
+                    SchemaDirective::AsDeclared => parse_integer_type(schema, context, None)?,
+                    SchemaDirective::ParsedString(_)
+                    | SchemaDirective::Coordinates(_)
+                    | SchemaDirective::ParsedIntegerBool
+                    | SchemaDirective::Range(_) => {
                         unreachable!("parsed type directives return before inline validation")
                     }
                 };
@@ -2991,6 +3021,7 @@ fn validation_base_type(kind: &ValidatedTypeKind) -> Option<TypeRef> {
         ValidatedTypeKind::Array(_) => Some(TypeRef::Array(Box::new(TypeRef::Bool))),
         ValidatedTypeKind::Named(_)
         | ValidatedTypeKind::ParsedString(_)
+        | ValidatedTypeKind::Coordinates(_)
         | ValidatedTypeKind::ParsedInteger(_)
         | ValidatedTypeKind::Map(_)
         | ValidatedTypeKind::JsonValue
@@ -2998,6 +3029,303 @@ fn validation_base_type(kind: &ValidatedTypeKind) -> Option<TypeRef> {
         | ValidatedTypeKind::AnyOf(_)
         | ValidatedTypeKind::InlineStruct(_)
         | ValidatedTypeKind::Range(_) => None,
+    }
+}
+
+fn validate_coordinates(
+    document: &ResolvedDocument<'_>,
+    selector: &CoordinateSelector,
+    context: &str,
+    stack: &mut Vec<String>,
+) -> Result<ValidatedCoordinates, ValidationError> {
+    let invalid = |reason: String| ValidationError::InvalidSatayCoordinates {
+        context: context.to_owned(),
+        reason,
+    };
+    let mut target_name = selector.target.clone();
+    let mut references = BTreeSet::new();
+    let target_schema = loop {
+        if !references.insert(target_name.clone()) {
+            return Err(invalid(format!(
+                "target `{target_name}` contains a reference cycle"
+            )));
+        }
+        let target = component_schema(document, &target_name)?;
+        if let Some(reference) = target.reference() {
+            let object = target
+                .as_object()
+                .expect("schema references are object schemas");
+            validate_reference_siblings(object, context, SchemaValidationContext::Value)?;
+            target_name = schema_component_ref(reference)?.name().to_owned();
+        } else {
+            break target;
+        }
+    };
+    let target_object = target_schema
+        .as_object()
+        .ok_or_else(|| invalid(format!("target `{target_name}` must be a generated object")))?;
+    let (target_type, nullable) = schema_type_and_nullable(target_object, context)?;
+    if nullable
+        || !matches!(target_type, Some(OasSchemaType::Object) | None)
+        || (target_object.properties.is_empty() && target_object.all_of.is_empty())
+        || schema_is_union(target_object)
+    {
+        return Err(invalid(format!(
+            "target `{target_name}` must be a nonnullable generated object"
+        )));
+    }
+    if target_object.all_of.is_empty() && target_object.properties.len() != 2 {
+        return Err(invalid(format!(
+            "target `{target_name}` must declare precisely the two selected fields"
+        )));
+    }
+    let marker = format!("coordinates:{target_name}");
+    if stack.contains(&marker) {
+        return Err(invalid(format!(
+            "target `{target_name}` recursively uses the coordinate codec"
+        )));
+    }
+    stack.push(marker);
+    let component = validate_component_schema(document, &target_name, target_schema, stack);
+    stack.pop();
+    let component = component?;
+    let ValidatedComponentKind::Struct(fields) = component.kind else {
+        return Err(invalid(format!(
+            "target `{target_name}` must be a generated object"
+        )));
+    };
+    if fields.len() != 2 {
+        return Err(invalid(format!(
+            "target `{target_name}` must generate precisely the two selected fields"
+        )));
+    }
+    let mut indices = [0; 2];
+    for (output_index, wire_name) in selector.fields.iter().enumerate() {
+        let (index, field) = fields
+            .iter()
+            .enumerate()
+            .find(|(_, field)| &field.wire_name == wire_name)
+            .ok_or_else(|| invalid(format!("target `{target_name}` has no field `{wire_name}`")))?;
+        if !field.required || !matches!(field.value, ValidatedFieldValue::Strict(_)) {
+            return Err(invalid(format!(
+                "target field `{target_name}.{wire_name}` must be required with strict numeric decoding"
+            )));
+        }
+        validate_coordinate_scalar(
+            document,
+            field.value.ty(),
+            &format!("{context} target field `{target_name}.{wire_name}`"),
+            &mut BTreeSet::new(),
+            stack,
+        )?;
+        indices[output_index] = index;
+    }
+    Ok(ValidatedCoordinates {
+        target: type_ident(&target_name),
+        field_indices: indices,
+        delimiter: selector.delimiter.clone(),
+    })
+}
+
+fn validate_coordinate_scalar(
+    document: &ResolvedDocument<'_>,
+    ty: &ValidatedType,
+    context: &str,
+    visited: &mut BTreeSet<String>,
+    stack: &mut Vec<String>,
+) -> Result<(), ValidationError> {
+    let invalid = || ValidationError::InvalidSatayCoordinates {
+        context: context.to_owned(),
+        reason: "selected fields must resolve to nonnullable f32/f64 numbers".to_owned(),
+    };
+    if ty.nullable || !matches!(ty.validation, None | Some(Validation::Number { .. })) {
+        return Err(invalid());
+    }
+    match &ty.kind {
+        ValidatedTypeKind::F32 | ValidatedTypeKind::F64 => Ok(()),
+        ValidatedTypeKind::Named(rust_name) => {
+            if !visited.insert(rust_name.clone()) {
+                return Err(invalid());
+            }
+            let (schema_name, schema) = document
+                .spec
+                .components
+                .as_ref()
+                .and_then(|components| {
+                    components
+                        .schemas
+                        .iter()
+                        .find(|(name, _)| type_ident(name) == *rust_name)
+                })
+                .ok_or_else(invalid)?;
+            let resolved = document.resolve_schema(schema, context)?;
+            let object = resolved.as_object().ok_or_else(invalid)?;
+            if schema_type_and_nullable(object, context)? != (Some(OasSchemaType::Number), false) {
+                return Err(invalid());
+            }
+            let component = validate_component_schema(document, schema_name, schema, stack)?;
+            match component.kind {
+                ValidatedComponentKind::Reference(reference) => validate_coordinate_scalar(
+                    document,
+                    &ValidatedType::named(reference),
+                    context,
+                    visited,
+                    stack,
+                ),
+                ValidatedComponentKind::Type(ty) => {
+                    validate_coordinate_scalar(document, &ty, context, visited, stack)
+                }
+                ValidatedComponentKind::Struct(_) => Err(invalid()),
+            }
+        }
+        _ => Err(invalid()),
+    }
+}
+
+/// Check placement after named references are validated, so component aliases can
+/// carry field codec metadata without silently falling back to the object's serde.
+pub(super) fn validate_coordinate_uses(
+    components: &[ValidatedComponent],
+    operations: &[ValidatedOperation],
+) -> Result<(), ValidationError> {
+    let by_name = components
+        .iter()
+        .map(|component| (type_ident(&component.schema_name), component))
+        .collect::<BTreeMap<_, _>>();
+    for component in components {
+        check_coordinate_component(
+            component,
+            true,
+            &format!("schema `{}`", component.schema_name),
+            &by_name,
+            &mut BTreeSet::new(),
+        )?;
+    }
+    for operation in operations {
+        let context = format!("operation `{}`", operation.operation_id);
+        for parameter in &operation.parameters {
+            check_coordinate_type(
+                &parameter.ty,
+                false,
+                &format!("{context} parameter `{}`", parameter.wire_name),
+                &by_name,
+                &mut BTreeSet::new(),
+            )?;
+        }
+        if let Some(body) = &operation.request_body {
+            check_coordinate_type(
+                &body.ty,
+                false,
+                &format!("{context} request body"),
+                &by_name,
+                &mut BTreeSet::new(),
+            )?;
+        }
+        for response in &operation.responses {
+            if let Some(body) = &response.body {
+                check_coordinate_type(
+                    body,
+                    false,
+                    &format!("{context} response `{}`", response.status),
+                    &by_name,
+                    &mut BTreeSet::new(),
+                )?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_coordinate_component(
+    component: &ValidatedComponent,
+    field_codec: bool,
+    context: &str,
+    components: &BTreeMap<String, &ValidatedComponent>,
+    visited: &mut BTreeSet<(String, bool)>,
+) -> Result<(), ValidationError> {
+    if !visited.insert((component.schema_name.clone(), field_codec)) {
+        return Ok(());
+    }
+    match &component.kind {
+        ValidatedComponentKind::Reference(name) => check_coordinate_type(
+            &ValidatedType::named(name.clone()),
+            field_codec,
+            context,
+            components,
+            visited,
+        ),
+        ValidatedComponentKind::Type(ty) => {
+            check_coordinate_type(ty, field_codec, context, components, visited)
+        }
+        ValidatedComponentKind::Struct(fields) => {
+            check_coordinate_fields(fields, context, components, visited)
+        }
+    }
+}
+
+fn check_coordinate_fields(
+    fields: &[ValidatedField],
+    context: &str,
+    components: &BTreeMap<String, &ValidatedComponent>,
+    visited: &mut BTreeSet<(String, bool)>,
+) -> Result<(), ValidationError> {
+    for field in fields {
+        check_coordinate_type(
+            field.value.ty(),
+            true,
+            &format!("{context} property `{}`", field.wire_name),
+            components,
+            visited,
+        )?;
+    }
+    Ok(())
+}
+
+fn check_coordinate_type(
+    ty: &ValidatedType,
+    field_codec: bool,
+    context: &str,
+    components: &BTreeMap<String, &ValidatedComponent>,
+    visited: &mut BTreeSet<(String, bool)>,
+) -> Result<(), ValidationError> {
+    match &ty.kind {
+        ValidatedTypeKind::Coordinates(_) if !field_codec => {
+            Err(ValidationError::SatayCoordinatesRequireStructField {
+                context: context.to_owned(),
+            })
+        }
+        ValidatedTypeKind::Named(name) => {
+            if let Some(component) = components.get(name) {
+                check_coordinate_component(component, field_codec, context, components, visited)?;
+            }
+            Ok(())
+        }
+        ValidatedTypeKind::Array(item) | ValidatedTypeKind::Map(item) => {
+            check_coordinate_type(item, false, context, components, visited)
+        }
+        ValidatedTypeKind::AnyOf(union) => {
+            for variant in &union.variants {
+                match &variant.kind {
+                    ValidatedUnionVariantKind::Reference { type_name, .. } => {
+                        check_coordinate_type(
+                            &ValidatedType::named(type_name.clone()),
+                            false,
+                            context,
+                            components,
+                            visited,
+                        )?;
+                    }
+                    ValidatedUnionVariantKind::Inline(ty) => {
+                        check_coordinate_type(ty, false, context, components, visited)?;
+                    }
+                }
+            }
+            Ok(())
+        }
+        ValidatedTypeKind::InlineStruct(fields) => {
+            check_coordinate_fields(fields, context, components, visited)
+        }
+        _ => Ok(()),
     }
 }
 

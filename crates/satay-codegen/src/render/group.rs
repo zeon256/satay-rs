@@ -204,6 +204,7 @@ fn render_group_operation_example(
 fn collect_type_refs(ty: &TypeRef, names: &mut Vec<syn::Ident>) {
     match ty {
         TypeRef::Named(name) => names.push(super::ident(name)),
+        TypeRef::Coordinates(codec) => names.push(super::ident(codec.target())),
         TypeRef::Constrained { rust_name, .. } => names.push(super::ident(rust_name)),
         TypeRef::Array(inner) | TypeRef::Map(inner) | TypeRef::Option(inner) => {
             collect_type_refs(inner, names);

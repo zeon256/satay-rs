@@ -278,6 +278,7 @@ fn uses_storage(ty: &TypeRef, names: &BTreeSet<String>) -> bool {
         TypeRef::String | TypeRef::Map(_) => true,
         TypeRef::Array(inner) | TypeRef::Option(inner) => uses_storage(inner, names),
         TypeRef::Named(name) => names.contains(name),
+        TypeRef::Coordinates(codec) => names.contains(codec.target()),
         _ => false,
     }
 }
@@ -332,6 +333,7 @@ fn owned_models(api: &Api, models: &BTreeSet<String>) -> BTreeSet<String> {
 fn contains_owned(ty: &TypeRef, owned: &BTreeSet<String>) -> bool {
     match ty {
         TypeRef::Named(name) => owned.contains(name),
+        TypeRef::Coordinates(codec) => owned.contains(codec.target()),
         TypeRef::Array(inner) | TypeRef::Option(inner) | TypeRef::Map(inner) => {
             contains_owned(inner, owned)
         }

@@ -158,6 +158,9 @@ fn collect_type_refs(ty: &TypeRef, names: &mut Vec<Ident>) {
         TypeRef::Named(name) => {
             names.push(super::ident(name));
         }
+        TypeRef::Coordinates(codec) => {
+            names.push(super::ident(codec.target()));
+        }
         TypeRef::Constrained { rust_name, .. } => {
             names.push(super::ident(rust_name));
         }

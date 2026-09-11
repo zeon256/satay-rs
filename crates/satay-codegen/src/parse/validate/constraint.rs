@@ -15,6 +15,7 @@ pub(super) fn parse_validation(
         TypeRef::F32 | TypeRef::F64 => parse_number_validation(schema, base, context),
         TypeRef::Array(_) => parse_array_validation(schema, context),
         TypeRef::ParsedString(_)
+        | TypeRef::Coordinates(_)
         | TypeRef::ParsedInteger(_)
         | TypeRef::Range(_)
         | TypeRef::Bool

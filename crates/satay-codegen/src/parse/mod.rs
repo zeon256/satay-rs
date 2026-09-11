@@ -12,7 +12,7 @@ mod resolve;
 mod satay;
 #[cfg(test)]
 mod tests;
-mod validate;
+pub(crate) mod validate;
 
 #[derive(Debug)]
 pub(crate) struct Document {

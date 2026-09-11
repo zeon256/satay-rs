@@ -1,7 +1,7 @@
 use crate::ident::{field_ident, type_ident, unique_ident, variant_ident};
 use crate::model::{
-    Component, ComponentKind, ConstrainedType, Enum, Field, RangeType, RangeTypeRef, TypeRef,
-    Union, UnionTag, UnionTagStyle, UnionVariant,
+    Component, ComponentKind, ConstrainedType, CoordinateCodec, Enum, Field, RangeType,
+    RangeTypeRef, TypeRef, Union, UnionTag, UnionTagStyle, UnionVariant,
 };
 use crate::parse::registry::TypeRegistry;
 use crate::parse::validate::{
@@ -206,6 +206,11 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
             ValidatedTypeKind::Named(rust_name) => self.component_ref(rust_name, registry),
             ValidatedTypeKind::String => TypeRef::String,
             ValidatedTypeKind::ParsedString(codec) => TypeRef::ParsedString(codec.clone()),
+            ValidatedTypeKind::Coordinates(coordinates) => {
+                let component = self.validated_component(coordinates.target());
+                let target = self.parse_component_kind(&component, registry);
+                TypeRef::Coordinates(CoordinateCodec::from_validated(coordinates, &target))
+            }
             ValidatedTypeKind::ParsedInteger(parse_as) => TypeRef::ParsedInteger(*parse_as),
             ValidatedTypeKind::Integer(integer_type) => TypeRef::Integer(*integer_type),
             ValidatedTypeKind::F32 => TypeRef::F32,
