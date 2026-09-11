@@ -4,6 +4,8 @@ mod reachability;
 mod satay;
 mod schema;
 
+pub(crate) use schema::ValidatedCoordinates;
+
 use super::resolve::ResolvedDocument;
 use super::satay::SatayIdentifier;
 use crate::error::ValidationError;
@@ -117,6 +119,7 @@ impl ValidatedType {
             ValidatedTypeKind::Named(_)
             | ValidatedTypeKind::String
             | ValidatedTypeKind::ParsedString(_)
+            | ValidatedTypeKind::Coordinates(_)
             | ValidatedTypeKind::ParsedInteger(_)
             | ValidatedTypeKind::Integer(_)
             | ValidatedTypeKind::F32
@@ -144,6 +147,7 @@ impl ValidatedType {
             ValidatedTypeKind::Named(_)
             | ValidatedTypeKind::String
             | ValidatedTypeKind::ParsedString(_)
+            | ValidatedTypeKind::Coordinates(_)
             | ValidatedTypeKind::ParsedInteger(_)
             | ValidatedTypeKind::Integer(_)
             | ValidatedTypeKind::F32
@@ -169,6 +173,7 @@ impl ValidatedType {
             ValidatedTypeKind::Named(_)
             | ValidatedTypeKind::String
             | ValidatedTypeKind::ParsedString(_)
+            | ValidatedTypeKind::Coordinates(_)
             | ValidatedTypeKind::ParsedInteger(_)
             | ValidatedTypeKind::Integer(_)
             | ValidatedTypeKind::F32
@@ -186,6 +191,7 @@ pub(crate) enum ValidatedTypeKind {
     Named(String),
     String,
     ParsedString(StringCodec),
+    Coordinates(ValidatedCoordinates),
     ParsedInteger(ParseAs),
     Integer(IntegerType),
     F32,
@@ -229,9 +235,9 @@ impl NonEmptySentinels {
     }
 }
 
-/// A validated string decoded via a [`StringCodec`].
+/// A validated string decoded via a scalar or coordinate field codec.
 ///
-/// The private wrapper can only be constructed from a parsed-string kind.
+/// The private wrapper can only be constructed from a string-codec kind.
 #[derive(Debug, Clone)]
 pub(crate) struct ValidatedParsedString {
     ty: ValidatedType,
@@ -254,7 +260,10 @@ impl ValidatedParsedString {
     }
 
     fn try_from_type(ty: ValidatedType) -> Result<Self, NotParsedString> {
-        if matches!(ty.kind, ValidatedTypeKind::ParsedString(_)) {
+        if matches!(
+            ty.kind,
+            ValidatedTypeKind::ParsedString(_) | ValidatedTypeKind::Coordinates(_)
+        ) {
             Ok(Self { ty })
         } else {
             Err(NotParsedString)
@@ -359,6 +368,7 @@ pub(crate) fn validate_document<'a>(
     let excluded = reachability::excluded_component_schemas(&document)?;
     let components = schema::validate_components(&document, &excluded)?;
     let operations = operation::validate_operations(&document)?;
+    schema::validate_coordinate_uses(&components, &operations)?;
 
     Ok(ValidatedDocument {
         resolved: document,

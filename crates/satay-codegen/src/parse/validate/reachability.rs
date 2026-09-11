@@ -19,6 +19,7 @@ use oas3::spec::{
 use super::super::helpers::json_media_type;
 use super::super::reference::schema_component_ref;
 use super::super::resolve::ResolvedDocument;
+use super::super::satay::coordinate_target_reference;
 use super::operation::{inferred_operation_id, operation_satay_skip};
 use crate::error::ValidationError;
 use crate::model::HttpMethod;
@@ -163,6 +164,18 @@ fn collect_schema_ref_names(schema: &OasSchema, out: &mut BTreeSet<String>) {
         if let Ok(reference) = schema_component_ref(reference) {
             out.insert(reference.name().to_owned());
         }
+    }
+    collect_coordinate_ref_names(schema, out);
+}
+
+fn collect_coordinate_ref_names(schema: &OasSchema, out: &mut BTreeSet<String>) {
+    if let Some(reference) = schema.as_object().and_then(coordinate_target_reference)
+        && let Ok(reference) = schema_component_ref(reference)
+    {
+        out.insert(reference.name().to_owned());
+    }
+    for subschema in schema.subschemas() {
+        collect_coordinate_ref_names(subschema, out);
     }
 }
 

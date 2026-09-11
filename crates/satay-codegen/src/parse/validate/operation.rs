@@ -456,13 +456,13 @@ fn parse_parameter_default(
             || invalid_parameter_default(wire_name, value, "expected a JSON boolean"),
         )?)),
         ValidatedTypeKind::Enum(enum_) => parse_enum_parameter_default(value, enum_, wire_name),
-        ValidatedTypeKind::ParsedString(_) | ValidatedTypeKind::ParsedInteger(_) => {
-            Err(invalid_parameter_default(
-                wire_name,
-                value,
-                "defaults for x-satay parsed parameters are not supported",
-            ))
-        }
+        ValidatedTypeKind::ParsedString(_)
+        | ValidatedTypeKind::Coordinates(_)
+        | ValidatedTypeKind::ParsedInteger(_) => Err(invalid_parameter_default(
+            wire_name,
+            value,
+            "defaults for x-satay parsed parameters are not supported",
+        )),
         ValidatedTypeKind::Array(_) => Err(invalid_parameter_default(
             wire_name,
             value,

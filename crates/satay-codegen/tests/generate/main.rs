@@ -8,6 +8,7 @@ mod all_of;
 mod ast;
 mod behavior;
 mod common;
+mod coordinates;
 mod enums;
 mod identifiers;
 mod ignore;

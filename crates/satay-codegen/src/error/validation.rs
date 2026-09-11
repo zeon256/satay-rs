@@ -103,6 +103,23 @@ pub enum ValidationError {
         keyword: &'static str,
     },
 
+    /// A coordinate selector is missing, inconsistent, or selects an invalid target shape.
+    #[error("{context} has invalid x-satay coordinates configuration: {reason}")]
+    InvalidSatayCoordinates { context: String, reason: String },
+
+    /// A coordinate-specific option was configured without the coordinate codec.
+    #[error("{context} uses x-satay.{keyword} without x-satay.parse-as `coordinates`")]
+    SatayOptionRequiresCoordinates {
+        context: String,
+        keyword: &'static str,
+    },
+
+    /// A field-local coordinate codec would be lost in this value context.
+    #[error(
+        "{context} uses a coordinates string codec outside a direct object property; coordinate codecs require a serde-bearing struct field"
+    )]
+    SatayCoordinatesRequireStructField { context: String },
+
     /// An `x-satay.enum-variants` entry points at a value that is not in the enum.
     ///
     /// Error message: `{context}.x-satay.enum-variants contains `{wire_name}`, which is not declared in the enum`

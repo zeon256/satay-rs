@@ -3,31 +3,42 @@ use std::collections::{BTreeMap, BTreeSet};
 use oas3::spec::{ObjectSchema as OasObjectSchema, SchemaType as OasSchemaType};
 use serde_json::Value as JsonValue;
 
-use super::super::reference::schema_type_wire;
+use super::super::reference::{schema_component_ref, schema_type_wire};
 use super::super::satay::{
-    SatayIdentifier, SatayIntegerTypeWire, SataySchemaOptions, parse_range_scalar,
-    parse_satay_enum_variants, satay_parse_as_wire, schema_options, validate_satay_integer_type,
+    SatayIdentifier, SatayIntegerTypeWire, SatayParseAsWire, SataySchemaOptions,
+    parse_range_scalar, parse_satay_enum_variants, satay_parse_as_wire, schema_options,
+    validate_satay_integer_type,
 };
 use super::constraint::{parse_integer_type, reject_keyword};
 use super::{NonEmptySentinels, ValidatedFieldDecoding};
 use crate::error::ValidationError;
 use crate::model::{
-    BoolStringMapping, BoolStringMappingError, IntegerType, ParseAs, RangeScalar, StringCodec,
+    BoolStringMapping, BoolStringMappingError, CoordinateDelimiter, IntegerType, ParseAs,
+    RangeScalar, StringCodec,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ValidatedTypeDirective {
+pub(crate) enum SchemaDirective {
     AsDeclared,
     Integer(IntegerType),
     ParsedString(StringCodec),
     ParsedIntegerBool,
     Range(RangeScalar),
+    Coordinates(CoordinateSelector),
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct ValidatedSataySchema {
-    pub(crate) directive: ValidatedTypeDirective,
+    pub(crate) directive: SchemaDirective,
     pub(super) property_options: Option<ValidatedPropertyOptions>,
+}
+
+/// Well-formed wire selectors, before resolving the target schema.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CoordinateSelector {
+    pub(super) target: String,
+    pub(super) fields: [String; 2],
+    pub(super) delimiter: CoordinateDelimiter,
 }
 
 #[derive(Debug, Clone)]
@@ -89,6 +100,9 @@ fn validate_type_satay(
     let options = schema_options(schema, context)?.unwrap_or_default();
     let SataySchemaOptions {
         parse_as,
+        target,
+        fields,
+        delimiter,
         integer_type,
         treat_error_as_none,
         none_if,
@@ -105,7 +119,21 @@ fn validate_type_satay(
         });
     }
 
-    let parse_as = (*parse_as).map(|wire| wire.into_parse_as());
+    let coordinates = *parse_as == Some(SatayParseAsWire::Coordinates);
+    if !coordinates {
+        let stray = target
+            .as_ref()
+            .map(|_| "target")
+            .or_else(|| fields.as_ref().map(|_| "fields"))
+            .or_else(|| delimiter.as_ref().map(|_| "delimiter"));
+        if let Some(keyword) = stray {
+            return Err(ValidationError::SatayOptionRequiresCoordinates {
+                context: context.to_owned(),
+                keyword,
+            });
+        }
+    }
+    let parse_as = (*parse_as).and_then(SatayParseAsWire::into_parse_as);
     let integer_type_wire = *integer_type;
     let explicit_integer_type = match integer_type_wire {
         Some(SatayIntegerTypeWire::Auto) | None => None,
@@ -129,50 +157,33 @@ fn validate_type_satay(
             identifier.clone(),
         ),
     };
-    let directive = validate_type_directive(
-        schema,
-        schema_type,
-        parse_as,
-        integer_type_wire,
-        explicit_integer_type,
-        context,
-    )?;
+    let directive = if coordinates {
+        SchemaDirective::Coordinates(validate_coordinate_selector(
+            schema,
+            schema_type,
+            &options,
+            context,
+        )?)
+    } else {
+        validate_type_directive(
+            schema,
+            schema_type,
+            parse_as,
+            integer_type_wire,
+            explicit_integer_type,
+            context,
+        )?
+    };
 
-    if sentinels.is_some() && !matches!(&directive, ValidatedTypeDirective::ParsedString(_)) {
-        return Err(ValidationError::SatayNoneIfRequiresParsedString {
-            context: context.to_owned(),
-        });
-    }
-    if sentinels.is_some() && treat_error_as_none {
-        return Err(ValidationError::ConflictingSatayNoneHandling {
-            context: context.to_owned(),
-        });
-    }
-
-    let none_if = sentinels
-        .as_ref()
-        .map_or(&[][..], NonEmptySentinels::as_slice);
-    let bool_string_mapping = validate_bool_string_mapping(
+    let (directive, field_decoding) = validate_field_decoding(
+        directive,
+        sentinels,
+        treat_error_as_none,
         true_values.as_deref(),
         false_values.as_deref(),
         *unknown_as,
-        &directive,
-        none_if,
         context,
     )?;
-    let directive = match (directive, bool_string_mapping) {
-        (ValidatedTypeDirective::ParsedString(_), Some(mapping)) => {
-            ValidatedTypeDirective::ParsedString(StringCodec::MappedBool(mapping))
-        }
-        (directive, None) => directive,
-        _ => unreachable!("validated boolean mapping requires a parsed string"),
-    };
-
-    let field_decoding = match sentinels {
-        Some(sentinels) => ValidatedFieldDecoding::Sentinel(sentinels),
-        None if treat_error_as_none => ValidatedFieldDecoding::Lossy,
-        None => ValidatedFieldDecoding::Strict,
-    };
 
     if matches!(validation_context, SatayValidationContext::Property) {
         reject_options_with_ignore(&options, context)?;
@@ -190,6 +201,129 @@ fn validate_type_satay(
     Ok(ValidatedSataySchema {
         directive,
         property_options,
+    })
+}
+
+fn validate_field_decoding(
+    directive: SchemaDirective,
+    sentinels: Option<NonEmptySentinels>,
+    treat_error_as_none: bool,
+    true_values: Option<&[String]>,
+    false_values: Option<&[String]>,
+    unknown_as: Option<bool>,
+    context: &str,
+) -> Result<(SchemaDirective, ValidatedFieldDecoding), ValidationError> {
+    if sentinels.is_some()
+        && !matches!(
+            &directive,
+            SchemaDirective::ParsedString(_) | SchemaDirective::Coordinates(_)
+        )
+    {
+        return Err(ValidationError::SatayNoneIfRequiresParsedString {
+            context: context.to_owned(),
+        });
+    }
+    if sentinels.is_some() && treat_error_as_none {
+        return Err(ValidationError::ConflictingSatayNoneHandling {
+            context: context.to_owned(),
+        });
+    }
+
+    let none_if = sentinels
+        .as_ref()
+        .map_or(&[][..], NonEmptySentinels::as_slice);
+    let bool_string_mapping = validate_bool_string_mapping(
+        true_values,
+        false_values,
+        unknown_as,
+        &directive,
+        none_if,
+        context,
+    )?;
+    let directive = match (directive, bool_string_mapping) {
+        (SchemaDirective::ParsedString(_), Some(mapping)) => {
+            SchemaDirective::ParsedString(StringCodec::MappedBool(mapping))
+        }
+        (directive, None) => directive,
+        _ => unreachable!("validated boolean mapping requires a parsed string"),
+    };
+
+    let field_decoding = match sentinels {
+        Some(sentinels) => ValidatedFieldDecoding::Sentinel(sentinels),
+        None if treat_error_as_none => ValidatedFieldDecoding::Lossy,
+        None => ValidatedFieldDecoding::Strict,
+    };
+
+    Ok((directive, field_decoding))
+}
+
+fn validate_coordinate_selector(
+    schema: &OasObjectSchema,
+    schema_type: Option<OasSchemaType>,
+    options: &SataySchemaOptions,
+    context: &str,
+) -> Result<CoordinateSelector, ValidationError> {
+    let invalid = |reason: &str| ValidationError::InvalidSatayCoordinates {
+        context: context.to_owned(),
+        reason: reason.to_owned(),
+    };
+    if schema_type != Some(OasSchemaType::String) {
+        return Err(invalid("parse-as `coordinates` requires a string schema"));
+    }
+    if options.integer_type.is_some() {
+        return Err(invalid("integer-type is not meaningful for coordinates"));
+    }
+    // Constraints belong to the target's numeric fields. Applying string or
+    // numeric constraints to the converted object would silently change meaning.
+    for keyword in schema.present_keywords() {
+        if !matches!(
+            keyword,
+            "type"
+                | "title"
+                | "description"
+                | "default"
+                | "deprecated"
+                | "readOnly"
+                | "writeOnly"
+                | "examples"
+                | "example"
+        ) && !keyword.starts_with("x-")
+        {
+            return Err(invalid(&format!(
+                "schema keyword `{keyword}` cannot be combined with coordinates"
+            )));
+        }
+    }
+    let target = options
+        .target
+        .as_ref()
+        .ok_or_else(|| invalid("target with a schema $ref is required"))?;
+    let target = schema_component_ref(&target.reference).map_err(|source| {
+        ValidationError::ResolveReference {
+            reference: target.reference.clone(),
+            context: context.to_owned(),
+            source: Box::new(source),
+        }
+    })?;
+    let fields = options
+        .fields
+        .as_deref()
+        .ok_or_else(|| invalid("fields must select exactly two distinct target wire names"))?;
+    let [first, second] = fields else {
+        return Err(invalid(
+            "fields must select exactly two distinct target wire names",
+        ));
+    };
+    if first == second {
+        return Err(invalid("fields must select two distinct target wire names"));
+    }
+    let delimiter =
+        CoordinateDelimiter::new(options.delimiter.clone().unwrap_or_else(|| " ".to_owned()))
+            .ok_or_else(|| invalid("delimiter must be a nonempty literal string"))?;
+    Ok(CoordinateSelector {
+        target: target.name().to_owned(),
+        fields: [first.as_str().to_owned(), second.as_str().to_owned()],
+        delimiter,
     })
 }
 
@@ -213,25 +347,23 @@ fn validate_type_directive(
     integer_type_wire: Option<SatayIntegerTypeWire>,
     explicit_integer_type: Option<IntegerType>,
     context: &str,
-) -> Result<ValidatedTypeDirective, ValidationError> {
+) -> Result<SchemaDirective, ValidationError> {
     validate_satay_integer_type(schema_type, parse_as, integer_type_wire, context)?;
 
     if let Some(parse_as) = parse_as {
         return match (schema_type, parse_as) {
             (Some(OasSchemaType::String), ParseAs::IntegerRange | ParseAs::NumberRange) => {
-                Ok(ValidatedTypeDirective::Range(parse_range_scalar(
+                Ok(SchemaDirective::Range(parse_range_scalar(
                     schema,
                     parse_as,
                     explicit_integer_type,
                     context,
                 )?))
             }
-            (Some(OasSchemaType::String), parse_as) => Ok(ValidatedTypeDirective::ParsedString(
+            (Some(OasSchemaType::String), parse_as) => Ok(SchemaDirective::ParsedString(
                 StringCodec::Standard(parse_as),
             )),
-            (Some(OasSchemaType::Integer), ParseAs::Bool) => {
-                Ok(ValidatedTypeDirective::ParsedIntegerBool)
-            }
+            (Some(OasSchemaType::Integer), ParseAs::Bool) => Ok(SchemaDirective::ParsedIntegerBool),
             _ => Err(ValidationError::SatayParseAsRequiresString {
                 context: context.to_owned(),
                 parse_as: satay_parse_as_wire(parse_as).to_owned(),
@@ -251,7 +383,7 @@ fn validate_type_directive(
         } else {
             parse_integer_type(schema, context, explicit_integer_type)?
         };
-        return Ok(ValidatedTypeDirective::Integer(integer_type));
+        return Ok(SchemaDirective::Integer(integer_type));
     }
 
     if schema_type == Some(OasSchemaType::String) && schema.format.as_deref() == Some("uri") {
@@ -260,19 +392,19 @@ fn validate_type_directive(
         reject_keyword(schema.pattern.is_some(), "pattern", context)?;
         reject_keyword(schema.min_length.is_some(), "minLength", context)?;
         reject_keyword(schema.max_length.is_some(), "maxLength", context)?;
-        return Ok(ValidatedTypeDirective::ParsedString(StringCodec::Standard(
+        return Ok(SchemaDirective::ParsedString(StringCodec::Standard(
             ParseAs::Url,
         )));
     }
 
-    Ok(ValidatedTypeDirective::AsDeclared)
+    Ok(SchemaDirective::AsDeclared)
 }
 
 fn validate_bool_string_mapping(
     true_values: Option<&[String]>,
     false_values: Option<&[String]>,
     unknown_as: Option<bool>,
-    directive: &ValidatedTypeDirective,
+    directive: &SchemaDirective,
     none_if: &[String],
     context: &str,
 ) -> Result<Option<BoolStringMapping>, ValidationError> {
@@ -282,7 +414,7 @@ fn validate_bool_string_mapping(
     }
     if !matches!(
         directive,
-        ValidatedTypeDirective::ParsedString(codec) if codec.parse_as() == ParseAs::Bool
+        SchemaDirective::ParsedString(codec) if codec.parse_as() == ParseAs::Bool
     ) {
         return Err(ValidationError::SatayBoolMappingRequiresParsedStringBool {
             context: context.to_owned(),
@@ -379,6 +511,9 @@ fn reject_options_with_ignore(
         .or_else(|| options.enum_variants.as_ref().map(|_| "enum-variants"))
         .or_else(|| options.parse_as.as_ref().map(|_| "parse-as"))
         .or_else(|| options.integer_type.as_ref().map(|_| "integer-type"))
+        .or_else(|| options.target.as_ref().map(|_| "target"))
+        .or_else(|| options.fields.as_ref().map(|_| "fields"))
+        .or_else(|| options.delimiter.as_ref().map(|_| "delimiter"))
         .or_else(|| options.identifier.as_ref().map(|_| "identifier"));
     if let Some(keyword) = conflicting_keyword {
         return Err(ValidationError::SatayOptionConflictsWithIgnore {
@@ -420,6 +555,9 @@ fn validate_enum_satay(
     let options = schema_options(schema, context)?.unwrap_or_default();
     let SataySchemaOptions {
         parse_as,
+        target,
+        fields,
+        delimiter,
         integer_type,
         treat_error_as_none,
         none_if,
@@ -441,10 +579,10 @@ fn validate_enum_satay(
         )?;
     }
 
-    if let Some(parse_as) = (*parse_as).map(|wire| wire.into_parse_as()) {
+    if let Some(parse_as) = parse_as {
         return Err(ValidationError::SatayParseAsWithEnum {
             context: context.to_owned(),
-            parse_as: satay_parse_as_wire(parse_as).to_owned(),
+            parse_as: parse_as.wire_name().to_owned(),
         });
     }
     if none_if
@@ -461,6 +599,9 @@ fn validate_enum_satay(
         .or_else(|| none_if.as_ref().map(|_| "none-if"))
         .or_else(|| true_values.as_ref().map(|_| "true-values"))
         .or_else(|| false_values.as_ref().map(|_| "false-values"))
+        .or_else(|| target.as_ref().map(|_| "target"))
+        .or_else(|| fields.as_ref().map(|_| "fields"))
+        .or_else(|| delimiter.as_ref().map(|_| "delimiter"))
         .or_else(|| unknown_as.as_ref().map(|_| "unknown-as"));
     if let Some(keyword) = unsupported_keyword {
         return Err(ValidationError::SatayOptionUnsupportedWithEnum {
@@ -539,7 +680,7 @@ mod tests {
             None,
         ] {
             let validated = validate_value_satay(&schema, schema_type, "Value").unwrap();
-            assert_eq!(validated.directive, ValidatedTypeDirective::AsDeclared);
+            assert_eq!(validated.directive, SchemaDirective::AsDeclared);
         }
     }
 
@@ -552,7 +693,7 @@ mod tests {
 
         assert_eq!(
             validated.directive,
-            ValidatedTypeDirective::ParsedString(StringCodec::Standard(ParseAs::OffsetDateTime))
+            SchemaDirective::ParsedString(StringCodec::Standard(ParseAs::OffsetDateTime))
         );
         assert!(validated.property_options.is_none());
     }
@@ -566,7 +707,7 @@ mod tests {
 
         assert_eq!(
             validated.directive,
-            ValidatedTypeDirective::ParsedString(StringCodec::Standard(ParseAs::Date))
+            SchemaDirective::ParsedString(StringCodec::Standard(ParseAs::Date))
         );
     }
 
@@ -579,7 +720,7 @@ mod tests {
 
         assert_eq!(
             validated.directive,
-            ValidatedTypeDirective::ParsedString(StringCodec::Standard(ParseAs::NaiveDateTime))
+            SchemaDirective::ParsedString(StringCodec::Standard(ParseAs::NaiveDateTime))
         );
     }
 
@@ -590,10 +731,7 @@ mod tests {
         let validated =
             validate_value_satay(&schema, Some(OasSchemaType::Integer), "Flag.enabled").unwrap();
 
-        assert_eq!(
-            validated.directive,
-            ValidatedTypeDirective::ParsedIntegerBool
-        );
+        assert_eq!(validated.directive, SchemaDirective::ParsedIntegerBool);
     }
 
     #[test]
@@ -658,7 +796,7 @@ mod tests {
 
         assert_eq!(
             validated.directive,
-            ValidatedTypeDirective::ParsedString(StringCodec::MappedBool(
+            SchemaDirective::ParsedString(StringCodec::MappedBool(
                 BoolStringMapping::try_new(
                     vec!["Y".to_owned(), "Yes".to_owned()],
                     vec!["N".to_owned(), "No".to_owned()],
@@ -749,7 +887,7 @@ mod tests {
                 .unwrap();
         assert_eq!(
             parameter.directive,
-            ValidatedTypeDirective::ParsedString(StringCodec::MappedBool(
+            SchemaDirective::ParsedString(StringCodec::MappedBool(
                 BoolStringMapping::try_new(vec!["Y".to_owned()], vec!["N".to_owned()], None,)
                     .expect("boolean string mapping should be valid")
             ))
@@ -803,7 +941,7 @@ mod tests {
 
         assert_eq!(
             validated.directive,
-            ValidatedTypeDirective::Range(RangeScalar::Integer(IntegerType::U16))
+            SchemaDirective::Range(RangeScalar::Integer(IntegerType::U16))
         );
     }
 
@@ -816,7 +954,7 @@ mod tests {
 
         assert_eq!(
             validated.directive,
-            ValidatedTypeDirective::Integer(IntegerType::U16)
+            SchemaDirective::Integer(IntegerType::U16)
         );
     }
 
@@ -831,7 +969,7 @@ mod tests {
 
         assert_eq!(
             validated.directive,
-            ValidatedTypeDirective::Integer(IntegerType::U8)
+            SchemaDirective::Integer(IntegerType::U8)
         );
     }
 
@@ -844,10 +982,7 @@ mod tests {
             let validated =
                 validate_value_satay(&schema, Some(OasSchemaType::Integer), "Epoch").unwrap();
 
-            assert_eq!(
-                validated.directive,
-                ValidatedTypeDirective::Integer(expected)
-            );
+            assert_eq!(validated.directive, SchemaDirective::Integer(expected));
         }
     }
 
@@ -865,7 +1000,7 @@ mod tests {
 
         assert_eq!(
             validated.directive,
-            ValidatedTypeDirective::Range(RangeScalar::Integer(IntegerType::U8))
+            SchemaDirective::Range(RangeScalar::Integer(IntegerType::U8))
         );
     }
 
