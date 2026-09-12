@@ -1965,6 +1965,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "satay-storage"
+version = "0.17.2"
+dependencies = [
+ "bumpalo",
+]
+
+[[package]]
 name = "satay-ureq"
 version = "0.17.2"
 dependencies = [
