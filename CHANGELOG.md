@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.2](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.17.1...satay-codegen-v0.17.2) - 2026-09-12
+
+### Fixed
+
+- *(codegen)* ensure that we dont emit fully qualified path
+
 ## [0.17.1](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.17.0...satay-codegen-v0.17.1) - 2026-09-11
 
 ### Added
