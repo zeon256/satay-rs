@@ -188,6 +188,25 @@ jobs:
 
           cargo dylint --all --no-deps "${package_args[@]}" -- --tests
 
+  storage-no-std:
+    name: Storage without std
+    needs: changes
+    if: contains(fromJSON(needs.changes.outputs.packages), 'satay-storage')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install Rust with bare-metal target
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: stable
+          targets: thumbv7em-none-eabi
+      - name: Check core-only and alloc storage
+        env:
+          RUSTC_WRAPPER: ""
+        run: |
+          cargo check -p satay-storage --lib --target thumbv7em-none-eabi --no-default-features
+          cargo check -p satay-storage --lib --target thumbv7em-none-eabi
+
   test:
     name: Test
     needs: changes
@@ -212,10 +231,18 @@ jobs:
       - name: Test satay-oas3 without default features
         if: needs.changes.outputs.has_oas3_parser == 'true'
         run: cargo test --package satay-oas3 --no-default-features
+      - name: Test storage without default features
+        if: contains(fromJSON(needs.changes.outputs.packages), 'satay-storage')
+        run: cargo test --package satay-storage --no-default-features
+      - name: Run storage consumer examples
+        if: contains(fromJSON(needs.changes.outputs.packages), 'satay-storage')
+        run: |
+          cargo run -p satay-storage --example bumpalo
+          cargo run -p satay-storage --example hash_map
 
   result:
     name: QC Result
-    needs: [changes, fmt, clippy, check, dylint, test]
+    needs: [changes, fmt, clippy, check, dylint, storage-no-std, test]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -227,6 +254,7 @@ jobs:
             ${{ needs.clippy.result }}
             ${{ needs.check.result }}
             ${{ needs.dylint.result }}
+            ${{ needs.storage-no-std.result }}
             ${{ needs.test.result }}
         run: |
           set -euo pipefail
