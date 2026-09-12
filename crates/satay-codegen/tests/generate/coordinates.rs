@@ -119,6 +119,16 @@ components:
 #[test]
 fn coordinate_fields_reuse_target_types_without_changing_object_serde() {
     let files = satay_codegen::generate(COORDINATES).expect("generate coordinate codecs");
+    let types = &find_file(&files, "types.rs").contents;
+    // Keep coordinate helper calls within minimal_imports' two-segment limit.
+    assert!(types.contains("use satay_runtime::serde_string::pair::option as pair_option;"));
+    assert!(types.contains("pair_option::deserialize_lossy("));
+    assert!(types.contains("pair_option::deserialize("));
+    assert!(types.contains("use serde::de::Error;"));
+    assert!(types.contains("use serde::ser::Error;"));
+    assert!(!types.contains("pair::option::deserialize"));
+    assert!(!types.contains("serde::de::Error::custom"));
+    assert!(!types.contains("serde::ser::Error::custom"));
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();
     write_manifest(crate_dir, &runtime_path_toml(), true, false);

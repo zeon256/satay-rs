@@ -197,13 +197,9 @@ fn render_coordinates_functions(
         .iter()
         .map(|value| lit_str(value))
         .collect::<Vec<_>>();
-    let deserialize_module: syn::Path = if !field.required || field.ty.is_option() {
-        parse_quote!(pair::option)
-    } else {
-        parse_quote!(pair)
-    };
+    let deserialize_module = coordinates_deserialize_module(field, imports);
     let deserialize: syn::Expr = if field.treat_error_as_none {
-        parse_quote!(pair::option::deserialize_lossy(deserializer, #delimiter, #parse))
+        parse_quote!(pair_option::deserialize_lossy(deserializer, #delimiter, #parse))
     } else if none_if.is_empty() {
         parse_quote!(#deserialize_module::deserialize(deserializer, #delimiter, #parse))
     } else {
@@ -222,7 +218,7 @@ fn render_coordinates_functions(
         let first = #first_ref;
         let second = #second_ref;
         if !first.is_finite() || !second.is_finite() {
-            return Err(serde::ser::Error::custom("coordinate components must be finite"));
+            return Err(Error::custom("coordinate components must be finite"));
         }
         pair::serialize(first, second, #delimiter, serializer)
     });
@@ -255,6 +251,8 @@ fn render_coordinates_functions(
             where
                 D: serde::Deserializer<'de>,
             {
+                use serde::de::Error;
+
                 #deserialize
             }
         ),
@@ -270,10 +268,21 @@ fn render_coordinates_functions(
             where
                 Serializer: serde::Serializer,
             {
+                use serde::ser::Error;
+
                 #serialize
             }
         ),
     ]
+}
+
+fn coordinates_deserialize_module(field: &Field, imports: &mut BTreeSet<String>) -> syn::Path {
+    if !field.required || field.ty.is_option() || field.treat_error_as_none {
+        imports.insert("satay_runtime::serde_string::pair::option as pair_option".to_owned());
+        parse_quote!(pair_option)
+    } else {
+        parse_quote!(pair)
+    }
 }
 
 fn coordinate_scalar_type(scalar: &CoordinateScalar) -> syn::Type {
@@ -292,14 +301,14 @@ fn parse_coordinate_scalar(scalar: &CoordinateScalar, component: &syn::Ident) ->
         CoordinateScalar::Constrained { rust_name, inner } => {
             let name = ident(rust_name);
             let value = parse_coordinate_scalar(inner, component);
-            parse_quote!(self::#name::try_new(#value).map_err(serde::de::Error::custom)?)
+            parse_quote!(self::#name::try_new(#value).map_err(Error::custom)?)
         }
         CoordinateScalar::F32 | CoordinateScalar::F64 => {
             let ty = coordinate_scalar_type(scalar);
             parse_quote!({
-                let value = #component.parse::<#ty>().map_err(serde::de::Error::custom)?;
+                let value = #component.parse::<#ty>().map_err(Error::custom)?;
                 if !value.is_finite() {
-                    return Err(serde::de::Error::custom("coordinate components must be finite"));
+                    return Err(Error::custom("coordinate components must be finite"));
                 }
                 value
             })
