@@ -1801,7 +1801,7 @@ dependencies = [
 
 [[package]]
 name = "satay-cli"
-version = "0.17.3"
+version = "0.17.4"
 dependencies = [
  "argh",
  "satay-codegen",
@@ -1812,7 +1812,7 @@ dependencies = [
 
 [[package]]
 name = "satay-codegen"
-version = "0.17.3"
+version = "0.17.4"
 dependencies = [
  "compact_str",
  "heck",
@@ -1909,7 +1909,7 @@ dependencies = [
 
 [[package]]
 name = "satay-oas3"
-version = "0.17.3"
+version = "0.17.4"
 dependencies = [
  "assert_matches",
  "derive_more",
@@ -1940,7 +1940,7 @@ dependencies = [
 
 [[package]]
 name = "satay-reqwest"
-version = "0.17.3"
+version = "0.17.4"
 dependencies = [
  "bytes",
  "http",
@@ -1952,7 +1952,7 @@ dependencies = [
 
 [[package]]
 name = "satay-runtime"
-version = "0.17.3"
+version = "0.17.4"
 dependencies = [
  "fast-float2",
  "http",
@@ -1966,14 +1966,14 @@ dependencies = [
 
 [[package]]
 name = "satay-storage"
-version = "0.17.2"
+version = "0.17.4"
 dependencies = [
  "bumpalo",
 ]
 
 [[package]]
 name = "satay-ureq"
-version = "0.17.3"
+version = "0.17.4"
 dependencies = [
  "http",
  "satay-runtime",
