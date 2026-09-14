@@ -1,8 +1,8 @@
 use la_arena::Arena;
 
 use crate::{
-    AdditionalProperties, Api, BuildError, BuildErrors, Definition, DefinitionId, SchemaUse,
-    TypeExpr,
+    AdditionalProperties, Api, BuildError, BuildErrors, Definition, DefinitionId, GraphOwner,
+    HttpApi, SchemaUse, StringInterpretation, TypeExpr,
 };
 
 /// Allocates definitions and finalizes a semantic schema graph.
@@ -12,6 +12,7 @@ use crate::{
 #[derive(Debug, Default)]
 pub struct ApiBuilder {
     definitions: Arena<Option<Definition>>,
+    http: HttpApi,
 }
 
 impl ApiBuilder {
@@ -54,11 +55,20 @@ impl ApiBuilder {
         Ok(())
     }
 
+    /// Replaces the complete HTTP record with `http`.
+    ///
+    /// The previous record is dropped normally; no merge or validation occurs
+    /// here. HTTP roots carry no IDs.
+    pub fn set_http(&mut self, http: HttpApi) {
+        self.http = http;
+    }
+
     /// Validates graph integrity and returns an immutable graph.
     ///
-    /// This checks only slot completeness and reference ranges. It does not
+    /// This checks only slot completeness and schema-edge ranges. It does not
     /// evaluate schema satisfiability, compile patterns, compare bounds, reject
-    /// duplicate wire properties, or select backend representations.
+    /// duplicate wire properties, validate response ranges or media syntax, or
+    /// select backend representations.
     ///
     /// # Errors
     ///
@@ -75,12 +85,54 @@ impl ApiBuilder {
         let mut errors = vec![];
 
         for (slot_id, definition) in self.definitions.iter() {
-            let owner = DefinitionId::from_slot_index(slot_id);
+            let id = DefinitionId::from_slot_index(slot_id);
             match definition {
                 Some(definition) => {
-                    inspect_use(owner, &definition.schema, slot_count, &mut errors);
+                    inspect_use(
+                        GraphOwner::Definition(id),
+                        &definition.schema,
+                        slot_count,
+                        &mut errors,
+                    );
                 }
-                None => errors.push(BuildError::MissingDefinition { id: owner }),
+                None => errors.push(BuildError::MissingDefinition { id }),
+            }
+        }
+
+        for (path_index, path) in self.http.paths.iter().enumerate() {
+            for parameter in &path.parameters {
+                inspect_use(
+                    GraphOwner::Path { index: path_index },
+                    &parameter.schema,
+                    slot_count,
+                    &mut errors,
+                );
+            }
+            for (operation_index, operation) in path.operations.iter().enumerate() {
+                let owner = GraphOwner::Operation {
+                    path_index,
+                    operation_index,
+                };
+                for parameter in &operation.parameters {
+                    inspect_use(owner, &parameter.schema, slot_count, &mut errors);
+                }
+                if let Some(request_body) = &operation.request_body {
+                    for media in &request_body.content {
+                        if let Some(schema) = &media.schema {
+                            inspect_use(owner, schema, slot_count, &mut errors);
+                        }
+                    }
+                }
+                for response in &operation.responses {
+                    for media in &response.content {
+                        if let Some(schema) = &media.media.schema {
+                            inspect_use(owner, schema, slot_count, &mut errors);
+                        }
+                        if let Some(projection) = &media.projection {
+                            inspect_use(owner, &projection.output, slot_count, &mut errors);
+                        }
+                    }
+                }
             }
         }
 
@@ -96,12 +148,15 @@ impl ApiBuilder {
             debug_assert_eq!(actual_id, expected_id);
         }
 
-        Ok(Api { definitions })
+        Ok(Api {
+            definitions,
+            http: self.http,
+        })
     }
 }
 
 fn inspect_use(
-    owner: DefinitionId,
+    owner: GraphOwner,
     schema_use: &SchemaUse,
     slot_count: usize,
     errors: &mut Vec<BuildError>,
@@ -125,10 +180,38 @@ fn inspect_use(
                 inspect_use(owner, value, slot_count, errors);
             }
         }
-        TypeExpr::String(_)
-        | TypeExpr::Integer(_)
+        TypeExpr::Composition(composition) => {
+            for branch in &composition.branches {
+                inspect_use(owner, branch, slot_count, errors);
+            }
+            if let Some(discriminator) = &composition.discriminator {
+                for mapping in &discriminator.mappings {
+                    if mapping.target.raw_index() >= slot_count {
+                        errors.push(BuildError::UnresolvedReference {
+                            owner,
+                            target: mapping.target,
+                            location: mapping.source.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        TypeExpr::String(schema) => {
+            if let StringInterpretation::Coordinates(coordinates) = &schema.interpretation {
+                let target = coordinates.target();
+                if target.raw_index() >= slot_count {
+                    errors.push(BuildError::UnresolvedReference {
+                        owner,
+                        target,
+                        location: schema_use.annotations.source.clone(),
+                    });
+                }
+            }
+        }
+        TypeExpr::Integer(_)
         | TypeExpr::Number(_)
         | TypeExpr::Boolean
+        | TypeExpr::Null
         | TypeExpr::AnyJson
         | TypeExpr::Ref(_) => {}
     }

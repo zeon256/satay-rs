@@ -1,6 +1,6 @@
 use la_arena::Arena;
 
-use crate::{Definition, DefinitionId};
+use crate::{Definition, DefinitionId, HttpApi};
 
 /// A structurally finalized semantic schema graph.
 ///
@@ -10,6 +10,7 @@ use crate::{Definition, DefinitionId};
 #[derive(Debug, Clone)]
 pub struct Api {
     pub(crate) definitions: Arena<Definition>,
+    pub(crate) http: HttpApi,
 }
 
 impl Api {
@@ -22,6 +23,15 @@ impl Api {
         }
 
         Some(&self.definitions[id.definition_index()])
+    }
+
+    /// Returns the immutable HTTP record.
+    ///
+    /// Paths, operations, and metadata appear in caller order; no effective
+    /// merging or filtering has been applied.
+    #[must_use]
+    pub fn http(&self) -> &HttpApi {
+        &self.http
     }
 
     /// Iterates over definitions in allocation order.

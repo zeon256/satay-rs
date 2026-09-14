@@ -4,7 +4,7 @@ use std::io;
 
 use satay_ir::{
     AdditionalProperties, Api, ApiBuilder, ArrayConstraints, ArraySchema, Definition, DefinitionId,
-    ObjectSchema, Property, SchemaUse, StringSchema, TypeExpr,
+    ObjectSchema, Property, PropertyPolicy, SchemaUse, StringSchema, TypeExpr,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -55,11 +55,13 @@ fn build_graph(
                             wire_name: "owner".into(),
                             required: true,
                             value: SchemaUse::new(TypeExpr::Ref(user)),
+                            policy: PropertyPolicy::default(),
                         },
                         Property {
                             wire_name: "reviewer".into(),
                             required: false,
                             value: SchemaUse::new(TypeExpr::Ref(user)),
+                            policy: PropertyPolicy::default(),
                         },
                         Property {
                             wire_name: "tags".into(),
@@ -70,6 +72,7 @@ fn build_graph(
                                 ))),
                                 constraints: ArrayConstraints::default(),
                             })),
+                            policy: PropertyPolicy::default(),
                         },
                     ],
                     additional_properties: AdditionalProperties::Forbidden,
