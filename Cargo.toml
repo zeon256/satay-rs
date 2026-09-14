@@ -8,6 +8,7 @@ members = [
   "crates/satay-oas3/integration-tests",
   "crates/satay-reqwest",
   "crates/satay-runtime",
+  "crates/satay-ir",
   "crates/satay-storage",
   "crates/satay-ureq",
   "examples/reqwest",
@@ -21,6 +22,7 @@ default-members = [
   "crates/satay-codegen",
   "crates/satay-reqwest",
   "crates/satay-runtime",
+  "crates/satay-ir",
   "crates/satay-storage",
   "crates/satay-ureq",
   "examples/reqwest",
@@ -50,6 +52,7 @@ futures-util = "0.3"
 http = "1"
 indexmap = "2"
 indoc = "2"
+la-arena = "0.3.1"
 log = "0.4"
 maplit = "1"
 oas3 = { package = "satay-oas3", version = "0.17.3", path = "crates/satay-oas3/crates/oas3", default-features = false }
@@ -63,6 +66,7 @@ quote = "1"
 regex = "1.12.3"
 reqwest = { version = "0.13", default-features = false }
 satay-codegen = { version = "0.17.3", path = "crates/satay-codegen" }
+satay-ir = { version = "0.17.3", path = "crates/satay-ir" }
 satay-reqwest = { version = "0.17.3", path = "crates/satay-reqwest" }
 satay-runtime = { version = "0.17.3", path = "crates/satay-runtime" }
 satay-ureq = { version = "0.17.3", path = "crates/satay-ureq" }

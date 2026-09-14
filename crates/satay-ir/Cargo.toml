@@ -1,0 +1,18 @@
+[package]
+name = "satay-ir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Resolved semantic schema graphs for Satay"
+repository = "https://github.com/zeon256/satay-rs"
+homepage = "https://github.com/zeon256/satay-rs"
+documentation = "https://docs.rs/satay-ir"
+
+[dependencies]
+la-arena.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
