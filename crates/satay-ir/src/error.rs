@@ -22,16 +22,36 @@ pub enum BuildError {
         id: DefinitionId,
     },
     /// A schema use references an ID outside the builder's slot range.
-    #[error(
-        "definition {owner:?} references unknown definition {target:?} (location: {location:?})"
-    )]
+    #[error("{owner:?} references unknown definition {target:?} (location: {location:?})")]
     UnresolvedReference {
-        /// Definition containing the offending schema use.
-        owner: DefinitionId,
+        /// Graph node containing the offending schema use.
+        owner: GraphOwner,
         /// Out-of-range referenced definition ID.
         target: DefinitionId,
         /// Provenance attached to the offending schema use.
         location: Option<SourceRef>,
+    },
+}
+
+/// The graph node owning one checked schema use.
+///
+/// Indices identify vector positions in the submitted HTTP tree, not portable
+/// IDs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraphOwner {
+    /// A definition slot owner.
+    Definition(DefinitionId),
+    /// A path-level owner.
+    Path {
+        /// Position of the path in the submitted `HttpApi.paths`.
+        index: usize,
+    },
+    /// An operation-level owner.
+    Operation {
+        /// Position of the path in the submitted `HttpApi.paths`.
+        path_index: usize,
+        /// Position of the operation in the path's `operations`.
+        operation_index: usize,
     },
 }
 

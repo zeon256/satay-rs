@@ -1,9 +1,11 @@
 //! Local semantic retention checks over finalized definitions.
 //!
 use satay_ir::{
-    AdditionalProperties, ApiBuilder, Definition, DefinitionId, IntegerSchema, NumericBound,
-    NumericConstraints, ObjectSchema, Property, SchemaAnnotations, SchemaUse, SourceRef,
-    StringConstraints, StringSchema, TypeExpr,
+    AdditionalProperties, ApiBuilder, BoolMapping, CoordinatesInterpretation, DecodePolicy,
+    Definition, DefinitionId, IntegerInterpretation, IntegerRepresentation, IntegerSchema,
+    NumberSchema, NumericBound, NumericConstraints, ObjectSchema, Property, PropertyPolicy,
+    SchemaAnnotations, SchemaUse, SentinelValues, SourceRef, StringConstraints,
+    StringInterpretation, StringSchema, TypeExpr,
 };
 use serde_json::{Number, Value};
 
@@ -40,6 +42,7 @@ fn container_definition(shared: DefinitionId) -> Definition {
                             source: Some(source("/properties/required_nullable")),
                         },
                     },
+                    policy: PropertyPolicy::default(),
                 },
                 Property {
                     wire_name: "optional_non_null".into(),
@@ -54,6 +57,7 @@ fn container_definition(shared: DefinitionId) -> Definition {
                             source: Some(source("/properties/optional_non_null")),
                         },
                     },
+                    policy: PropertyPolicy::default(),
                 },
             ],
             additional_properties: AdditionalProperties::Unspecified,
@@ -78,7 +82,6 @@ fn required_nullable_default_and_use_annotations_remain_local() {
         },
     ));
     let container = builder.add_definition(container_definition(shared));
-
     let api = builder.finish().unwrap();
     let TypeExpr::Object(container_schema) = &api.definition(container).unwrap().schema.ty else {
         panic!("Container should be an object");
@@ -154,6 +157,7 @@ fn numeric_bounds_retain_json_numbers_and_exclusivity() {
                         exclusive: true,
                     }),
                 },
+                interpretation: IntegerInterpretation::default(),
             }),
             nullable: false,
             annotations: SchemaAnnotations {
@@ -172,6 +176,7 @@ fn numeric_bounds_retain_json_numbers_and_exclusivity() {
                     exclusive: false,
                 }),
             },
+            interpretation: IntegerInterpretation::default(),
         })),
     ));
 
@@ -205,6 +210,8 @@ fn enum_const_and_additional_property_rules_remain_distinct() {
             constraints: StringConstraints::default(),
             enum_values: Some(vec!["pending".into(), "ready".into(), "failed".into()]),
             const_value: Some("ready".into()),
+            enum_variants: vec![],
+            interpretation: StringInterpretation::Plain,
         })),
     ));
     let unspecified = builder.add_definition(object_definition(
@@ -278,4 +285,342 @@ fn object_rule(schema: &SchemaUse) -> &AdditionalProperties {
         panic!("schema should be an object");
     };
     &object.additional_properties
+}
+
+/// Shared coordinate definitions keep local property policies independent.
+#[test]
+fn coordinate_uses_keep_local_policies_independent_of_shared_definition() {
+    let mut builder = ApiBuilder::new();
+    let target = builder.reserve_definition();
+    let coordinates = builder.reserve_definition();
+    let container = builder.reserve_definition();
+
+    build_coordinate_shapes(&mut builder, target, coordinates);
+    builder
+        .define(container, policy_container_definition(target, coordinates))
+        .unwrap();
+
+    let api = builder.finish().unwrap();
+    let TypeExpr::Object(container_schema) = &api.definition(container).unwrap().schema.ty else {
+        panic!("Container should be an object");
+    };
+
+    // The shared definition is unmodified by any property policy.
+    let shared = &api.definition(coordinates).unwrap().schema;
+    let TypeExpr::String(shared_string) = &shared.ty else {
+        panic!("Coordinates should be a string");
+    };
+    let StringInterpretation::Coordinates(shared_coordinates) = &shared_string.interpretation
+    else {
+        panic!("Coordinates should carry a coordinates interpretation");
+    };
+    assert!(matches!(shared_coordinates.target(), id if id == target));
+    assert_eq!(
+        shared_coordinates.fields(),
+        &["latitude".to_string(), "longitude".to_string()]
+    );
+    assert_eq!(shared_coordinates.delimiter(), " ");
+    assert_eq!(
+        shared.annotations.source,
+        Some(source("/$defs/Coordinates"))
+    );
+
+    let source_property = &container_schema.properties[0];
+    assert!(matches!(source_property.value.ty, TypeExpr::Ref(id) if id == coordinates));
+    assert_eq!(
+        source_property.value.annotations.default,
+        Some(Value::String("N/A".into()))
+    );
+    assert!(matches!(
+        &source_property.policy,
+        PropertyPolicy::Included {
+            identifier: None,
+            decoding: DecodePolicy::ErrorAsAbsent
+        }
+    ));
+
+    let origin_property = &container_schema.properties[1];
+    assert!(!origin_property.required);
+    assert!(matches!(
+        &origin_property.policy,
+        PropertyPolicy::Included {
+            identifier: Some(words),
+            decoding: DecodePolicy::PropagateError,
+        } if words == &vec!["location".to_string(), "of".to_string(), "origin".to_string()]
+    ));
+
+    let inline_property = &container_schema.properties[2];
+    let TypeExpr::String(inline_string) = &inline_property.value.ty else {
+        panic!("inline should be an inline string");
+    };
+    let StringInterpretation::Coordinates(inline_coordinates) = &inline_string.interpretation
+    else {
+        panic!("inline should carry a coordinates interpretation");
+    };
+    assert!(matches!(inline_coordinates.target(), id if id == target));
+    assert_eq!(
+        inline_coordinates.fields(),
+        &["longitude".to_string(), "latitude".to_string()]
+    );
+    assert_eq!(inline_coordinates.delimiter(), ",");
+    assert!(matches!(
+        &inline_property.policy,
+        PropertyPolicy::Included {
+            identifier: None,
+            decoding: DecodePolicy::SentinelAsAbsent(sentinels),
+        } if sentinels.values()
+            == ["unknown".to_string(), "N/A".to_string(), String::new()]
+    ));
+}
+
+/// An ignored property retains its complete wire schema; mapped booleans and
+/// integer representations retain declared intent.
+#[test]
+fn policies_and_interpretations_retain_declared_intent() {
+    let mut builder = ApiBuilder::new();
+    let record = builder.add_definition(record_definition());
+
+    let api = builder.finish().unwrap();
+    let TypeExpr::Object(record_schema) = &api.definition(record).unwrap().schema.ty else {
+        panic!("Record should be an object");
+    };
+
+    let ignored = &record_schema.properties[0];
+    assert!(matches!(ignored.policy, PropertyPolicy::Ignored));
+    // The ignored property retains its complete wire schema and annotations.
+    let TypeExpr::String(audit_string) = &ignored.value.ty else {
+        panic!("audit should be a string");
+    };
+    let StringInterpretation::MappedBool(mapping) = &audit_string.interpretation else {
+        panic!("audit should carry a mapped-bool interpretation");
+    };
+    assert_eq!(mapping.true_values(), &["yes".to_string(), "y".to_string()]);
+    assert_eq!(mapping.false_values(), &["no".to_string(), "n".to_string()]);
+    assert_eq!(mapping.unknown_as(), Some(false));
+    assert!(ignored.value.nullable);
+    assert_eq!(ignored.value.annotations.default, Some(Value::Bool(false)));
+    assert_eq!(
+        ignored.value.annotations.format.as_deref(),
+        Some("sentinel")
+    );
+
+    let TypeExpr::Integer(auto_schema) = &record_schema.properties[1].value.ty else {
+        panic!("auto_count should be an integer");
+    };
+    let TypeExpr::Integer(fixed_schema) = &record_schema.properties[2].value.ty else {
+        panic!("fixed_count should be an integer");
+    };
+    assert_eq!(
+        auto_schema.interpretation,
+        IntegerInterpretation::Numeric {
+            representation: Some(IntegerRepresentation::Auto),
+        }
+    );
+    assert_eq!(
+        fixed_schema.interpretation,
+        IntegerInterpretation::Numeric {
+            representation: Some(IntegerRepresentation::U32),
+        }
+    );
+    // No-representation request remains distinct from Auto and U32.
+    assert_ne!(
+        auto_schema.interpretation,
+        IntegerInterpretation::Numeric {
+            representation: None
+        }
+    );
+    assert_ne!(
+        fixed_schema.interpretation,
+        IntegerInterpretation::Numeric {
+            representation: None
+        }
+    );
+}
+
+/// Defines the two-number-field placement target and the shared coordinate string.
+fn build_coordinate_shapes(
+    builder: &mut ApiBuilder,
+    target: DefinitionId,
+    coordinates: DefinitionId,
+) {
+    builder
+        .define(
+            target,
+            definition(
+                "Placement",
+                SchemaUse::new(TypeExpr::Object(ObjectSchema {
+                    properties: vec![
+                        Property {
+                            wire_name: "latitude".into(),
+                            required: true,
+                            value: SchemaUse::new(TypeExpr::Number(NumberSchema::default())),
+                            policy: PropertyPolicy::default(),
+                        },
+                        Property {
+                            wire_name: "longitude".into(),
+                            required: true,
+                            value: SchemaUse::new(TypeExpr::Number(NumberSchema::default())),
+                            policy: PropertyPolicy::default(),
+                        },
+                    ],
+                    additional_properties: AdditionalProperties::Forbidden,
+                })),
+            ),
+        )
+        .unwrap();
+    builder
+        .define(
+            coordinates,
+            definition(
+                "Coordinates",
+                SchemaUse {
+                    ty: TypeExpr::String(StringSchema {
+                        interpretation: StringInterpretation::Coordinates(
+                            CoordinatesInterpretation::new(
+                                target,
+                                ["latitude".into(), "longitude".into()],
+                                " ".into(),
+                            )
+                            .unwrap(),
+                        ),
+                        ..StringSchema::default()
+                    }),
+                    nullable: false,
+                    annotations: SchemaAnnotations {
+                        source: Some(source("/$defs/Coordinates")),
+                        ..SchemaAnnotations::default()
+                    },
+                },
+            ),
+        )
+        .unwrap();
+}
+
+/// Defines the container object with locally-policied coordinate uses.
+fn policy_container_definition(target: DefinitionId, coordinates: DefinitionId) -> Definition {
+    definition(
+        "Container",
+        SchemaUse::new(TypeExpr::Object(ObjectSchema {
+            properties: vec![
+                Property {
+                    wire_name: "source".into(),
+                    required: true,
+                    value: SchemaUse {
+                        ty: TypeExpr::Ref(coordinates),
+                        nullable: false,
+                        annotations: SchemaAnnotations {
+                            default: Some(Value::String("N/A".into())),
+                            ..SchemaAnnotations::default()
+                        },
+                    },
+                    policy: PropertyPolicy::Included {
+                        identifier: None,
+                        decoding: DecodePolicy::ErrorAsAbsent,
+                    },
+                },
+                Property {
+                    wire_name: "origin".into(),
+                    required: false,
+                    value: SchemaUse::new(TypeExpr::Ref(coordinates)),
+                    policy: PropertyPolicy::Included {
+                        identifier: Some(vec!["location".into(), "of".into(), "origin".into()]),
+                        decoding: DecodePolicy::PropagateError,
+                    },
+                },
+                Property {
+                    wire_name: "inline".into(),
+                    required: false,
+                    value: SchemaUse {
+                        ty: TypeExpr::String(StringSchema {
+                            interpretation: StringInterpretation::Coordinates(
+                                CoordinatesInterpretation::new(
+                                    target,
+                                    ["longitude".into(), "latitude".into()],
+                                    ",".into(),
+                                )
+                                .unwrap(),
+                            ),
+                            ..StringSchema::default()
+                        }),
+                        nullable: false,
+                        annotations: SchemaAnnotations {
+                            default: None,
+                            ..SchemaAnnotations::default()
+                        },
+                    },
+                    policy: PropertyPolicy::Included {
+                        identifier: None,
+                        decoding: DecodePolicy::SentinelAsAbsent(
+                            SentinelValues::new(vec![
+                                "unknown".into(),
+                                "N/A".into(),
+                                String::new(),
+                            ])
+                            .unwrap(),
+                        ),
+                    },
+                },
+            ],
+            additional_properties: AdditionalProperties::Unspecified,
+        })),
+    )
+}
+
+/// Defines the record object with an ignored mapped-bool property and two
+/// integer properties carrying distinct representation requests.
+fn record_definition() -> Definition {
+    definition(
+        "Record",
+        SchemaUse::new(TypeExpr::Object(ObjectSchema {
+            properties: vec![
+                Property {
+                    wire_name: "audit".into(),
+                    required: false,
+                    value: SchemaUse {
+                        ty: TypeExpr::String(StringSchema {
+                            interpretation: StringInterpretation::MappedBool(
+                                BoolMapping::new(
+                                    vec!["yes".into(), "y".into()],
+                                    vec!["no".into(), "n".into()],
+                                    Some(false),
+                                )
+                                .unwrap(),
+                            ),
+                            ..StringSchema::default()
+                        }),
+                        nullable: true,
+                        annotations: SchemaAnnotations {
+                            default: Some(Value::Bool(false)),
+                            format: Some("sentinel".into()),
+                            ..SchemaAnnotations::default()
+                        },
+                    },
+                    policy: PropertyPolicy::Ignored,
+                },
+                Property {
+                    wire_name: "auto_count".into(),
+                    required: true,
+                    value: SchemaUse::new(TypeExpr::Integer(IntegerSchema {
+                        interpretation: IntegerInterpretation::Numeric {
+                            representation: Some(IntegerRepresentation::Auto),
+                        },
+                        ..IntegerSchema::default()
+                    })),
+                    policy: PropertyPolicy::default(),
+                },
+                Property {
+                    wire_name: "fixed_count".into(),
+                    required: true,
+                    value: SchemaUse::new(TypeExpr::Integer(IntegerSchema {
+                        interpretation: IntegerInterpretation::Numeric {
+                            representation: Some(IntegerRepresentation::U32),
+                        },
+                        ..IntegerSchema::default()
+                    })),
+                    policy: PropertyPolicy::default(),
+                },
+            ],
+            additional_properties: AdditionalProperties::Unspecified,
+        })),
+    )
 }
