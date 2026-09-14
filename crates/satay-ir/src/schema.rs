@@ -2,6 +2,9 @@ use la_arena::Idx;
 use serde_json::{Number, Value};
 
 use crate::SourceRef;
+use crate::interpretation::{
+    EnumVariantName, IntegerInterpretation, PropertyPolicy, StringInterpretation,
+};
 
 /// Opaque identity of a definition within one graph.
 ///
@@ -96,6 +99,10 @@ pub enum TypeExpr {
     Array(ArraySchema),
     /// An object schema with ordered properties.
     Object(ObjectSchema),
+    /// A composition of owned branch uses.
+    Composition(CompositionSchema),
+    /// The base schema accepting only null.
+    Null,
     /// An unconstrained JSON value.
     AnyJson,
     /// A reference to a separately allocated definition.
@@ -111,6 +118,12 @@ pub struct StringSchema {
     pub enum_values: Option<Vec<String>>,
     /// A separately declared constant string value.
     pub const_value: Option<String>,
+    /// Ordered explicitly requested variant names.
+    ///
+    /// Empty means no explicit names were requested.
+    pub enum_variants: Vec<EnumVariantName>,
+    /// Declared interpretation beyond plain text.
+    pub interpretation: StringInterpretation,
 }
 
 /// Integer-specific constraints.
@@ -118,6 +131,8 @@ pub struct StringSchema {
 pub struct IntegerSchema {
     /// Numeric bounds retained without target-width selection.
     pub constraints: NumericConstraints,
+    /// Declared interpretation beyond a plain numeric value.
+    pub interpretation: IntegerInterpretation,
 }
 
 /// Number-specific constraints.
@@ -192,6 +207,8 @@ pub struct Property {
     pub required: bool,
     /// Schema use for the property's value.
     pub value: SchemaUse,
+    /// Included/ignored policy for the decoded model.
+    pub policy: PropertyPolicy,
 }
 
 /// Rule for object properties not explicitly listed.
@@ -205,4 +222,51 @@ pub enum AdditionalProperties {
     Forbidden,
     /// Additional values must match the owned schema use.
     Schema(Box<SchemaUse>),
+}
+
+/// How a composition combines its branches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompositionKind {
+    /// All branches must match.
+    AllOf,
+    /// At least one branch must match.
+    AnyOf,
+    /// Exactly one branch must match.
+    OneOf,
+}
+
+/// An owned composition of branch uses with an optional discriminator.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CompositionSchema {
+    /// How the branches combine.
+    pub kind: CompositionKind,
+    /// Branches in source order.
+    pub branches: Vec<SchemaUse>,
+    /// Declared discriminator, when present.
+    pub discriminator: Option<Discriminator>,
+}
+
+/// A declared discriminator.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Discriminator {
+    /// Property name used for tagging.
+    pub property_name: String,
+    /// Explicit mappings in source order.
+    ///
+    /// An empty mapping means no explicit mapping was declared; implicit tags
+    /// remain derivable from branch references.
+    pub mappings: Vec<DiscriminatorMapping>,
+}
+
+/// One explicit discriminator mapping.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiscriminatorMapping {
+    /// Wire value selecting the target.
+    pub wire_value: String,
+    /// Resolved identity of the mapped definition.
+    pub target: DefinitionId,
+    /// Provenance of this mapping.
+    ///
+    /// Unlike a schema use, a mapping error has no inferred source fallback.
+    pub source: Option<SourceRef>,
 }

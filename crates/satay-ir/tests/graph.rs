@@ -3,9 +3,10 @@
 use std::collections::HashSet;
 
 use satay_ir::{
-    AdditionalProperties, Api, ApiBuilder, ArrayConstraints, ArraySchema, BuildError, Definition,
-    DefinitionId, ObjectSchema, Property, SchemaAnnotations, SchemaUse, SourceRef, StringSchema,
-    TypeExpr,
+    AdditionalProperties, Api, ApiBuilder, ArrayConstraints, ArraySchema, BuildError,
+    CompositionKind, CompositionSchema, Definition, DefinitionId, Discriminator,
+    DiscriminatorMapping, GraphOwner, ObjectSchema, Property, PropertyPolicy, SchemaAnnotations,
+    SchemaUse, SourceRef, StringInterpretation, StringSchema, TypeExpr,
 };
 
 fn definition(source_name: &str, schema: SchemaUse) -> Definition {
@@ -51,10 +52,25 @@ fn references_in(schema: &SchemaUse, references: &mut Vec<DefinitionId>) {
                 references_in(value, references);
             }
         }
-        TypeExpr::String(_)
-        | TypeExpr::Integer(_)
+        TypeExpr::Composition(composition) => {
+            for branch in &composition.branches {
+                references_in(branch, references);
+            }
+            if let Some(discriminator) = &composition.discriminator {
+                for mapping in &discriminator.mappings {
+                    references.push(mapping.target);
+                }
+            }
+        }
+        TypeExpr::String(schema) => {
+            if let StringInterpretation::Coordinates(coordinates) = &schema.interpretation {
+                references.push(coordinates.target());
+            }
+        }
+        TypeExpr::Integer(_)
         | TypeExpr::Number(_)
         | TypeExpr::Boolean
+        | TypeExpr::Null
         | TypeExpr::AnyJson => {}
     }
 }
@@ -108,11 +124,13 @@ fn forward_references_preserve_ids_order_and_shared_identity() {
                             wire_name: "owner".into(),
                             required: true,
                             value: SchemaUse::new(TypeExpr::Ref(user)),
+                            policy: PropertyPolicy::default(),
                         },
                         Property {
                             wire_name: "reviewer".into(),
                             required: false,
                             value: SchemaUse::new(TypeExpr::Ref(user)),
+                            policy: PropertyPolicy::default(),
                         },
                         Property {
                             wire_name: "tags".into(),
@@ -123,6 +141,7 @@ fn forward_references_preserve_ids_order_and_shared_identity() {
                                 ))),
                                 constraints: ArrayConstraints::default(),
                             })),
+                            policy: PropertyPolicy::default(),
                         },
                     ],
                     additional_properties: AdditionalProperties::Forbidden,
@@ -291,11 +310,13 @@ fn unresolved_references_report_each_use_in_depth_first_order() {
                                 items: Box::new(reference(out_of_range, "/items/items")),
                                 constraints: ArrayConstraints::default(),
                             })),
+                            policy: PropertyPolicy::default(),
                         },
                         Property {
                             wire_name: "value".into(),
                             required: true,
                             value: reference(out_of_range, "/value"),
+                            policy: PropertyPolicy::default(),
                         },
                     ],
                     additional_properties: AdditionalProperties::Schema(Box::new(reference(
@@ -312,7 +333,7 @@ fn unresolved_references_report_each_use_in_depth_first_order() {
         errors.errors(),
         &[
             BuildError::UnresolvedReference {
-                owner,
+                owner: GraphOwner::Definition(owner),
                 target: out_of_range,
                 location: Some(SourceRef {
                     document: "graph.json".into(),
@@ -320,7 +341,7 @@ fn unresolved_references_report_each_use_in_depth_first_order() {
                 }),
             },
             BuildError::UnresolvedReference {
-                owner,
+                owner: GraphOwner::Definition(owner),
                 target: out_of_range,
                 location: Some(SourceRef {
                     document: "graph.json".into(),
@@ -328,7 +349,7 @@ fn unresolved_references_report_each_use_in_depth_first_order() {
                 }),
             },
             BuildError::UnresolvedReference {
-                owner,
+                owner: GraphOwner::Definition(owner),
                 target: out_of_range,
                 location: Some(SourceRef {
                     document: "graph.json".into(),
@@ -349,4 +370,158 @@ fn unresolved_references_report_each_use_in_depth_first_order() {
 fn empty_builder_finalizes() {
     let api = ApiBuilder::new().finish().unwrap();
     assert_eq!(api.definitions().count(), 0);
+}
+
+/// Nested compositions retain kind, order, mappings, and sources after
+/// finalization and `Api::clone`.
+#[test]
+fn nested_compositions_retain_structure_after_finish_and_clone() {
+    let mut builder = ApiBuilder::new();
+    let shared = builder.reserve_definition();
+    let nested_owner = builder.reserve_definition();
+
+    shared_definition(&mut builder, shared);
+    builder
+        .define(nested_owner, nested_union_definition(shared))
+        .unwrap();
+
+    let api = builder.finish().unwrap();
+    let cloned = api.clone();
+
+    for graph in [&api, &cloned] {
+        let schema = &graph.definition(nested_owner).unwrap().schema;
+        let TypeExpr::Composition(outer) = &schema.ty else {
+            panic!("Nested should be a composition");
+        };
+        assert_eq!(outer.kind, CompositionKind::AllOf);
+        assert_eq!(outer.branches.len(), 2);
+        assert!(matches!(outer.branches[0].ty, TypeExpr::Ref(id) if id == shared));
+        assert_eq!(
+            outer.branches[0]
+                .annotations
+                .source
+                .as_ref()
+                .unwrap()
+                .pointer,
+            "/outer/branch-0"
+        );
+
+        let TypeExpr::Composition(nested) = &outer.branches[1].ty else {
+            panic!("Outer branch 1 should be a nested composition");
+        };
+        assert_eq!(nested.kind, CompositionKind::AnyOf);
+        assert!(matches!(nested.branches[0].ty, TypeExpr::Ref(id) if id == shared));
+        assert!(nested.branches[0].nullable);
+        assert_eq!(
+            nested.branches[0]
+                .annotations
+                .source
+                .as_ref()
+                .unwrap()
+                .pointer,
+            "/nested/branch-0"
+        );
+        assert!(matches!(nested.branches[1].ty, TypeExpr::Null));
+
+        let discriminator = outer.discriminator.as_ref().unwrap();
+        assert_eq!(discriminator.property_name, "kind");
+        assert_eq!(discriminator.mappings.len(), 2);
+        assert_eq!(discriminator.mappings[0].wire_value, "first");
+        assert!(matches!(discriminator.mappings[0].target, id if id == shared));
+        assert_eq!(
+            discriminator.mappings[0].source.as_ref().unwrap().pointer,
+            "/outer/mapping-0"
+        );
+        assert_eq!(discriminator.mappings[1].wire_value, "second");
+        assert!(discriminator.mappings[1].source.is_none());
+    }
+
+    assert_eq!(direct_references(&api, nested_owner), [shared; 4]);
+}
+
+/// Defines the boolean target shared across composition branches.
+fn shared_definition(builder: &mut ApiBuilder, shared: DefinitionId) {
+    builder
+        .define(
+            shared,
+            definition(
+                "Shared",
+                SchemaUse {
+                    ty: TypeExpr::Boolean,
+                    nullable: false,
+                    annotations: SchemaAnnotations {
+                        source: Some(SourceRef {
+                            document: "graph.json".into(),
+                            pointer: "/$defs/Shared".into(),
+                        }),
+                        ..SchemaAnnotations::default()
+                    },
+                },
+            ),
+        )
+        .unwrap();
+}
+
+/// Defines the nested `AllOf` composition with discriminator mappings.
+fn nested_union_definition(shared: DefinitionId) -> Definition {
+    let nested_branch = SchemaUse {
+        ty: TypeExpr::Composition(CompositionSchema {
+            kind: CompositionKind::AnyOf,
+            branches: vec![
+                SchemaUse {
+                    ty: TypeExpr::Ref(shared),
+                    nullable: true,
+                    annotations: SchemaAnnotations {
+                        source: Some(SourceRef {
+                            document: "graph.json".into(),
+                            pointer: "/nested/branch-0".into(),
+                        }),
+                        ..SchemaAnnotations::default()
+                    },
+                },
+                SchemaUse::new(TypeExpr::Null),
+            ],
+            discriminator: None,
+        }),
+        nullable: false,
+        annotations: SchemaAnnotations::default(),
+    };
+    definition(
+        "Nested",
+        SchemaUse::new(TypeExpr::Composition(CompositionSchema {
+            kind: CompositionKind::AllOf,
+            branches: vec![
+                SchemaUse {
+                    ty: TypeExpr::Ref(shared),
+                    nullable: false,
+                    annotations: SchemaAnnotations {
+                        source: Some(SourceRef {
+                            document: "graph.json".into(),
+                            pointer: "/outer/branch-0".into(),
+                        }),
+                        ..SchemaAnnotations::default()
+                    },
+                },
+                nested_branch,
+            ],
+            discriminator: Some(Discriminator {
+                property_name: "kind".into(),
+                mappings: vec![
+                    DiscriminatorMapping {
+                        wire_value: "first".into(),
+                        target: shared,
+                        source: Some(SourceRef {
+                            document: "graph.json".into(),
+                            pointer: "/outer/mapping-0".into(),
+                        }),
+                    },
+                    DiscriminatorMapping {
+                        wire_value: "second".into(),
+                        target: shared,
+                        source: None,
+                    },
+                ],
+            }),
+        })),
+    )
 }
