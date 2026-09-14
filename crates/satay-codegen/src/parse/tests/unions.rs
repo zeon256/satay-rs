@@ -1,3 +1,7 @@
+use satay_ir::{CompositionKind, TypeExpr};
+
+use crate::parse::normalize::normalize_spec;
+
 use super::*;
 
 #[test]
@@ -583,8 +587,7 @@ components:
 
 #[test]
 fn parses_any_of_open_string_enum_branch() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -614,10 +617,40 @@ components:
                 - whisper-1
                 - gpt-4o-mini-transcribe
                 - gpt-4o-transcribe
-"#,
+"#;
+
+    let api = parse_valid(spec);
+    let semantic = normalize_spec(spec, "open-enum.yaml").unwrap();
+    let (_, transcription_ir) = semantic
+        .definitions()
+        .find(|(_, d)| d.source_name == "AudioTranscription")
+        .unwrap();
+
+    let TypeExpr::Object(transcription_ir) = &transcription_ir.schema.ty else {
+        panic!("transcription object")
+    };
+
+    let TypeExpr::Composition(model_ir) = &transcription_ir.properties[0].value.ty else {
+        panic!("open enum remains an ordered composition")
+    };
+    assert_eq!(model_ir.kind, CompositionKind::AnyOf);
+
+    let TypeExpr::String(fallback) = &model_ir.branches[0].ty else {
+        panic!("string")
+    };
+
+    assert_eq!(fallback.enum_values, None);
+    let TypeExpr::String(values) = &model_ir.branches[1].ty else {
+        panic!("enum")
+    };
+
+    assert_eq!(
+        values.enum_values.as_ref().unwrap(),
+        &["whisper-1", "gpt-4o-mini-transcribe", "gpt-4o-transcribe"]
     );
 
     let transcription = component(&api, "AudioTranscription");
+
     match &transcription.kind {
         ComponentKind::Struct(fields) => {
             let model = field(fields, "model");
@@ -631,6 +664,7 @@ components:
     }
 
     let model = component(&api, "AudioTranscriptionModel");
+
     match &model.kind {
         ComponentKind::Enum(enum_) => {
             let variants = &enum_.variants;
@@ -730,6 +764,7 @@ components:
     );
 
     let model = component(&api, "Model");
+
     assert_eq!(
         model.description.as_deref(),
         Some("Preferred model identifier.")
@@ -867,6 +902,7 @@ components:
         - const: all
 "##,
     );
+
     match err {
         ValidationError::DuplicateOpenStringEnumValue { context, value } => {
             assert_eq!(context, "schema `Model`");
@@ -911,6 +947,7 @@ components:
     );
 
     let choice = component(&api, "Choice");
+
     match &choice.kind {
         ComponentKind::Union(union) => {
             assert!(union.tag.is_none());
@@ -922,6 +959,7 @@ components:
     }
 
     let first = component(&api, "ChoiceEnum");
+
     match &first.kind {
         ComponentKind::Enum(enum_) => {
             let wire = enum_
@@ -936,6 +974,7 @@ components:
     }
 
     let second = component(&api, "ChoiceEnum2");
+
     match &second.kind {
         ComponentKind::Enum(enum_) => {
             let wire = enum_

@@ -1,9 +1,12 @@
+use satay_ir::{CompositionKind, TypeExpr};
+
+use crate::parse::normalize::normalize_spec;
+
 use super::*;
 
 #[test]
 fn parses_all_of_component_and_inline_branches_into_ir() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -49,11 +52,55 @@ components:
               type: string
             nickname:
               type: string
-"#,
+"#;
+
+    let api = parse_valid(spec);
+    let semantic = normalize_spec(spec, "all-of.yaml").unwrap();
+    let (_, child_ir) = semantic
+        .definitions()
+        .find(|(_, d)| d.source_name == "Child")
+        .unwrap();
+
+    let TypeExpr::Composition(composition) = &child_ir.schema.ty else {
+        panic!("allOf tree must not be flattened")
+    };
+
+    assert_eq!(composition.kind, CompositionKind::AllOf);
+    let TypeExpr::Ref(decorated_id) = composition.branches[0].ty else {
+        panic!("component branch identity")
+    };
+
+    assert_eq!(
+        semantic.definition(decorated_id).unwrap().source_name,
+        "Decorated"
+    );
+
+    let TypeExpr::Object(inline) = &composition.branches[1].ty else {
+        panic!("inline object branch")
+    };
+
+    assert_eq!(
+        inline
+            .properties
+            .iter()
+            .map(|p| p.wire_name.as_str())
+            .collect::<Vec<_>>(),
+        ["name", "nickname"]
+    );
+
+    assert_eq!(
+        composition.branches[1]
+            .annotations
+            .source
+            .as_ref()
+            .unwrap()
+            .pointer,
+        "/components/schemas/Child/allOf/1"
     );
 
     let child = component(&api, "Child");
     assert_eq!(child.description.as_deref(), Some("A flattened child."));
+
     match &child.kind {
         ComponentKind::Struct(fields) => {
             assert_eq!(fields.len(), 4);

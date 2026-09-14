@@ -1,3 +1,7 @@
+use satay_ir::{AdditionalProperties, TypeExpr};
+
+use crate::parse::normalize::normalize_spec;
+
 use super::*;
 
 #[test]
@@ -326,8 +330,7 @@ components:
 fn parses_struct_with_additional_properties_sibling() {
     // Structs that also allow extra properties keep generating plain structs;
     // the `additionalProperties` sibling is ignored.
-    let api = parse_valid(
-        r##"
+    let spec = r##"
 openapi: 3.1.0
 info:
   title: Test API
@@ -349,8 +352,21 @@ components:
       properties:
         type:
           type: string
-"##,
-    );
+"##;
+    let api = parse_valid(spec);
+    let semantic = normalize_spec(spec, "maps.yaml").unwrap();
+    let (_, input) = semantic
+        .definitions()
+        .find(|(_, d)| d.source_name == "InputSchema")
+        .unwrap();
+
+    let TypeExpr::Object(input) = &input.schema.ty else {
+        panic!("object")
+    };
+
+    assert_eq!(input.additional_properties, AdditionalProperties::Allowed);
+    assert_eq!(input.properties[0].wire_name, "type");
+    assert!(input.properties[0].required);
 
     match &component(&api, "InputSchema").kind {
         ComponentKind::Struct(fields) => {

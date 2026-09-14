@@ -459,7 +459,7 @@ fn validate_bool_string_mapping(
     Ok(Some(mapping))
 }
 
-fn reject_property_options_on_value(
+pub(in crate::parse) fn reject_property_options_on_value(
     treat_error_as_none: Option<bool>,
     none_if: Option<&[String]>,
     ignore: Option<bool>,
@@ -492,7 +492,7 @@ fn reject_property_options_on_value(
     Ok(())
 }
 
-fn reject_options_with_ignore(
+pub(in crate::parse) fn reject_options_with_ignore(
     options: &SataySchemaOptions,
     context: &str,
 ) -> Result<(), ValidationError> {

@@ -17,6 +17,7 @@ mod constraints;
 mod errors;
 mod extensions;
 mod groups;
+mod ir;
 mod lowering;
 mod maps;
 mod naming;

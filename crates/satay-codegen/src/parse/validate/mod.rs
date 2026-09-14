@@ -1,8 +1,8 @@
 pub(crate) mod constraint;
-mod operation;
-mod reachability;
-mod satay;
-mod schema;
+pub(super) mod operation;
+pub(super) mod reachability;
+pub(super) mod satay;
+pub(super) mod schema;
 
 pub(crate) use schema::ValidatedCoordinates;
 
@@ -377,7 +377,7 @@ pub(crate) fn validate_document<'a>(
     })
 }
 
-fn is_supported_openapi_version(version: &str) -> bool {
+pub(in crate::parse) fn is_supported_openapi_version(version: &str) -> bool {
     version.starts_with("3.1.")
 }
 

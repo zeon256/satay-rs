@@ -215,7 +215,7 @@ fn parse_array_validation(
     }
 }
 
-pub(super) fn reject_keyword(
+pub(in crate::parse) fn reject_keyword(
     present: bool,
     keyword: &'static str,
     context: &str,
@@ -405,7 +405,10 @@ fn tighter_float_maximum(
     }
 }
 
-fn json_integer(value: &Number, context: &str) -> Result<i128, ValidationError> {
+pub(in crate::parse) fn json_integer(
+    value: &Number,
+    context: &str,
+) -> Result<i128, ValidationError> {
     if let Some(value) = value.as_i64() {
         return Ok(i128::from(value));
     }

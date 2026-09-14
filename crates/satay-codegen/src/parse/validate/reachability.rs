@@ -43,7 +43,7 @@ enum MediaScope {
 /// nor an unreferenced-but-valid component schema. When no operation is
 /// skipped the result is always empty, so specs without `x-satay.skip`
 /// generate byte-for-byte as before.
-pub(super) fn excluded_component_schemas(
+pub(in crate::parse) fn excluded_component_schemas(
     document: &ResolvedDocument<'_>,
 ) -> Result<BTreeSet<String>, ValidationError> {
     let Some(components) = document.spec.components.as_ref() else {
