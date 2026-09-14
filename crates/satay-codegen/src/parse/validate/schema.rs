@@ -405,7 +405,9 @@ fn validate_reference_siblings(
     validation_context.validate_satay(schema, None, context)
 }
 
-fn unsupported_reference_schema_keyword(schema: &OasObjectSchema) -> Option<&str> {
+pub(in crate::parse) fn unsupported_reference_schema_keyword(
+    schema: &OasObjectSchema,
+) -> Option<&str> {
     schema
         .present_keywords()
         .find(|&keyword| keyword != "$ref" && keyword != "description")
@@ -639,7 +641,7 @@ fn component_description(schema: &OasSchema, kind: &ValidatedComponentKind) -> O
 /// `satay-oas3`; membership in `unknown_keywords` distinguishes preserved
 /// keywords from the modeled fields yielded by the same iterator. Recursing
 /// through `subschemas()` keeps this guard complete as the AST grows.
-fn reject_preserved_unknown_keywords(
+pub(in crate::parse) fn reject_preserved_unknown_keywords(
     schema: &OasSchema,
     context: &str,
 ) -> Result<(), ValidationError> {
@@ -944,7 +946,9 @@ fn open_string_any_of_branch_is_unconstrained_string(
 /// Returns the single local `$ref` when a schema is an annotation-only `allOf`
 /// wrapper: exactly one `$ref` branch with only annotation siblings. This is a
 /// common OpenAPI idiom for attaching `title`/`description` to a reference.
-fn annotation_only_all_of_ref_wrapper(schema: &OasObjectSchema) -> Option<&str> {
+pub(in crate::parse) fn annotation_only_all_of_ref_wrapper(
+    schema: &OasObjectSchema,
+) -> Option<&str> {
     if schema.all_of.len() != 1 {
         return None;
     }
@@ -2368,7 +2372,7 @@ fn all_of_ref_wrapper_unwraps(
     Ok(true)
 }
 
-fn reject_all_of_sibling_keywords(
+pub(in crate::parse) fn reject_all_of_sibling_keywords(
     schema: &OasObjectSchema,
     context: &str,
 ) -> Result<(), ValidationError> {
@@ -2425,7 +2429,7 @@ fn reject_all_of_sibling_keywords(
     Ok(())
 }
 
-fn reject_all_of_object_branch_keywords(
+pub(in crate::parse) fn reject_all_of_object_branch_keywords(
     schema: &OasObjectSchema,
     context: &str,
     index: usize,
@@ -2485,14 +2489,14 @@ fn composite_object_type_is_allowed(schema: &OasObjectSchema) -> bool {
     )
 }
 
-pub(super) fn reject_any_of_sibling_keywords(
+pub(in crate::parse) fn reject_any_of_sibling_keywords(
     schema: &OasObjectSchema,
     context: &str,
 ) -> Result<(), ValidationError> {
     reject_plain_union_sibling_keywords(schema, context, PlainUnionKeyword::AnyOf)
 }
 
-pub(super) fn reject_plain_one_of_sibling_keywords(
+pub(in crate::parse) fn reject_plain_one_of_sibling_keywords(
     schema: &OasObjectSchema,
     context: &str,
 ) -> Result<(), ValidationError> {
@@ -2603,7 +2607,7 @@ fn reject_plain_union_sibling_keywords(
     Ok(())
 }
 
-fn reject_discriminator_union_sibling_keywords(
+pub(in crate::parse) fn reject_discriminator_union_sibling_keywords(
     schema: &OasObjectSchema,
     context: &str,
 ) -> Result<(), ValidationError> {
@@ -3509,7 +3513,7 @@ fn effective_enum_values<'a>(
     Ok(Cow::Borrowed(&[]))
 }
 
-fn validate_enum_shape(
+pub(in crate::parse) fn validate_enum_shape(
     enum_values: &[JsonValue],
     schema_type: Option<OasSchemaType>,
     context: &str,

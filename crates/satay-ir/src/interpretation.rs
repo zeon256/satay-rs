@@ -1,4 +1,5 @@
 use crate::DefinitionId;
+use crate::schema::NumericConstraints;
 
 /// How a string schema is interpreted beyond plain text.
 ///
@@ -18,9 +19,20 @@ pub enum StringInterpretation {
     IntegerRange {
         /// Requested representation; `None` keeps no explicit width intent.
         representation: Option<IntegerRepresentation>,
+        /// Numeric bounds declared for the range's scalar interpretation.
+        ///
+        /// Retained independently of an inferred Rust representation. Retention
+        /// does not promise that generated range values enforce these bounds at
+        /// runtime; integer bounds also feed scalar-width inference.
+        bounds: NumericConstraints,
     },
     /// Decode a number encoded as a string.
-    NumberRange,
+    NumberRange {
+        /// Numeric bounds declared for the range's scalar interpretation.
+        ///
+        /// Retained independently of any floating-point representation.
+        bounds: NumericConstraints,
+    },
     /// Decode packed coordinates into the referenced definition's fields.
     Coordinates(CoordinatesInterpretation),
 }

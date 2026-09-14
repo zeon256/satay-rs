@@ -919,7 +919,7 @@ fn projected_object_schema<'a>(
 }
 
 /// Matches OpenAPI wildcard response keys `1XX`..`5XX` (uppercase only).
-fn wildcard_status_class(status: &str) -> Option<u8> {
+pub(in crate::parse) fn wildcard_status_class(status: &str) -> Option<u8> {
     match status.as_bytes() {
         [class @ b'1'..=b'5', b'X', b'X'] => Some(class - b'0'),
         _ => None,
@@ -968,7 +968,9 @@ fn validate_path_parameters(
     Ok(())
 }
 
-fn path_parameter_names(path: &str) -> Result<BTreeSet<String>, ValidationError> {
+pub(in crate::parse) fn path_parameter_names(
+    path: &str,
+) -> Result<BTreeSet<String>, ValidationError> {
     let mut names = BTreeSet::new();
     let mut rest = path;
 

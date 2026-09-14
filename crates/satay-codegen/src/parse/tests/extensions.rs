@@ -1975,8 +1975,7 @@ components:
 
 #[test]
 fn skips_operations_annotated_with_x_satay_skip() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -2004,8 +2003,9 @@ paths:
       responses:
         '204':
           description: No content
-"#,
-    );
+"#;
+    let api = parse_valid(spec);
+    ir::assert_selection(spec, &[], &["listFiles"]);
 
     assert_eq!(api.operations.len(), 1);
     assert_eq!(api.operations[0].fn_name, "list_files");
@@ -2342,8 +2342,7 @@ paths:
 
 #[test]
 fn skips_component_schema_used_only_by_skipped_operation() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -2379,8 +2378,9 @@ components:
           type: boolean
           x-satay:
             parse-as: u8
-"#,
-    );
+"#;
+    let api = parse_valid(spec);
+    ir::assert_selection(spec, &[], &["listFiles"]);
 
     assert_eq!(api.operations.len(), 1);
     assert_eq!(api.operations[0].fn_name, "list_files");
@@ -2394,8 +2394,7 @@ components:
 
 #[test]
 fn skips_component_schema_used_by_skipped_content_parameter() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -2428,8 +2427,9 @@ components:
       type: boolean
       x-satay:
         parse-as: u8
-"#,
-    );
+"#;
+    let api = parse_valid(spec);
+    ir::assert_selection(spec, &[], &["health"]);
 
     assert_eq!(api.operations.len(), 1);
     assert_eq!(api.operations[0].fn_name, "health");
@@ -2443,8 +2443,7 @@ components:
 
 #[test]
 fn skips_component_schema_reached_through_prefix_items() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -2479,8 +2478,9 @@ components:
       type: boolean
       x-satay:
         parse-as: u8
-"#,
-    );
+"#;
+    let api = parse_valid(spec);
+    ir::assert_selection(spec, &[], &["health"]);
 
     assert_eq!(api.operations.len(), 1);
     assert_eq!(api.operations[0].fn_name, "health");
@@ -2494,8 +2494,7 @@ components:
 
 #[test]
 fn validates_component_schema_shared_with_non_skipped_operation() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -2533,8 +2532,9 @@ components:
       properties:
         id:
           type: string
-"#,
-    );
+"#;
+    let api = parse_valid(spec);
+    ir::assert_selection(spec, &["Shared"], &["getShared"]);
 
     assert_eq!(api.operations.len(), 1);
     component(&api, "Shared");
@@ -2542,8 +2542,7 @@ components:
 
 #[test]
 fn keeps_unreferenced_component_schema_when_operation_is_skipped() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -2586,8 +2585,9 @@ components:
       properties:
         value:
           type: string
-"#,
-    );
+"#;
+    let api = parse_valid(spec);
+    ir::assert_selection(spec, &["Orphan"], &["listFiles"]);
 
     assert_eq!(api.operations.len(), 1);
     component(&api, "Orphan");
@@ -2601,8 +2601,7 @@ components:
 
 #[test]
 fn keeps_skipped_only_schema_referenced_by_unreferenced_component() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -2643,8 +2642,9 @@ components:
       properties:
         x:
           $ref: '#/components/schemas/Shared'
-"#,
-    );
+"#;
+    let api = parse_valid(spec);
+    ir::assert_selection(spec, &["Shared", "Holder"], &["listFiles"]);
 
     assert_eq!(api.operations.len(), 1);
     component(&api, "Shared");
@@ -2653,8 +2653,7 @@ components:
 
 #[test]
 fn skips_path_level_parameters_when_all_operations_on_path_skipped() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -2682,8 +2681,10 @@ paths:
       responses:
         '204':
           description: No content
-"#,
-    );
+"#;
+
+    let api = parse_valid(spec);
+    ir::assert_selection(spec, &[], &["health"]);
 
     assert_eq!(api.operations.len(), 1);
     assert_eq!(api.operations[0].fn_name, "health");

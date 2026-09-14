@@ -25,4 +25,6 @@ tracing.workspace = true
 [dev-dependencies]
 # Pre-fetch the dependency used by generated crates before their offline resolution.
 compact_str = { version = "0.9", features = ["serde"] }
+serde-saphyr.workspace = true
+satay-ir.workspace = true
 tempfile.workspace = true

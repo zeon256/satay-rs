@@ -6,6 +6,8 @@ use tracing::debug;
 
 mod helpers;
 mod lower;
+#[cfg(test)]
+mod normalize;
 mod reference;
 mod registry;
 mod resolve;

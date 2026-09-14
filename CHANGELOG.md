@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - *(ir)* add a standalone semantic schema graph with forward references, graph-local definition IDs, and structural finalization errors
+- *(codegen)* add a private, test-gated OpenAPI-to-`satay-ir` frontend preserving schema identities, declared constraints, HTTP media, projections, and source provenance; production generation remains unchanged
+- *(ir)* retain declared scalar numeric bounds on integer-range and number-range string interpretations independently of representation hints
 
 ## [0.17.3](https://github.com/zeon256/satay-rs/compare/satay-codegen-v0.17.1...satay-codegen-v0.17.3) - 2026-09-12
 
