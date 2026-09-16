@@ -1,11 +1,12 @@
+use super::codegen;
 use std::fs;
 
-use crate::ast::*;
-use crate::common::*;
+use super::ast::*;
+use super::common::*;
 
 #[test]
 fn referenced_treat_error_as_none_fields_decode_lossily() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info:
@@ -128,7 +129,7 @@ mod tests {
 
 #[test]
 fn x_satay_parse_as_generates_wire_backed_deserializers() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info:
@@ -354,7 +355,7 @@ mod tests {
 
 #[test]
 fn x_satay_none_if_generates_strict_optional_parsed_fields() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info:
@@ -543,7 +544,7 @@ mod tests {
 
 #[test]
 fn x_satay_bool_mappings_generate_configured_serde_behavior() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info:
@@ -821,7 +822,7 @@ mod tests {
 
 #[test]
 fn x_satay_parse_as_date_generates_query_parameter_encoding() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info:
@@ -891,7 +892,7 @@ mod tests {
 
 #[test]
 fn x_satay_parse_as_naive_datetime_generates_query_parameter_encoding() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info:
@@ -961,7 +962,7 @@ mod tests {
 
 #[test]
 fn unixtime_format_generates_offset_datetime_types_and_seconds_encoding() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info:

@@ -1,11 +1,12 @@
+use super::codegen;
 use std::fs;
 
-use crate::ast::*;
-use crate::common::*;
+use super::ast::*;
+use super::common::*;
 
 #[test]
 fn ignored_properties_are_deserialized_but_never_serialized() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info:

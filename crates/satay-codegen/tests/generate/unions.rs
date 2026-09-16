@@ -1,7 +1,8 @@
+use super::codegen;
 use std::fs;
 
-use crate::ast::*;
-use crate::common::*;
+use super::ast::*;
+use super::common::*;
 
 const NULLABLE_INLINE_PRIMITIVE_ONE_OF: &str = r##"
 openapi: 3.1.0
@@ -47,7 +48,7 @@ components:
 
 #[test]
 fn any_of_generates_untagged_union_types() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -104,7 +105,7 @@ components:
 
 #[test]
 fn one_of_generates_untagged_union_types() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -219,7 +220,7 @@ components:
 
 #[test]
 fn one_of_generates_inline_singleton_string_enum_branch() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -308,7 +309,7 @@ components:
 
 #[test]
 fn one_of_generates_inline_multi_value_string_enum_branch() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -370,7 +371,7 @@ components:
 
 #[test]
 fn one_of_generates_nullable_inline_primitive_union_branch() {
-    let files = satay_codegen::generate(NULLABLE_INLINE_PRIMITIVE_ONE_OF)
+    let files = codegen::generate(NULLABLE_INLINE_PRIMITIVE_ONE_OF)
         .expect("generate nullable oneOf inline primitive fixture");
 
     let types_rs = parse_rust(find_file(&files, "types.rs"));
@@ -389,7 +390,7 @@ fn one_of_generates_nullable_inline_primitive_union_branch() {
 
 #[test]
 fn any_of_discriminator_generates_tagged_union_types() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -450,7 +451,7 @@ components:
 
 #[test]
 fn one_of_discriminator_mapping_generates_variant_renames() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -512,7 +513,7 @@ components:
 
 #[test]
 fn discriminator_with_embedded_type_field_generates_untagged_union() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -589,7 +590,7 @@ components:
 
 #[test]
 fn discriminator_with_const_type_field_generates_untagged_union() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -663,7 +664,7 @@ components:
 
 #[test]
 fn generated_any_of_deserializes_with_first_matching_branch() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -747,7 +748,7 @@ mod tests {
 
 #[test]
 fn generated_one_of_tool_union_deserializes_by_singleton_type_field() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -855,7 +856,7 @@ mod tests {
 
 #[test]
 fn generated_nullable_inline_primitive_one_of_deserializes_and_serializes() {
-    let files = satay_codegen::generate(NULLABLE_INLINE_PRIMITIVE_ONE_OF)
+    let files = codegen::generate(NULLABLE_INLINE_PRIMITIVE_ONE_OF)
         .expect("generate nullable oneOf inline primitive runtime fixture");
 
     let temp = tempfile::tempdir().expect("create temp crate");
@@ -928,7 +929,7 @@ mod tests {
 
 #[test]
 fn generated_one_of_inline_singleton_branch_serializes_and_deserializes() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -1059,7 +1060,7 @@ mod tests {
 
 #[test]
 fn generated_one_of_inline_multi_value_branch_serializes_and_deserializes() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -1187,7 +1188,7 @@ mod tests {
 
 #[test]
 fn generated_discriminator_union_serializes_and_deserializes_with_tag() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -1302,7 +1303,7 @@ mod tests {
 
 #[test]
 fn generated_embedded_discriminator_union_uses_branch_type_field() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -1429,7 +1430,7 @@ mod tests {
 
 #[test]
 fn generated_const_embedded_discriminator_union_round_trips() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -1553,7 +1554,7 @@ mod tests {
 
 #[test]
 fn nested_discriminated_one_of_generates_option_of_ref() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -1611,7 +1612,7 @@ components:
 
 #[test]
 fn generated_nested_multi_branch_union_round_trips() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -1734,7 +1735,7 @@ mod tests {
 
 #[test]
 fn generated_all_of_ref_wrapper_unwraps_round_trip() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:

@@ -1,9 +1,10 @@
-use crate::ast::*;
-use crate::common::*;
+use super::ast::*;
+use super::codegen;
+use super::common::*;
 
 #[test]
 fn explicit_integer_formats_keep_base_type_and_can_be_overridden() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info:
@@ -65,7 +66,7 @@ components:
 
 #[test]
 fn open_ended_non_negative_unformatted_integer_parameters_use_unsigned() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info:

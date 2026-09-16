@@ -39,7 +39,9 @@ pub(super) fn security_schemes(api: &ir::Api) -> Vec<ApiKeySecurityScheme> {
             let location = match location {
                 SemanticApiKeyLocation::Header => ApiKeyLocation::Header,
                 SemanticApiKeyLocation::Query => ApiKeyLocation::Query,
-                SemanticApiKeyLocation::Cookie => return None,
+                SemanticApiKeyLocation::Cookie | SemanticApiKeyLocation::Unsupported(_) => {
+                    return None;
+                }
             };
             Some(ApiKeySecurityScheme {
                 location,
@@ -160,7 +162,7 @@ pub(super) fn operations(
                     let context = format!("{context} responses {status} schema");
                     match &media.projection {
                         Some(projection) => (
-                            Some(schemas.value(&projection.output, &context)?),
+                            Some(schemas.projected_value(projection, &context)?),
                             Some(ValidatedResponseProjection {
                                 unwrap_field: projection.selector.unwrap_field.clone(),
                                 map_field: projection.selector.map_field.clone(),

@@ -1,8 +1,8 @@
-use satay_codegen::{Error, ValidationError};
+use super::codegen::{self, Error, ValidationError};
 
 #[test]
 fn openapi_30_documents_are_rejected() {
-    let err = satay_codegen::generate(
+    let err = codegen::generate(
         r#"
 openapi: 3.0.3
 info:
@@ -23,7 +23,7 @@ paths: {}
 
 #[test]
 fn nullable_parameters_are_rejected_instead_of_generating_invalid_rust() {
-    let err = satay_codegen::generate(
+    let err = codegen::generate(
         r#"
 openapi: 3.1.0
 info:
@@ -56,7 +56,7 @@ paths:
 
 #[test]
 fn default_response_bodies_are_rejected_instead_of_silently_dropped() {
-    let err = satay_codegen::generate(
+    let err = codegen::generate(
         r#"
 openapi: 3.1.0
 info:

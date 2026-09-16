@@ -248,6 +248,8 @@ fn build_envelope_and_http(builder: &mut ApiBuilder, coordinates: DefinitionId) 
                         source: None,
                     },
                     projection: Some(ResponseProjection {
+                        unwrap_required: false,
+                        map_required: Some(false),
                         selector: OutputSelector {
                             unwrap_field: "items".into(),
                             map_field: Some("value".into()),

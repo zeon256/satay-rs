@@ -192,6 +192,8 @@ fn operation(target: DefinitionId) -> Operation {
                     source: None,
                 },
                 projection: Some(ResponseProjection {
+                    unwrap_required: true,
+                    map_required: None,
                     selector: OutputSelector {
                         unwrap_field: "items".into(),
                         map_field: None,
@@ -531,6 +533,8 @@ fn projection_http(envelope: DefinitionId, pet: DefinitionId) -> HttpApi {
                                 source: None,
                             },
                             projection: Some(ResponseProjection {
+                                unwrap_required: false,
+                                map_required: Some(false),
                                 selector: OutputSelector {
                                     unwrap_field: "items".into(),
                                     map_field: Some("value".into()),

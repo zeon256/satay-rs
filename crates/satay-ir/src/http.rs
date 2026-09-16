@@ -242,6 +242,11 @@ pub struct ResponseMediaType {
 /// A projected response output.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResponseProjection {
+    /// Whether the envelope requires the unwrapped property. Kept separately
+    /// from output nullability, even when an unselected wire constraint fails.
+    pub unwrap_required: bool,
+    /// Whether an array item requires the mapped property; absent without mapping.
+    pub map_required: Option<bool>,
     /// Selector producing the projected value.
     pub selector: OutputSelector,
     /// Schema use for the projected output.

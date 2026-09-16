@@ -382,6 +382,20 @@ impl NormalizeContext<'_, '_> {
                 .at(self, &location));
             }
         };
+        if self.recover {
+            // The Rust stage checks the resolved target in legacy encounter order.
+            // Keep the declared alias identity here, including invalid targets,
+            // so diagnostics name the terminal generated component correctly.
+            return CoordinatesInterpretation::new(
+                target_id,
+                [first.as_str().to_owned(), second.as_str().to_owned()],
+                delimiter,
+            )
+            .map_err(|source| NormalizeError::Interpretation {
+                location: source_ref(self.document_id, &location),
+                source,
+            });
+        }
         let mut declared = BTreeMap::new();
         self.coordinate_object_fields(
             self.component_schema_at(target_name, &location)?,

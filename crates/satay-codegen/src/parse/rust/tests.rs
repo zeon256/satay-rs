@@ -1,7 +1,6 @@
-use crate::parse::{
-    self,
-    normalize::{self, NormalizeError},
-};
+use crate::parse;
+use crate::parse::parity;
+use crate::parse::parity::codegen;
 use crate::{GenerateOptions, RootModule};
 use std::{fs, path::Path};
 
@@ -46,12 +45,7 @@ fn inferred_operation_diagnostic_context() {
 }
 
 fn staged(spec: &str, options: GenerateOptions) -> Result<Vec<crate::GeneratedFile>, String> {
-    let api = normalize::normalize_for_rust(spec, "test.yaml").map_err(|error| match error {
-        NormalizeError::Validation { source, .. } => source.to_string(),
-        NormalizeError::Parse(error) => error.to_string(),
-        error => error.to_string(),
-    })?;
-    super::lower_api(&api, options).map_err(|error| error.to_string())
+    codegen::generate_with(spec, options).map_err(|error| error.to_string())
 }
 
 #[test]
@@ -175,58 +169,11 @@ fn fixture_file_parity() {
         })
         .collect::<Vec<_>>();
     paths.sort();
-    let mut failures = vec![];
-    let mut checked = 0;
+    assert!(!paths.is_empty());
     for path in paths {
         let source = fs::read_to_string(&path).unwrap();
-        if crate::generate(&source).is_err() {
-            continue;
-        }
-        checked += 1;
-        let api = match normalize::normalize_for_rust(&source, &path.display().to_string()) {
-            Ok(api) => api,
-            Err(error) => {
-                failures.push(format!("{}: frontend: {error}", path.display()));
-                continue;
-            }
-        };
-        for root_module in [RootModule::ModRs, RootModule::LibRs] {
-            let options = GenerateOptions { root_module };
-            let old = crate::generate_with(&source, options).unwrap();
-            let new = match super::lower_api(&api, options) {
-                Ok(files) => files,
-                Err(error) => {
-                    failures.push(format!("{}: lowering: {error}", path.display()));
-                    break;
-                }
-            };
-            let old = old
-                .iter()
-                .map(|file| (&file.relative_path, &file.contents))
-                .collect::<Vec<_>>();
-            let new = new
-                .iter()
-                .map(|file| (&file.relative_path, &file.contents))
-                .collect::<Vec<_>>();
-            if old != new {
-                let mismatch = old.iter().zip(&new).find(|(old, new)| old != new);
-                failures.push(format!(
-                    "{}: {root_module:?}: files differ: {}",
-                    path.display(),
-                    mismatch
-                        .map(|(old, _)| old.0.as_str())
-                        .unwrap_or("file count")
-                ));
-            }
-        }
+        parity::assert_generation(&source);
     }
-    assert!(checked > 0);
-    assert!(
-        failures.is_empty(),
-        "{} of {checked} fixtures have differences:\n{}",
-        failures.len(),
-        failures.join("\n")
-    );
 }
 
 #[test]

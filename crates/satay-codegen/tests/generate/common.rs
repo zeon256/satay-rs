@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 use std::process;
 
-use satay_codegen::GeneratedFile;
+use super::codegen::GeneratedFile;
 
 pub const SIMPLE: &str = include_str!("../../../../tests/fixtures/simple.yaml");
 pub const PETSTORE_MINIMAL: &str = include_str!("../../../../tests/fixtures/petstore-minimal.yaml");
@@ -126,6 +126,10 @@ pub fn run_temp_cargo(crate_dir: &Path, subcommand: &str, extra_args: &[&str], c
 
     let output = process::Command::new(&cargo)
         .arg(subcommand)
+        .env(
+            "CARGO_TARGET_DIR",
+            workspace_root().join("target/generated-tests"),
+        )
         .arg("--locked")
         .arg("--offline")
         .arg("--quiet")

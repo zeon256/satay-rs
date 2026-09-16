@@ -1,11 +1,12 @@
+use super::codegen;
 use std::fs;
 
-use crate::ast::*;
-use crate::common::*;
+use super::ast::*;
+use super::common::*;
 
 #[test]
 fn inline_enum_generates_proper_enum_types() {
-    let files = satay_codegen::generate(INLINE_ENUM).expect("generate inline-enum fixture");
+    let files = codegen::generate(INLINE_ENUM).expect("generate inline-enum fixture");
 
     let types_rs = parse_rust(find_file(&files, "types.rs"));
     let item = find_struct(&types_rs, "Item");
@@ -28,7 +29,7 @@ fn inline_enum_generates_proper_enum_types() {
 
 #[test]
 fn x_satay_enum_variants_generate_named_variants() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info:
@@ -102,7 +103,7 @@ components:
 
 #[test]
 fn closed_enum_can_generate_other_variant_for_other_wire_value() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info:
@@ -137,7 +138,7 @@ components:
 
 #[test]
 fn any_of_string_and_enum_generates_open_string_enum() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info:
@@ -222,7 +223,7 @@ components:
 
 #[test]
 fn any_of_const_branches_generate_open_string_enum() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info:
@@ -269,7 +270,7 @@ components:
 
 #[test]
 fn open_string_enum_mangles_other_known_value_and_keeps_fallback() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info:
@@ -313,7 +314,7 @@ components:
 
 #[test]
 fn generated_inline_enum_compiles_and_rejects_unknown() {
-    let files = satay_codegen::generate(INLINE_ENUM).expect("generate inline-enum fixture");
+    let files = codegen::generate(INLINE_ENUM).expect("generate inline-enum fixture");
 
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();
@@ -373,7 +374,7 @@ mod tests {
 
 #[test]
 fn generated_open_string_enum_preserves_unknown_values() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info:

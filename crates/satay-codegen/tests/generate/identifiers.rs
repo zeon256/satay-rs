@@ -1,15 +1,16 @@
+use super::codegen;
 use std::fs;
 
-use crate::ast::*;
-use crate::common::*;
+use super::ast::*;
+use super::common::*;
 
 const PROPERTY_IDENTIFIERS: &str =
     include_str!("../../../../tests/fixtures/property-identifiers.yaml");
 
 #[test]
 fn property_identifiers_render_with_rust_casing_and_wire_renames() {
-    let files = satay_codegen::generate(PROPERTY_IDENTIFIERS)
-        .expect("generate property identifier fixture");
+    let files =
+        codegen::generate(PROPERTY_IDENTIFIERS).expect("generate property identifier fixture");
     let types_rs = parse_rust(find_file(&files, "types.rs"));
     let bus_stop = find_struct(&types_rs, "BusStop");
 
@@ -50,8 +51,8 @@ fn property_identifiers_render_with_rust_casing_and_wire_renames() {
 
 #[test]
 fn bus_stop_identifier_overrides_round_trip_with_original_wire_keys() {
-    let files = satay_codegen::generate(PROPERTY_IDENTIFIERS)
-        .expect("generate property identifier fixture");
+    let files =
+        codegen::generate(PROPERTY_IDENTIFIERS).expect("generate property identifier fixture");
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();
     let generated_dir = crate_dir.join("src/generated");

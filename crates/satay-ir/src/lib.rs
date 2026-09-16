@@ -47,6 +47,7 @@
 
 mod api;
 mod builder;
+mod diagnostic;
 mod error;
 mod http;
 mod interpretation;
@@ -56,6 +57,7 @@ mod source;
 
 pub use api::Api;
 pub use builder::ApiBuilder;
+pub use diagnostic::DiagnosticKind;
 pub use error::{BuildError, BuildErrors, GraphOwner};
 pub use http::{
     HttpApi, HttpMethod, MediaType, Operation, OperationInterpretation, OutputSelector, Parameter,

@@ -48,7 +48,7 @@ pub enum SecuritySchemeKind {
 }
 
 /// Where an API key travels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApiKeyLocation {
     /// A URL query parameter.
     Query,
@@ -56,6 +56,8 @@ pub enum ApiKeyLocation {
     Header,
     /// A cookie value.
     Cookie,
+    /// An unrecognized declaration retained for backend selection policy.
+    Unsupported(String),
 }
 
 /// One declared `OAuth2` flow.

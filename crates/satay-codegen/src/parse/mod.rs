@@ -4,10 +4,14 @@ use crate::error::{ParseError, ValidationError};
 use crate::model::Api;
 use tracing::debug;
 
+#[cfg(test)]
+mod diagnostic;
 mod helpers;
 mod lower;
 #[cfg(test)]
 mod normalize;
+#[cfg(test)]
+mod parity;
 mod reference;
 mod registry;
 mod resolve;
