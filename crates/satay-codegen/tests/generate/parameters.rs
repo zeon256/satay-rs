@@ -1,8 +1,8 @@
 use std::fs;
 
-use satay_codegen::{Error, ValidationError};
+use super::codegen::{self, Error, ValidationError};
 
-use crate::common::*;
+use super::common::*;
 
 const PARAMETER_DEFAULTS: &str = r#"
 openapi: 3.1.0
@@ -79,7 +79,7 @@ components:
 
 #[test]
 fn generated_parameter_defaults_compile_and_behave() {
-    let files = satay_codegen::generate(PARAMETER_DEFAULTS).expect("generate defaults fixture");
+    let files = codegen::generate(PARAMETER_DEFAULTS).expect("generate defaults fixture");
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();
     let generated_dir = crate_dir.join("src/generated");
@@ -213,7 +213,7 @@ paths:
 "#
         );
 
-        let err = satay_codegen::generate(&spec).expect_err("invalid default must be rejected");
+        let err = codegen::generate(&spec).expect_err("invalid default must be rejected");
         let Error::Validation(ValidationError::InvalidParameterDefault {
             wire_name,
             value: _,

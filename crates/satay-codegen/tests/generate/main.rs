@@ -22,3 +22,5 @@ mod storage;
 mod structure;
 mod unions;
 mod urls;
+
+use satay_codegen as codegen;

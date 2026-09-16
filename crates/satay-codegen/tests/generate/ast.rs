@@ -1,9 +1,9 @@
 //! Assertion helpers that parse generated file contents back into a `syn` AST,
 //! so tests check structure instead of `prettyplease` formatting artifacts.
 
+use super::codegen::GeneratedFile;
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
 use quote::ToTokens;
-use satay_codegen::GeneratedFile;
 use syn::{Expr, ExprLit, Fields, ImplItem, Item, Lit, Meta, MetaNameValue, Type, Visibility};
 
 pub fn parse_rust(file: &GeneratedFile) -> syn::File {

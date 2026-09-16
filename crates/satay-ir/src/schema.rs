@@ -121,8 +121,8 @@ pub enum TypeExpr {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{message}")]
 pub struct Diagnostic {
-    /// Stable diagnostic category supplied by the frontend.
-    pub code: String,
+    /// Structured category and payload supplied by the frontend.
+    pub kind: crate::DiagnosticKind,
     /// Complete contextual diagnostic text, without a source-location suffix.
     pub message: String,
 }

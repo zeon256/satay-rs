@@ -4,6 +4,7 @@
 //! test-gated, so no public error export exists yet.
 
 use crate::error::{ParseError, ValidationError};
+use crate::parse::diagnostic;
 
 /// Errors raised while normalizing a resolved OpenAPI document into
 /// [`satay_ir::Api`].
@@ -41,18 +42,26 @@ pub(in crate::parse) enum NormalizeError {
 
 impl NormalizeError {
     pub(super) fn diagnostic(&self) -> satay_ir::Diagnostic {
-        let (code, message) = match self {
-            Self::Validation { source, .. } => (format!("{source:?}"), source.to_string()),
-            Self::Interpretation { source, .. } => (format!("{source:?}"), source.to_string()),
-            _ => (format!("{self:?}"), self.to_string()),
+        use satay_ir::DiagnosticKind;
+        let kind = match self {
+            Self::Validation { source, .. } => return diagnostic::retain(source),
+            Self::Interpretation { location, source } => DiagnosticKind::Interpretation {
+                location: location.clone(),
+                source: source.clone(),
+            },
+            Self::ExcludedDefinition { name, location } => DiagnosticKind::ExcludedDefinition {
+                name: name.clone(),
+                location: location.clone(),
+            },
+            Self::ApiKeyLocation { value, location } => DiagnosticKind::ApiKeyLocation {
+                value: value.clone(),
+                location: location.clone(),
+            },
+            error => panic!("non-semantic failure cannot be deferred: {error:?}"),
         };
         satay_ir::Diagnostic {
-            code: code
-                .split([' ', '{', '('])
-                .next()
-                .unwrap_or("Frontend")
-                .to_owned(),
-            message,
+            kind,
+            message: self.to_string(),
         }
     }
 }

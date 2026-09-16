@@ -1,11 +1,12 @@
+use super::codegen;
 use std::fs;
 
-use crate::ast::*;
-use crate::common::*;
+use super::ast::*;
+use super::common::*;
 
 #[test]
 fn generated_simple_fixture_compiles_and_behaves() {
-    let files = satay_codegen::generate(SIMPLE).expect("generate simple fixture");
+    let files = codegen::generate(SIMPLE).expect("generate simple fixture");
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();
     let generated_dir = crate_dir.join("src/generated");
@@ -128,7 +129,7 @@ mod tests {
 
 #[test]
 fn generated_group_views_compile_and_share_actions() {
-    let files = satay_codegen::generate(GROUPED).expect("generate grouped fixture");
+    let files = codegen::generate(GROUPED).expect("generate grouped fixture");
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();
     let generated_dir = crate_dir.join("src/generated");
@@ -172,8 +173,7 @@ mod tests {
 
 #[test]
 fn generated_response_name_collision_compiles_and_decodes() {
-    let files =
-        satay_codegen::generate(RESPONSE_NAME_COLLISION).expect("generate collision fixture");
+    let files = codegen::generate(RESPONSE_NAME_COLLISION).expect("generate collision fixture");
 
     let parts = parse_rust(find_file(&files, "psi/parts.rs"));
     let response = find_enum(&parts, "PsiOperationResponse");
@@ -226,7 +226,7 @@ mod tests {
 
 #[test]
 fn generated_constrained_fixture_enforces_openapi_bounds() {
-    let files = satay_codegen::generate(CONSTRAINED).expect("generate constrained fixture");
+    let files = codegen::generate(CONSTRAINED).expect("generate constrained fixture");
 
     let types_rs = parse_rust(find_file(&files, "types.rs"));
     assert_tuple_struct(&types_rs, "Age", "u8");

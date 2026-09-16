@@ -1,9 +1,10 @@
+use super::codegen;
 use std::fs;
 
 use syn::Fields;
 
-use crate::ast::*;
-use crate::common::*;
+use super::ast::*;
+use super::common::*;
 
 const WILDCARD_RESPONSES: &str = r#"
 openapi: 3.1.0
@@ -128,7 +129,7 @@ components:
 
 #[test]
 fn wildcard_range_generates_status_carrying_variant_after_exact_arms() {
-    let files = satay_codegen::generate(WILDCARD_RESPONSES).expect("generate wildcard fixture");
+    let files = codegen::generate(WILDCARD_RESPONSES).expect("generate wildcard fixture");
 
     let parts = parse_rust(find_file(&files, "get_user/parts.rs"));
     let response = find_enum(&parts, "GetUserResponse");
@@ -151,7 +152,7 @@ fn wildcard_range_generates_status_carrying_variant_after_exact_arms() {
 
 #[test]
 fn generated_wildcard_range_decodes_with_exact_status_precedence() {
-    let files = satay_codegen::generate(WILDCARD_RESPONSES).expect("generate wildcard fixture");
+    let files = codegen::generate(WILDCARD_RESPONSES).expect("generate wildcard fixture");
 
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();
@@ -231,7 +232,7 @@ mod tests {
 
 #[test]
 fn response_projection_generates_public_payload_types_and_projected_decoders() {
-    let files = satay_codegen::generate(PROJECTED_RESPONSES).expect("generate projection fixture");
+    let files = codegen::generate(PROJECTED_RESPONSES).expect("generate projection fixture");
 
     let services_parts = parse_rust(find_file(&files, "get_services/parts.rs"));
     let services_response = find_enum(&services_parts, "GetServicesResponse");
@@ -263,7 +264,7 @@ fn response_projection_generates_public_payload_types_and_projected_decoders() {
 
 #[test]
 fn generated_response_projection_decodes_wire_wrappers() {
-    let files = satay_codegen::generate(PROJECTED_RESPONSES).expect("generate projection fixture");
+    let files = codegen::generate(PROJECTED_RESPONSES).expect("generate projection fixture");
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();
     let generated_dir = crate_dir.join("src/generated");
@@ -338,4 +339,44 @@ mod tests {
         &[],
         "response projection generated crate tests",
     );
+}
+
+#[test]
+fn optional_projected_fields_preserve_public_types_and_decoding() {
+    let spec = PROJECTED_RESPONSES
+        .replace("required: [value]", "required: []")
+        .replace("required: [Link]", "required: []");
+    let files = codegen::generate(&spec).unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    write_manifest(temp.path(), &runtime_path_toml(), false, false);
+    write_generated_files(&temp.path().join("src/generated"), &files);
+    fs::write(temp.path().join("src/lib.rs"), r##"
+pub mod generated;
+#[cfg(test)]
+mod tests {
+    use super::generated::*;
+    fn response(body: &[u8]) -> satay_runtime::ResponseParts<Vec<u8>> {
+        satay_runtime::ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: body.to_vec(),
+        }
+    }
+    #[test]
+    fn missing_unwrapped_and_mapped_values_remain_optional() {
+        for body in [b"{}".as_slice(), br#"{"value":null}"#] {
+            let decoded: GetServicesResponse = operations::get_services::decode_get_services_response(response(body).as_bytes()).unwrap();
+            assert!(matches!(decoded, GetServicesResponse::Ok(None)));
+            let decoded: GetLinksResponse = operations::get_links::decode_get_links_response(response(body).as_bytes()).unwrap();
+            assert!(matches!(decoded, GetLinksResponse::Ok(None)));
+        }
+        let decoded: GetLinksResponse = operations::get_links::decode_get_links_response(
+            response(br#"{"value":[{}, {"Link":null}, {"Link":"found"}]}"#).as_bytes()
+        ).unwrap();
+        let GetLinksResponse::Ok(Some(values)) = decoded else { panic!("projected links") };
+        assert_eq!(values, vec![None, None, Some("found".to_owned())]);
+    }
+}
+"##).unwrap();
+    run_temp_cargo(temp.path(), "test", &[], "optional response projections");
 }

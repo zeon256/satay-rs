@@ -1,13 +1,13 @@
 use std::fs;
 
-use satay_codegen::{Error, ValidationError};
+use super::codegen::{self, Error, ValidationError};
 
-use crate::ast::*;
-use crate::common::*;
+use super::ast::*;
+use super::common::*;
 
 #[test]
 fn all_of_flattens_ref_and_inline_object_branches() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -71,7 +71,7 @@ components:
 
 #[test]
 fn generated_all_of_struct_decodes_flattened_fields() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -154,7 +154,7 @@ mod tests {
 
 #[test]
 fn inline_all_of_array_items_generate_named_flattened_structs() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -268,7 +268,7 @@ components:
 
 #[test]
 fn generated_inline_all_of_array_items_decode_flattened_fields() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -411,7 +411,7 @@ mod tests {
 
 #[test]
 fn all_of_rejects_duplicate_properties() {
-    let err = satay_codegen::generate(
+    let err = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -457,7 +457,7 @@ components:
 
 #[test]
 fn all_of_rejects_primitive_branches() {
-    let err = satay_codegen::generate(
+    let err = codegen::generate(
         r##"
 openapi: 3.1.0
 info:
@@ -494,7 +494,7 @@ components:
 
 #[test]
 fn all_of_rejects_recursive_component_cycles() {
-    let err = satay_codegen::generate(
+    let err = codegen::generate(
         r##"
 openapi: 3.1.0
 info:

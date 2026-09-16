@@ -617,6 +617,8 @@ impl NormalizeContext<'_, '_> {
                             Some(match projection {
                                 Ok(projection) => projection,
                                 Err(error) if self.recover => ResponseProjection {
+                                    unwrap_required: false,
+                                    map_required: output.map_field.as_ref().map(|_| false),
                                     selector: OutputSelector {
                                         unwrap_field: output.unwrap_field.as_str().to_owned(),
                                         map_field: output
@@ -720,6 +722,8 @@ impl NormalizeContext<'_, '_> {
                 context,
             )?;
             return Ok(ResponseProjection {
+                unwrap_required: object.required.iter().any(|name| name == unwrap_field),
+                map_required: None,
                 selector: OutputSelector {
                     unwrap_field: unwrap_field.to_owned(),
                     map_field: None,
@@ -814,6 +818,8 @@ impl NormalizeContext<'_, '_> {
         };
 
         Ok(ResponseProjection {
+            unwrap_required: object.required.iter().any(|name| name == unwrap_field),
+            map_required: Some(item_object.required.iter().any(|name| name == map_field)),
             selector: OutputSelector {
                 unwrap_field: unwrap_field.to_owned(),
                 map_field: Some(map_field.to_owned()),
@@ -988,6 +994,10 @@ impl NormalizeContext<'_, '_> {
                     "cookie" => SecuritySchemeKind::ApiKey {
                         wire_name: wire_name.clone(),
                         location: ApiKeyLocation::Cookie,
+                    },
+                    other if self.recover => SecuritySchemeKind::ApiKey {
+                        wire_name: wire_name.clone(),
+                        location: ApiKeyLocation::Unsupported(other.to_owned()),
                     },
                     other => {
                         return Err(NormalizeError::ApiKeyLocation {

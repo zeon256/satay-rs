@@ -1,11 +1,12 @@
+use super::codegen;
 use std::fs;
 
-use crate::ast;
-use crate::common::*;
+use super::ast;
+use super::common::*;
 
 #[test]
 fn generated_storage_is_selected_without_regenerating_models() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info: {title: Storage, version: 1.0.0}
@@ -177,7 +178,7 @@ mod tests {
 
 #[test]
 fn storage_parameter_does_not_shadow_schema_names() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info: {title: Storage names, version: 1.0.0}
@@ -260,7 +261,7 @@ mod tests {
 
 #[test]
 fn lossy_storage_bounds_propagate_through_containing_models() {
-    let files = satay_codegen::generate(
+    let files = codegen::generate(
         r#"
 openapi: 3.1.0
 info: {title: Lossy storage, version: 1.0.0}

@@ -1,6 +1,7 @@
 use super::normalize;
 use crate::error::ValidationError;
 use crate::parse::normalize::{NormalizeError, normalize_spec};
+use crate::parse::parity;
 use crate::parse::tests::parse_valid;
 
 #[test]
@@ -113,6 +114,7 @@ components:
 "#;
 
     parse_valid(spec);
+    parity::assert_generation(spec);
 
     let NormalizeError::ExcludedDefinition { name, location } =
         normalize_spec(spec, "media.yaml").unwrap_err()

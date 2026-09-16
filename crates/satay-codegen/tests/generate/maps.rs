@@ -1,7 +1,8 @@
+use super::codegen;
 use std::fs;
 
-use crate::ast::*;
-use crate::common::*;
+use super::ast::*;
+use super::common::*;
 
 const MAP_SCHEMAS: &str = r##"
 openapi: 3.1.0
@@ -44,7 +45,7 @@ components:
 
 #[test]
 fn map_schemas_generate_btree_map_fields() {
-    let files = satay_codegen::generate(MAP_SCHEMAS).expect("generate map schema fixture");
+    let files = codegen::generate(MAP_SCHEMAS).expect("generate map schema fixture");
 
     let types_rs = parse_rust(find_file(&files, "types.rs"));
     assert!(
@@ -72,7 +73,7 @@ fn map_schemas_generate_btree_map_fields() {
 
 #[test]
 fn generated_map_fields_round_trip() {
-    let files = satay_codegen::generate(MAP_SCHEMAS).expect("generate map schema runtime fixture");
+    let files = codegen::generate(MAP_SCHEMAS).expect("generate map schema runtime fixture");
 
     let temp = tempfile::tempdir().expect("create temp crate");
     let crate_dir = temp.path();

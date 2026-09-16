@@ -1,6 +1,7 @@
+use super::codegen;
 use std::fs;
 
-use crate::common::*;
+use super::common::*;
 
 #[test]
 fn uri_format_round_trips_and_builds_requests() {
@@ -61,7 +62,7 @@ components:
             type: string
             format: uri
 "#;
-    let files = satay_codegen::generate(spec).expect("generate URL fixture");
+    let files = codegen::generate(spec).expect("generate URL fixture");
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path();
     write_manifest(dir, &runtime_path_toml(), false, false);
@@ -131,7 +132,7 @@ mod tests {
         "          x-satay:\n            treat-error-as-none: true\n",
         "",
     );
-    let files = satay_codegen::generate(&serde_spec).unwrap();
+    let files = codegen::generate(&serde_spec).unwrap();
     write_generated_files(&dir.join("src/generated"), &files);
     run_temp_cargo(
         dir,

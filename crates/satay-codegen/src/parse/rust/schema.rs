@@ -15,8 +15,9 @@ use crate::parse::helpers;
 use crate::parse::satay::SatayIdentifier;
 use crate::parse::validate::*;
 use satay_ir::{
-    self as ir, AdditionalProperties, CompositionKind, DecodePolicy, IntegerInterpretation,
-    PropertyPolicy, StringConstraints, StringInterpretation, StringSchema, TypeExpr,
+    self as ir, AdditionalProperties, CompositionKind, DecodePolicy, DiagnosticKind,
+    IntegerInterpretation, PropertyPolicy, StringConstraints, StringInterpretation, StringSchema,
+    TypeExpr,
 };
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -73,6 +74,23 @@ impl<'a> Schemas<'a> {
             description,
             kind,
         })
+    }
+
+    /// Fold projection absence into Rust Option without changing semantic nullability.
+    pub(super) fn projected_value(
+        &mut self,
+        projection: &ir::ResponseProjection,
+        context: &str,
+    ) -> Result<ValidatedType, LowerError> {
+        let mut output = self.value(&projection.output, context)?;
+        output.nullable |= !projection.unwrap_required;
+        if let Some(required) = projection.map_required {
+            let ValidatedTypeKind::Array(item) = &mut output.kind else {
+                unreachable!("projected output lowers to an array")
+            };
+            item.nullable |= !required;
+        }
+        Ok(output)
     }
 
     #[allow(clippy::too_many_lines)] // Keep ordered schema-policy checks together.
@@ -479,55 +497,102 @@ impl<'a> Schemas<'a> {
         selector: &ir::CoordinatesInterpretation,
         context: &str,
     ) -> Result<ValidatedCoordinates, LowerError> {
-        let mut definition = self.definition(selector.target());
-        let mut seen = vec![];
-        while let TypeExpr::Ref(id) = definition.schema.ty {
-            if seen.contains(&id) {
-                return Err(ValidationError::InvalidSatayCoordinates {
-                    context: context.to_owned(),
-                    reason: format!(
-                        "target `{}` contains a reference cycle",
-                        definition.source_name
-                    ),
-                }
-                .into());
-            }
-            seen.push(id);
-            definition = self.definition(id);
-        }
+        let definition = self.coordinate_target(selector.target(), context)?;
         let name = &definition.source_name;
-        let invalid = |reason| ValidationError::InvalidSatayCoordinates {
-            context: context.to_owned(),
-            reason,
-        };
         let marker = format!("coordinates:{name}");
         if self.stack.contains(&marker) {
-            return Err(invalid(format!(
-                "target `{name}` recursively uses the coordinate codec"
-            ))
-            .into());
+            return Err(invalid_coordinates(
+                context,
+                format!("target `{name}` recursively uses the coordinate codec"),
+            ));
         }
         self.stack.push(marker);
         let component = self.component(definition);
         self.stack.pop();
         let ValidatedComponentKind::Struct(fields) = component?.kind else {
-            return Err(invalid(format!("target `{name}` must be a generated object")).into());
+            return Err(invalid_coordinates(
+                context,
+                format!("target `{name}` must be a generated object"),
+            ));
         };
         if fields.len() != 2 {
-            return Err(invalid(format!(
-                "target `{name}` must generate precisely the two selected fields"
-            ))
-            .into());
+            return Err(invalid_coordinates(
+                context,
+                format!("target `{name}` must generate precisely the two selected fields"),
+            ));
         }
+        let indices = self.coordinate_field_indices(&fields, selector, context, name)?;
+        Ok(ValidatedCoordinates::from_semantic(
+            type_ident(name),
+            indices,
+            CoordinateDelimiter::new(selector.delimiter().to_owned()).expect("checked delimiter"),
+        ))
+    }
+
+    fn coordinate_target(
+        &self,
+        target: ir::DefinitionId,
+        context: &str,
+    ) -> Result<&'a ir::Definition, LowerError> {
+        let mut definition = self.definition(target);
+        let mut seen = vec![];
+        while let TypeExpr::Ref(id) = definition.schema.ty {
+            if seen.contains(&id) {
+                return Err(invalid_coordinates(
+                    context,
+                    format!(
+                        "target `{}` contains a reference cycle",
+                        definition.source_name
+                    ),
+                ));
+            }
+            seen.push(id);
+            definition = self.definition(id);
+        }
+        let name = &definition.source_name;
+        if definition.schema.nullable || !is_struct(&definition.schema) {
+            return Err(invalid_coordinates(
+                context,
+                format!("target `{name}` must be a nonnullable generated object"),
+            ));
+        }
+        if let TypeExpr::Object(object) = &definition.schema.ty
+            && object.properties.len() != 2
+        {
+            return Err(invalid_coordinates(
+                context,
+                format!("target `{name}` must declare precisely the two selected fields"),
+            ));
+        }
+        Ok(definition)
+    }
+
+    fn coordinate_field_indices(
+        &mut self,
+        fields: &[ValidatedField],
+        selector: &ir::CoordinatesInterpretation,
+        context: &str,
+        name: &str,
+    ) -> Result<[usize; 2], LowerError> {
         let mut indices = [0; 2];
         for (output_index, wire_name) in selector.fields().iter().enumerate() {
             let (index, field) = fields
                 .iter()
                 .enumerate()
                 .find(|(_, field)| &field.wire_name == wire_name)
-                .ok_or_else(|| invalid(format!("target `{name}` has no field `{wire_name}`")))?;
+                .ok_or_else(|| {
+                    invalid_coordinates(
+                        context,
+                        format!("target `{name}` has no field `{wire_name}`"),
+                    )
+                })?;
             if !field.required || !matches!(field.value, ValidatedFieldValue::Strict(_)) {
-                return Err(invalid(format!("target field `{name}.{wire_name}` must be required with strict numeric decoding")).into());
+                return Err(invalid_coordinates(
+                    context,
+                    format!(
+                        "target field `{name}.{wire_name}` must be required with strict numeric decoding"
+                    ),
+                ));
             }
             let mut ty = field.value.ty().clone();
             let mut seen = BTreeSet::new();
@@ -547,23 +612,22 @@ impl<'a> Schemas<'a> {
                     .find(|(_, definition)| type_ident(&definition.source_name) == *rust_name)
                     .expect("validated component name")
                     .1;
+                if definition.schema.nullable
+                    || !matches!(definition.schema.ty, TypeExpr::Number(_) | TypeExpr::Ref(_))
+                {
+                    break;
+                }
                 ty = self.value(&definition.schema, context)?;
             }
             if ty.nullable || !matches!(ty.kind, ValidatedTypeKind::F32 | ValidatedTypeKind::F64) {
-                return Err(ValidationError::InvalidSatayCoordinates {
-                    context: format!("{context} target field `{name}.{wire_name}`"),
-                    reason: "selected fields must resolve to nonnullable f32/f64 numbers"
-                        .to_owned(),
-                }
-                .into());
+                return Err(invalid_coordinates(
+                    &format!("{context} target field `{name}.{wire_name}`"),
+                    "selected fields must resolve to nonnullable f32/f64 numbers",
+                ));
             }
             indices[output_index] = index;
         }
-        Ok(ValidatedCoordinates::from_semantic(
-            type_ident(name),
-            indices,
-            CoordinateDelimiter::new(selector.delimiter().to_owned()).expect("checked delimiter"),
-        ))
+        Ok(indices)
     }
 
     #[allow(clippy::too_many_lines)] // Keep ordered schema-policy checks together.
@@ -658,19 +722,23 @@ impl<'a> Schemas<'a> {
             };
             if let TypeExpr::Invalid(diagnostic) = &branch.ty {
                 if matches!(
-                    diagnostic.code.as_str(),
-                    "UnsupportedRefSiblingKeyword"
-                        | "InvalidExtension"
-                        | "DiscriminatorMappingValueMismatch"
+                    diagnostic.kind,
+                    DiagnosticKind::UnsupportedRefSiblingKeyword { .. }
+                        | DiagnosticKind::InvalidExtension { .. }
+                        | DiagnosticKind::DiscriminatorMappingValueMismatch { .. }
                 ) {
                     return Err(diagnostic.clone().into());
                 }
-                if diagnostic.code == "SatayTreatErrorAsNoneRequiresObjectProperty" {
-                    let mut diagnostic = diagnostic.clone();
-                    diagnostic.message = diagnostic
-                        .message
-                        .replace(&format!("{context}.{keyword}[{index}]"), context);
-                    return Err(diagnostic.into());
+                if matches!(
+                    diagnostic.kind,
+                    DiagnosticKind::SatayTreatErrorAsNoneRequiresObjectProperty { .. }
+                ) {
+                    return Err(
+                        ValidationError::SatayTreatErrorAsNoneRequiresObjectProperty {
+                            context: context.to_owned(),
+                        }
+                        .into(),
+                    );
                 }
                 return Err(error().into());
             }
@@ -853,7 +921,17 @@ impl<'a> Schemas<'a> {
                 self.stack.pop();
             }
             let component = component.map_err(|error| match &error {
-                LowerError::Frontend(diagnostic) if diagnostic.code == "NonStringEnumValue" => ValidationError::InvalidDiscriminatorProperty { context: context.to_owned(), schema: definition.source_name.clone(), property: discriminator.property_name.clone(), expected: "a strict, required, non-null singleton string enum or string const" }.into(),
+                LowerError::Frontend(diagnostic)
+                    if matches!(diagnostic.kind, DiagnosticKind::NonStringEnumValue { .. }) =>
+                {
+                    ValidationError::InvalidDiscriminatorProperty {
+                        context: context.to_owned(),
+                        schema: definition.source_name.clone(),
+                        property: discriminator.property_name.clone(),
+                        expected: "a strict, required, non-null singleton string enum or string const",
+                    }
+                    .into()
+                }
                 _ => error,
             })?;
             let ValidatedComponentKind::Struct(fields) = component.kind else {
@@ -958,6 +1036,14 @@ impl<'a> Schemas<'a> {
 fn is_struct(value: &ir::SchemaUse) -> bool {
     matches!(&value.ty, TypeExpr::Object(object) if !object.properties.is_empty())
         || matches!(&value.ty, TypeExpr::Composition(composition) if composition.kind == CompositionKind::AllOf)
+}
+
+fn invalid_coordinates(context: &str, reason: impl Into<String>) -> LowerError {
+    ValidationError::InvalidSatayCoordinates {
+        context: context.to_owned(),
+        reason: reason.into(),
+    }
+    .into()
 }
 
 fn effective_enum(string: &ir::StringSchema) -> Option<Vec<String>> {
