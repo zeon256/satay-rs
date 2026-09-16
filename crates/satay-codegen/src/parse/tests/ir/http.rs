@@ -671,7 +671,7 @@ paths:
     assert_eq!(
         responses
             .iter()
-            .map(|response| response.status)
+            .map(|response| response.status.clone())
             .collect::<Vec<_>>(),
         [
             ResponseStatus::Default,

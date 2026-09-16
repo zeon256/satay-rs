@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use oas3::spec::{SecurityScheme as OasSecurityScheme, Spec as OasSpec};
+use oas3::spec::SecurityScheme as OasSecurityScheme;
 
 use super::super::resolve::ResolvedDocument;
 use super::schema::SchemaLowerer;
@@ -16,8 +16,7 @@ use crate::model::{
 };
 use crate::parse::registry::TypeRegistry;
 use crate::parse::validate::{
-    ValidatedDocument, ValidatedOperation, ValidatedParameter, ValidatedRequestBody,
-    ValidatedResponse,
+    ValidatedOperation, ValidatedParameter, ValidatedRequestBody, ValidatedResponse,
 };
 
 pub(super) fn parse_api_key_security_schemes(
@@ -62,19 +61,18 @@ pub(super) fn parse_api_key_security_schemes(
 }
 
 pub(super) fn parse_operations(
-    document: &ValidatedDocument<'_>,
+    operations: &[ValidatedOperation],
     registry: &mut TypeRegistry,
-    schemas: &mut SchemaLowerer<'_, '_>,
+    schemas: &mut SchemaLowerer<'_>,
 ) -> Result<Vec<SatayOperation>, ValidationError> {
-    document
-        .operations
+    operations
         .iter()
         .map(|operation| parse_operation(operation, registry, schemas))
         .collect()
 }
 
 pub(super) fn parse_api_groups(
-    spec: &OasSpec,
+    tags: &[(String, Option<String>)],
     api_key_security_schemes: &[ApiKeySecurityScheme],
     operations: &[SatayOperation],
 ) -> Vec<ApiGroup> {
@@ -87,9 +85,9 @@ pub(super) fn parse_api_groups(
 
     // Root tag order is meaningful in OpenAPI. Undeclared tags follow in
     // first-operation order so generation stays deterministic.
-    for tag in &spec.tags {
-        if used_tags.contains(&tag.name) && seen_tags.insert(tag.name.clone()) {
-            ordered_tags.push(tag.name.clone());
+    for (name, _) in tags {
+        if used_tags.contains(name) && seen_tags.insert(name.clone()) {
+            ordered_tags.push(name.clone());
         }
     }
     for operation in operations {
@@ -120,11 +118,10 @@ pub(super) fn parse_api_groups(
         .map(|tag_name| {
             let base_name = group_ident(&tag_name);
             let rust_name = unique_group_ident(&base_name, &mut used_modules, &mut used_accessors);
-            let description = spec
-                .tags
+            let description = tags
                 .iter()
-                .find(|tag| tag.name == tag_name)
-                .and_then(|tag| tag.description.clone());
+                .find(|(name, _)| *name == tag_name)
+                .and_then(|(_, description)| description.clone());
             build_group(
                 Some(tag_name),
                 rust_name,
@@ -231,7 +228,7 @@ fn unique_group_ident(
 fn parse_operation(
     operation: &ValidatedOperation,
     registry: &mut TypeRegistry,
-    schemas: &mut SchemaLowerer<'_, '_>,
+    schemas: &mut SchemaLowerer<'_>,
 ) -> Result<SatayOperation, ValidationError> {
     let fn_name = function_ident(&operation.operation_id);
     let type_prefix = type_ident(&operation.operation_id);
@@ -280,7 +277,7 @@ fn parse_operation(
 fn parse_parameter(
     parameter: &ValidatedParameter,
     registry: &mut TypeRegistry,
-    schemas: &mut SchemaLowerer<'_, '_>,
+    schemas: &mut SchemaLowerer<'_>,
     type_prefix: &str,
 ) -> Result<Parameter, ValidationError> {
     let ty = schemas.parse_type_ref_with_hint(
@@ -345,7 +342,7 @@ fn parse_request_body(
     request_body: Option<&ValidatedRequestBody>,
     parameters: &[Parameter],
     registry: &mut TypeRegistry,
-    schemas: &mut SchemaLowerer<'_, '_>,
+    schemas: &mut SchemaLowerer<'_>,
     type_prefix: &str,
 ) -> Option<RequestBody> {
     let request_body = request_body?;
@@ -372,7 +369,7 @@ fn parse_request_body(
 fn parse_response(
     response: &ValidatedResponse,
     registry: &mut TypeRegistry,
-    schemas: &mut SchemaLowerer<'_, '_>,
+    schemas: &mut SchemaLowerer<'_>,
     type_prefix: &str,
 ) -> ResponseCase {
     ResponseCase {

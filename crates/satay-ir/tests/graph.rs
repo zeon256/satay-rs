@@ -71,6 +71,7 @@ fn references_in(schema: &SchemaUse, references: &mut Vec<DefinitionId>) {
         | TypeExpr::Number(_)
         | TypeExpr::Boolean
         | TypeExpr::Null
+        | TypeExpr::Invalid(_)
         | TypeExpr::AnyJson => {}
     }
 }

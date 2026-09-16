@@ -1,5 +1,6 @@
 //! Owned schema conversion, with references kept behind source-name identities.
 
+use crate::parse::helpers;
 use core::slice;
 use std::collections::{BTreeMap, BTreeSet};
 use std::mem;
@@ -82,6 +83,26 @@ impl NormalizeContext<'_, '_> {
         position: SchemaPosition,
         context: &str,
     ) -> Result<SchemaUse, NormalizeError> {
+        let result = self.schema_use_checked(schema, pointer, position, context);
+        match result {
+            Err(error) if self.recover => Ok(self.invalid_use(&error, pointer)),
+            result => result,
+        }
+    }
+
+    pub(super) fn invalid_use(&self, error: &NormalizeError, pointer: &str) -> SchemaUse {
+        let mut value = SchemaUse::new(TypeExpr::Invalid(error.diagnostic()));
+        value.annotations.source = Some(source_ref(self.document_id, pointer));
+        value
+    }
+
+    fn schema_use_checked(
+        &self,
+        schema: &OasSchema,
+        pointer: &str,
+        position: SchemaPosition,
+        context: &str,
+    ) -> Result<SchemaUse, NormalizeError> {
         reject_preserved_unknown_keywords(schema, context).map_err(|error| {
             let location =
                 unknown_keyword_pointer(schema, pointer).unwrap_or_else(|| pointer.to_owned());
@@ -95,6 +116,24 @@ impl NormalizeContext<'_, '_> {
     /// envelopes still own property-local options, and ignored fields retain their
     /// complete wire shape without becoming generated inline objects.
     fn schema_use_inner(
+        &self,
+        schema: &OasSchema,
+        pointer: &str,
+        position: SchemaPosition,
+        retained_wire: bool,
+        context: &str,
+    ) -> Result<(SchemaUse, PropertyPolicy), NormalizeError> {
+        let result =
+            self.schema_use_inner_checked(schema, pointer, position, retained_wire, context);
+        match result {
+            Err(error) if self.recover => {
+                Ok((self.invalid_use(&error, pointer), PropertyPolicy::default()))
+            }
+            result => result,
+        }
+    }
+
+    fn schema_use_inner_checked(
         &self,
         schema: &OasSchema,
         pointer: &str,
@@ -128,12 +167,22 @@ impl NormalizeContext<'_, '_> {
             }
             .at(self, &child_pointer(pointer, "default")));
         }
+        // Composition sibling validation precedes extension interpretation in
+        // the compatibility traversal.
+        if schema.discriminator.is_none() && !schema.one_of.is_empty() && schema.any_of.is_empty() {
+            reject_plain_one_of_sibling_keywords(schema, context)
+                .map_err(|error| error.at(self, pointer))?;
+        } else if schema.discriminator.is_none() && !schema.any_of.is_empty() {
+            reject_any_of_sibling_keywords(schema, context)
+                .map_err(|error| error.at(self, pointer))?;
+        }
         let mut interpreted =
             self.use_options_impl(schema, schema_type, position, pointer, context)?;
         let retained_wire = retained_wire
             || position == SchemaPosition::RetainedWire
             || interpreted.policy == PropertyPolicy::Ignored;
         let annotations = SchemaAnnotations {
+            const_value: schema.const_value.clone(),
             description: optional_description(&schema.description),
             format: schema.format.clone(),
             default: schema.default.clone().or_else(|| {
@@ -147,10 +196,7 @@ impl NormalizeContext<'_, '_> {
             let reference =
                 schema_component_ref(reference).map_err(|error| error.at(self, pointer))?;
             TypeExpr::Ref(self.schema_definition_id(reference.name(), pointer)?)
-        } else if schema.discriminator.is_some()
-            || !schema.any_of.is_empty()
-            || !schema.one_of.is_empty()
-        {
+        } else if !schema.any_of.is_empty() || !schema.one_of.is_empty() {
             self.union_schema(schema, pointer, retained_wire, context)?
         } else if !schema.all_of.is_empty() {
             self.all_of_schema(schema, pointer, retained_wire, context)?
@@ -209,7 +255,9 @@ impl NormalizeContext<'_, '_> {
                 .map_err(|error| error.at(self, &child_pointer(pointer, "enum")))?;
         }
 
-        if let Some(value) = &schema.const_value {
+        if let Some(value) = &schema.const_value
+            && (!self.recover || value.is_string() || !schema.enum_values.is_empty())
+        {
             validate_enum_shape(slice::from_ref(value), schema_type, context)
                 .map_err(|error| error.at(self, &child_pointer(pointer, "const")))?;
             if !schema.enum_values.is_empty() && !schema.enum_values.contains(value) {
@@ -253,7 +301,7 @@ impl NormalizeContext<'_, '_> {
                     )
                 };
                 Ok(TypeExpr::String(StringSchema {
-                    constraints: string_constraints(schema, context)
+                    constraints: string_constraints(schema, context, self.recover)
                         .map_err(|error| error.at(self, pointer))?,
                     enum_values,
                     const_value: schema
@@ -266,12 +314,12 @@ impl NormalizeContext<'_, '_> {
                 }))
             }
             Some(OasSchemaType::Integer) => Ok(TypeExpr::Integer(IntegerSchema {
-                constraints: numeric_constraints(schema, true, context)
+                constraints: numeric_constraints(schema, true, context, self.recover)
                     .map_err(|error| error.at(self, pointer))?,
                 interpretation: mem::take(&mut interpreted.integer),
             })),
             Some(OasSchemaType::Number) => Ok(TypeExpr::Number(NumberSchema {
-                constraints: numeric_constraints(schema, false, context)
+                constraints: numeric_constraints(schema, false, context, self.recover)
                     .map_err(|error| error.at(self, pointer))?,
             })),
             Some(OasSchemaType::Boolean) => Ok(TypeExpr::Boolean),
@@ -292,7 +340,7 @@ impl NormalizeContext<'_, '_> {
                 )?;
                 Ok(TypeExpr::Array(ArraySchema {
                     items: Box::new(items),
-                    constraints: array_constraints(schema, context)
+                    constraints: array_constraints(schema, context, self.recover)
                         .map_err(|error| error.at(self, pointer))?,
                 }))
             }
@@ -319,7 +367,7 @@ impl NormalizeContext<'_, '_> {
                         &child_pointer(&properties_pointer, name),
                         SchemaPosition::Property,
                         retained_wire,
-                        &format!("{context}.{name}"),
+                        &helpers::property_context(context, name),
                     )?;
                     properties.push(Property {
                         wire_name: name.clone(),
@@ -377,7 +425,10 @@ impl NormalizeContext<'_, '_> {
         let object = schema_type == Some(OasSchemaType::Object);
         for (keyword, unsupported) in [
             ("prefixItems", !schema.prefix_items.is_empty()),
-            ("multipleOf", schema.multiple_of.is_some()),
+            (
+                "multipleOf",
+                schema.multiple_of.is_some() && !(self.recover && numeric),
+            ),
             ("minProperties", schema.min_properties.is_some()),
             ("maxProperties", schema.max_properties.is_some()),
             ("minimum", !numeric && schema.minimum.is_some()),
@@ -407,7 +458,7 @@ impl NormalizeContext<'_, '_> {
                 .map_err(|error| error.at(self, &child_pointer(pointer, keyword)))?;
         }
 
-        if schema.unique_items == Some(true) {
+        if schema.unique_items == Some(true) && !(self.recover && array) {
             return Err(ValidationError::UniqueItemsUnsupported {
                 context: context.to_owned(),
             }
@@ -423,12 +474,33 @@ impl NormalizeContext<'_, '_> {
         retained_wire: bool,
         context: &str,
     ) -> Result<TypeExpr, NormalizeError> {
-        self.all_of_fields(schema, pointer, context, &mut BTreeSet::new())?;
+        if self.recover {
+            if annotation_only_all_of_ref_wrapper(schema).is_none() {
+                reject_all_of_sibling_keywords(schema, context)
+                    .map_err(|error| error.at(self, pointer))?;
+            }
+        } else {
+            self.all_of_fields(schema, pointer, context, &mut BTreeSet::new())?;
+        }
         let mut branches = Vec::with_capacity(schema.all_of.len());
 
         for (index, branch) in schema.all_of.iter().enumerate() {
             let branch_pointer =
                 child_pointer(&child_pointer(pointer, "allOf"), &index.to_string());
+            if self.recover
+                && branch.reference().is_none()
+                && let Some(object) = branch.as_object()
+            {
+                if !object.all_of.is_empty() {
+                    return Err(ValidationError::UnsupportedAllOfBranch {
+                        context: context.to_owned(),
+                        index,
+                    }
+                    .at(self, &branch_pointer));
+                }
+                reject_all_of_object_branch_keywords(object, context, index)
+                    .map_err(|error| error.at(self, &branch_pointer))?;
+            }
             let (value, _) = self.schema_use_inner(
                 branch,
                 &branch_pointer,
@@ -508,6 +580,25 @@ impl NormalizeContext<'_, '_> {
                 retained_wire,
                 &format!("{context}.{keyword}[{index}]"),
             )?;
+            let value = if self.recover
+                && branch.as_object().is_some_and(is_null_branch)
+                && matches!(value.ty, TypeExpr::Invalid(_))
+            {
+                let error = if keyword == "oneOf" {
+                    ValidationError::UnsupportedOneOfBranch {
+                        context: context.to_owned(),
+                        index,
+                    }
+                } else {
+                    ValidationError::UnsupportedAnyOfBranch {
+                        context: context.to_owned(),
+                        index,
+                    }
+                };
+                self.invalid_use(&error.at(self, &branch_pointer), &branch_pointer)
+            } else {
+                value
+            };
             branches.push(value);
         }
 
@@ -825,6 +916,70 @@ impl NormalizeContext<'_, '_> {
             })
     }
 
+    fn discriminator_identities(
+        &self,
+        discriminator: &OasDiscriminator,
+        branches: &[OasSchema],
+        keyword: &'static str,
+        pointer: &str,
+        context: &str,
+    ) -> Result<Discriminator, NormalizeError> {
+        let mut names = BTreeSet::new();
+        for (index, branch) in branches.iter().enumerate() {
+            let reference = branch.reference().ok_or_else(|| {
+                ValidationError::UnsupportedDiscriminatorBranch {
+                    context: context.to_owned(),
+                    keyword,
+                    index,
+                }
+                .at(self, pointer)
+            })?;
+            let reference =
+                schema_component_ref(reference).map_err(|error| error.at(self, pointer))?;
+            if !names.insert(reference.name().to_owned()) {
+                return Err(ValidationError::InvalidDiscriminatorUnion {
+                    context: context.to_owned(),
+                }
+                .at(self, pointer));
+            }
+        }
+        let mut mappings = vec![];
+        if let Some(declared) = &discriminator.mapping {
+            for (wire_value, target) in declared {
+                let name = if target.starts_with("#/") {
+                    schema_component_ref(target)
+                        .ok()
+                        .map(|reference| reference.name().to_owned())
+                } else {
+                    Some(target.clone())
+                };
+                let name = name.filter(|name| names.contains(name)).ok_or_else(|| {
+                    ValidationError::InvalidDiscriminatorMapping {
+                        context: context.to_owned(),
+                        value: wire_value.clone(),
+                        target: target.clone(),
+                    }
+                    .at(self, pointer)
+                })?;
+                mappings.push(DiscriminatorMapping {
+                    wire_value: wire_value.clone(),
+                    target: self.schema_definition_id(&name, pointer)?,
+                    source: Some(source_ref(
+                        self.document_id,
+                        &child_pointer(
+                            &child_pointer(&child_pointer(pointer, "discriminator"), "mapping"),
+                            wire_value,
+                        ),
+                    )),
+                });
+            }
+        }
+        Ok(Discriminator {
+            property_name: discriminator.property_name.clone(),
+            mappings,
+        })
+    }
+
     #[allow(clippy::too_many_lines)]
     fn discriminator(
         &self,
@@ -834,6 +989,15 @@ impl NormalizeContext<'_, '_> {
         pointer: &str,
         context: &str,
     ) -> Result<Discriminator, NormalizeError> {
+        if self.recover {
+            return self.discriminator_identities(
+                discriminator,
+                branches,
+                keyword,
+                pointer,
+                context,
+            );
+        }
         let location = child_pointer(pointer, "discriminator");
         let mut targets = BTreeMap::new();
 

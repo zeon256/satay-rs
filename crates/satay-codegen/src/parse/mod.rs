@@ -11,6 +11,7 @@ mod normalize;
 mod reference;
 mod registry;
 mod resolve;
+mod rust;
 mod satay;
 #[cfg(test)]
 mod tests;

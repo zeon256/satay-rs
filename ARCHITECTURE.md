@@ -108,7 +108,13 @@ flowchart TD
     operations --> validated
 ```
 
-There is no separate normalization or schema-identity pass in the current implementation. Validation walks the resolved `oas3` document directly and builds validated data structures that lowering can consume without revisiting unsupported OpenAPI shapes.
+Production validation still walks the resolved `oas3` document directly and builds validated data structures that lowering can consume without revisiting unsupported OpenAPI shapes. The private, test-gated semantic pipeline instead uses `parse/normalize` to build an owned `satay-ir::Api`, then `parse/rust` to validate and lower that graph. Neither `generate` nor `generate_with` has switched to this staged route.
+
+The Rust pass consumes only the semantic graph and generation options: no OpenAPI document, source-text lookup, or frontend query is available. It chooses integer widths, parses parameter defaults, applies codec and Serde policy, and preserves encounter order while producing the existing validated Rust types and model. Both routes share constraint and policy helpers in `parse/rust`, and reuse the existing naming, helper registry, model lowering, and renderer.
+
+The strict frontend entry still reports normalization failures immediately. Its recovering entry retains failures at their schema or HTTP position, plus original numeric declarations when canonicalization would fail. The Rust traversal can therefore report an earlier Rust-policy failure before a later frontend failure, with the legacy message and context. Graph finalization checks reference integrity even for recovering graphs; it does not imply that every schema is valid for generation. Deferred diagnostics are target-neutral owned code/message records, not borrowed OpenAPI state.
+
+Parity gates compare generated paths and bytes under both root-module options across the accepted fixture corpus and concrete generation-test specifications. Parser tests also compare the staged result against the existing route, including invalid-input diagnostics. Dedicated regressions cover cross-stage first-error selection, nested `allOf` aliases and ignored wire-name duplicates, and lowering a hand-built graph without source input.
 
 `ValidatedDocument` stores:
 
@@ -129,7 +135,7 @@ Validation responsibilities are split by file:
 
 - `validate/schema.rs` validates component schemas and inline type schemas, rejects unsupported schema shapes, validates enum shape, validates references, and records constraints on `ValidatedType`. Ordinary schemas enter through `validate_value_schema`; object properties enter through the property-specific stack validator and become included or ignored property results. Array items and `additionalProperties` values always return to value context rather than inheriting property capabilities.
 - `validate/operation.rs` validates paths, operation parameters, request bodies, responses, status codes, path placeholders, and JSON media-type requirements.
-- `validate/constraint.rs` parses and normalizes string, integer, number, and array constraints for `nutype` rendering. It also infers integer types from bounds when no explicit `x-satay.integer-type` is provided.
+- `validate/constraint.rs` adapts OpenAPI constraints to the pure policy in `rust/constraint.rs`, which parses string, integer, number, and array constraints for `nutype` rendering and infers integer types from bounds when no explicit `x-satay.integer-type` is provided.
 - `parse/satay.rs` is the authoritative home for typed schema and operation `x-satay` wire contracts, their `schema_options` and `operation_options` accessors, and lower-level parsing helpers shared by validation. The wire types use owned strings so validation does not need to carry extension-value lifetimes.
 - `validate/satay.rs` applies schema-extension compatibility rules such as `parse-as`, `none-if`, `integer-type`, `enum-variants`, `treat-error-as-none`, `ignore`, and `identifier`. Separate value and property entry points reject property-only keys on values by wire-key presence, including explicit `false`; the same context split controls which `x-satay` keys are legal beside `$ref`. Ordinary-type, enum, and `$ref` routes exhaustively destructure the raw schema options so each present key is either retained in validated state or rejected before lowering.
 - `validate/operation.rs` applies operation semantics and resolves names from operation extensions against validated operation data.

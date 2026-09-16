@@ -74,6 +74,8 @@ impl SchemaUse {
 /// Annotations attached to one schema use.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SchemaAnnotations {
+    /// Declared constant, including constants outside a string schema's domain.
+    pub const_value: Option<Value>,
     /// Human-readable schema description.
     pub description: Option<String>,
     /// Declared semantic format.
@@ -87,6 +89,9 @@ pub struct SchemaAnnotations {
 /// Target-neutral schema expression.
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeExpr {
+    /// A use that could not be normalized. Keeping its diagnostic in place
+    /// lets a consumer validate earlier uses before reporting this failure.
+    Invalid(Diagnostic),
     /// A string schema.
     String(StringSchema),
     /// An integer schema.
@@ -107,6 +112,19 @@ pub enum TypeExpr {
     AnyJson,
     /// A reference to a separately allocated definition.
     Ref(DefinitionId),
+}
+
+/// An owned frontend diagnostic retained at its semantic encounter position.
+///
+/// An invalid use has no implied JSON acceptance semantics. Consumers must
+/// report its diagnostic if that use participates in their selected output.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{message}")]
+pub struct Diagnostic {
+    /// Stable diagnostic category supplied by the frontend.
+    pub code: String,
+    /// Complete contextual diagnostic text, without a source-location suffix.
+    pub message: String,
 }
 
 /// String-specific constraints.
@@ -156,10 +174,28 @@ pub struct StringConstraints {
 /// Bounds on an integer or number value.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct NumericConstraints {
+    /// Original declarations when canonicalization must defer a diagnostic.
+    /// Consumers validate these before using the canonical interval.
+    pub declared: Option<DeclaredNumericConstraints>,
     /// Lower bound, when declared.
     pub minimum: Option<NumericBound>,
     /// Upper bound, when declared.
     pub maximum: Option<NumericBound>,
+}
+
+/// Numeric declarations before interval normalization or target-width checks.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DeclaredNumericConstraints {
+    /// Inclusive lower bound.
+    pub minimum: Option<Number>,
+    /// Exclusive lower bound.
+    pub exclusive_minimum: Option<Number>,
+    /// Inclusive upper bound.
+    pub maximum: Option<Number>,
+    /// Exclusive upper bound.
+    pub exclusive_maximum: Option<Number>,
+    /// Declared numeric step.
+    pub multiple_of: Option<Number>,
 }
 
 /// One numeric bound and whether it excludes its value.
@@ -183,6 +219,8 @@ pub struct ArraySchema {
 /// Constraints on an array value.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ArrayConstraints {
+    /// Whether item values must be unique.
+    pub unique_items: bool,
     /// Inclusive minimum item count.
     pub min_items: Option<u64>,
     /// Inclusive maximum item count.

@@ -6,7 +6,7 @@ use oas3::spec::ObjectSchema as OasObjectSchema;
 use serde_json::Number;
 
 use crate::error::ValidationError;
-use crate::parse::validate::constraint::{json_integer, reject_keyword};
+use crate::parse::rust::constraint::{json_integer, reject_keyword};
 
 use satay_ir::{ArrayConstraints, NumericBound, NumericConstraints, StringConstraints};
 
@@ -27,7 +27,20 @@ pub(in crate::parse) fn numeric_constraints(
     schema: &OasObjectSchema,
     integer: bool,
     context: &str,
+    recover: bool,
 ) -> Result<NumericConstraints, ValidationError> {
+    if recover {
+        let mut constraints =
+            numeric_constraints(schema, integer, context, false).unwrap_or_default();
+        constraints.declared = Some(satay_ir::DeclaredNumericConstraints {
+            minimum: schema.minimum.clone(),
+            exclusive_minimum: schema.exclusive_minimum.clone(),
+            maximum: schema.maximum.clone(),
+            exclusive_maximum: schema.exclusive_maximum.clone(),
+            multiple_of: schema.multiple_of.clone(),
+        });
+        return Ok(constraints);
+    }
     reject_keyword(schema.multiple_of.is_some(), "multipleOf", context)?;
 
     let minimum = tighter_bound(
@@ -47,7 +60,11 @@ pub(in crate::parse) fn numeric_constraints(
 
     check_interval(&minimum, &maximum, integer, context)?;
 
-    Ok(NumericConstraints { minimum, maximum })
+    Ok(NumericConstraints {
+        declared: None,
+        minimum,
+        maximum,
+    })
 }
 
 /// Normalizes declared string length and pattern constraints.
@@ -58,9 +75,11 @@ pub(in crate::parse) fn numeric_constraints(
 pub(in crate::parse) fn string_constraints(
     schema: &OasObjectSchema,
     context: &str,
+    recover: bool,
 ) -> Result<StringConstraints, ValidationError> {
     if let (Some(min_length), Some(max_length)) = (schema.min_length, schema.max_length)
         && min_length > max_length
+        && !recover
     {
         return Err(ValidationError::InvalidStringLengthBounds {
             context: context.to_owned(),
@@ -84,8 +103,9 @@ pub(in crate::parse) fn string_constraints(
 pub(in crate::parse) fn array_constraints(
     schema: &OasObjectSchema,
     context: &str,
+    recover: bool,
 ) -> Result<ArrayConstraints, ValidationError> {
-    if schema.unique_items == Some(true) {
+    if !recover && schema.unique_items == Some(true) {
         return Err(ValidationError::UniqueItemsUnsupported {
             context: context.to_owned(),
         });
@@ -93,6 +113,7 @@ pub(in crate::parse) fn array_constraints(
 
     if let (Some(min_items), Some(max_items)) = (schema.min_items, schema.max_items)
         && min_items > max_items
+        && !recover
     {
         return Err(ValidationError::InvalidArrayLengthBounds {
             context: context.to_owned(),
@@ -102,6 +123,7 @@ pub(in crate::parse) fn array_constraints(
     }
 
     Ok(ArrayConstraints {
+        unique_items: schema.unique_items.unwrap_or(false),
         min_items: schema.min_items,
         max_items: schema.max_items,
     })

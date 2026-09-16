@@ -170,6 +170,7 @@ fn number_range_retains_declared_bounds() {
 
 fn range_bounds(minimum: i64, maximum: i64) -> NumericConstraints {
     NumericConstraints {
+        declared: None,
         minimum: Some(NumericBound {
             value: json_number(minimum),
             exclusive: false,

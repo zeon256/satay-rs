@@ -5,31 +5,30 @@ use crate::model::{
 };
 use crate::parse::registry::TypeRegistry;
 use crate::parse::validate::{
-    ValidatedComponent, ValidatedComponentKind, ValidatedDocument, ValidatedField,
-    ValidatedFieldValue, ValidatedType, ValidatedTypeKind, ValidatedUnion, ValidatedUnionTagStyle,
-    ValidatedUnionVariant, ValidatedUnionVariantKind,
+    ValidatedComponent, ValidatedComponentKind, ValidatedField, ValidatedFieldValue, ValidatedType,
+    ValidatedTypeKind, ValidatedUnion, ValidatedUnionTagStyle, ValidatedUnionVariant,
+    ValidatedUnionVariantKind,
 };
 
 use std::collections::{BTreeMap, BTreeSet};
 
-pub(super) struct SchemaLowerer<'a, 'doc> {
-    document: &'a ValidatedDocument<'doc>,
+pub(super) struct SchemaLowerer<'a> {
+    components: &'a [ValidatedComponent],
     component_kinds: BTreeMap<String, ComponentKind>,
     component_refs: BTreeMap<String, TypeRef>,
 }
 
-impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
-    pub(super) fn new(document: &'a ValidatedDocument<'doc>) -> Self {
+impl<'a> SchemaLowerer<'a> {
+    pub(super) fn new(components: &'a [ValidatedComponent]) -> Self {
         Self {
-            document,
+            components,
             component_kinds: BTreeMap::new(),
             component_refs: BTreeMap::new(),
         }
     }
 
     pub(super) fn parse_components(&mut self, registry: &mut TypeRegistry) -> Vec<Component> {
-        self.document
-            .components
+        self.components
             .iter()
             .map(|component| self.parse_component(component, registry))
             .collect()
@@ -321,8 +320,7 @@ impl<'a, 'doc> SchemaLowerer<'a, 'doc> {
     }
 
     fn validated_component(&self, rust_name: &str) -> ValidatedComponent {
-        self.document
-            .components
+        self.components
             .iter()
             .find(|component| type_ident(&component.schema_name) == rust_name)
             .cloned()

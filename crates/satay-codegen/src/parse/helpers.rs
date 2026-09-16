@@ -1,4 +1,30 @@
+/// Stable source-level operation label used by diagnostics and name lowering.
+pub(super) fn inferred_operation_id(method: &str, path: &str) -> String {
+    let mut parts = vec![method.to_owned()];
+    for segment in path.split('/').filter(|segment| !segment.is_empty()) {
+        if let Some(name) = segment
+            .strip_prefix('{')
+            .and_then(|part| part.strip_suffix('}'))
+        {
+            parts.push("by".to_owned());
+            parts.push(name.to_owned());
+        } else {
+            parts.push(segment.to_owned());
+        }
+    }
+    parts.join("_")
+}
+
 use oas3::{Map as OasMap, spec::MediaType as OasMediaType};
+
+#[cfg(test)]
+pub(super) fn property_context(context: &str, name: &str) -> String {
+    let parent = context
+        .strip_prefix("schema `")
+        .and_then(|value| value.strip_suffix('`'))
+        .unwrap_or(context);
+    format!("property `{parent}.{name}`")
+}
 
 pub(super) fn optional_description(description: &Option<String>) -> Option<String> {
     description

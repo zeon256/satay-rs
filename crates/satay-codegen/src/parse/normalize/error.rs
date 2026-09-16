@@ -38,3 +38,21 @@ pub(in crate::parse) enum NormalizeError {
         location: satay_ir::SourceRef,
     },
 }
+
+impl NormalizeError {
+    pub(super) fn diagnostic(&self) -> satay_ir::Diagnostic {
+        let (code, message) = match self {
+            Self::Validation { source, .. } => (format!("{source:?}"), source.to_string()),
+            Self::Interpretation { source, .. } => (format!("{source:?}"), source.to_string()),
+            _ => (format!("{self:?}"), self.to_string()),
+        };
+        satay_ir::Diagnostic {
+            code: code
+                .split([' ', '{', '('])
+                .next()
+                .unwrap_or("Frontend")
+                .to_owned(),
+            message,
+        }
+    }
+}

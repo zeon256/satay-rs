@@ -58,6 +58,10 @@ pub(super) fn coordinate_target_reference(schema: &OasObjectSchema) -> Option<&s
 pub(crate) struct SatayIdentifier(Vec<String>);
 
 impl SatayIdentifier {
+    #[cfg(test)]
+    pub(in crate::parse) fn from_words(words: Vec<String>) -> Self {
+        Self(words)
+    }
     pub(crate) fn words(&self) -> &[String] {
         &self.0
     }
