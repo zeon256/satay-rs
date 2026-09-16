@@ -237,6 +237,7 @@ fn build_envelope_and_http(builder: &mut ApiBuilder, coordinates: DefinitionId) 
             tags: Vec::new(),
             parameters: Vec::new(),
             request_body: None,
+            responses_diagnostic: None,
             responses: vec![Response {
                 status: ResponseStatus::Exact(200),
                 description: None,

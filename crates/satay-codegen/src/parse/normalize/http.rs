@@ -10,6 +10,7 @@
 //! index at each declaration's physical pointer so absent and explicitly
 //! empty declarations stay distinguishable.
 
+use crate::parse::helpers;
 use std::collections::BTreeSet;
 
 use oas3::Map as OasMap;
@@ -53,6 +54,12 @@ impl NormalizeContext<'_, '_> {
     #[allow(clippy::too_many_lines)]
     pub(in crate::parse) fn http(&self) -> Result<HttpApi, NormalizeError> {
         let Some(paths) = self.document.spec.paths.as_ref() else {
+            if self.recover {
+                return Ok(HttpApi {
+                    diagnostic: Some(ValidationError::MissingPaths.at(self, "").diagnostic()),
+                    ..HttpApi::default()
+                });
+            }
             return Err(ValidationError::MissingPaths.at(self, ""));
         };
 
@@ -86,10 +93,13 @@ impl NormalizeContext<'_, '_> {
                 operation.map(|operation| (method, wire, operation))
             }) {
                 present = true;
-                let context_id = operation
-                    .operation_id
-                    .clone()
-                    .unwrap_or_else(|| format!("{wire} {path}"));
+                let context_id = operation.operation_id.clone().unwrap_or_else(|| {
+                    if self.recover {
+                        helpers::inferred_operation_id(wire, path)
+                    } else {
+                        format!("{wire} {path}")
+                    }
+                });
                 let operation_pointer = child_pointer(&physical_pointer, wire);
                 let options = operation_options(operation, &format!("operation `{context_id}`"))
                     .map_err(|error| {
@@ -153,6 +163,7 @@ impl NormalizeContext<'_, '_> {
         }
 
         Ok(HttpApi {
+            diagnostic: None,
             paths: items,
             servers: map_servers(&self.document.spec.servers),
             security_schemes: self.security_schemes()?,
@@ -181,6 +192,7 @@ impl NormalizeContext<'_, '_> {
     /// Every emitted operation has `OperationInterpretation.skip == false`
     /// because skipped operations were removed during selection.
     #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_lines)]
     fn operation(
         &self,
         method: HttpMethod,
@@ -210,10 +222,13 @@ impl NormalizeContext<'_, '_> {
             .filter(|parameter| parameter.location == ParameterLocation::Path)
             .map(|parameter| parameter.wire_name.as_str())
             .collect::<BTreeSet<_>>();
-        let placeholders =
-            path_parameter_names(path).map_err(|error| error.at(self, path_pointer))?;
+        let placeholders = match path_parameter_names(path) {
+            Ok(names) => names,
+            Err(_) if self.recover => BTreeSet::new(),
+            Err(error) => return Err(error.at(self, path_pointer)),
+        };
         for name in &placeholders {
-            if !declared.contains(name.as_str()) {
+            if !self.recover && !declared.contains(name.as_str()) {
                 return Err(ValidationError::UndeclaredPathParameter {
                     path: path.to_owned(),
                     name: name.clone(),
@@ -222,7 +237,7 @@ impl NormalizeContext<'_, '_> {
             }
         }
         for name in declared {
-            if !placeholders.contains(name) {
+            if !self.recover && !placeholders.contains(name) {
                 return Err(ValidationError::UnusedPathParameter {
                     path: path.to_owned(),
                     name: name.to_owned(),
@@ -244,7 +259,8 @@ impl NormalizeContext<'_, '_> {
             context_id,
             options.output.as_ref(),
         )?;
-        if options.output.is_some()
+        if !self.recover
+            && options.output.is_some()
             && !responses.iter().any(|response| {
                 response
                     .content
@@ -259,6 +275,17 @@ impl NormalizeContext<'_, '_> {
         }
 
         Ok(Operation {
+            responses_diagnostic: if operation.responses.is_none() {
+                Some(
+                    ValidationError::MissingOperationResponses {
+                        operation_id: context_id.to_owned(),
+                    }
+                    .at(self, pointer)
+                    .diagnostic(),
+                )
+            } else {
+                None
+            },
             source_id: operation.operation_id.clone(),
             method,
             description: optional_description(&operation.description),
@@ -293,6 +320,44 @@ impl NormalizeContext<'_, '_> {
 
     /// Converts one parameter, reference or inline.
     fn parameter(
+        &self,
+        parameter: &ObjectOrReference<OasParameter>,
+        use_pointer: &str,
+        context: &str,
+    ) -> Result<Parameter, NormalizeError> {
+        let result = self.parameter_checked(parameter, use_pointer, context);
+        if !self.recover {
+            return result;
+        }
+        match result {
+            Ok(parameter) => Ok(parameter),
+            Err(error) => {
+                let raw = self
+                    .document
+                    .resolve(parameter, context)
+                    .map_err(|error| error.at(self, use_pointer))?;
+                Ok(Parameter {
+                    wire_name: raw.name.clone(),
+                    location: match raw.location {
+                        OasParameterIn::Path => ParameterLocation::Path,
+                        OasParameterIn::Query => ParameterLocation::Query,
+                        OasParameterIn::Header => ParameterLocation::Header,
+                        OasParameterIn::Cookie => ParameterLocation::Cookie,
+                    },
+                    required: raw.required.unwrap_or(false),
+                    description: optional_description(&raw.description),
+                    schema: self.invalid_use(&error, use_pointer),
+                    style: raw.style.map(style_wire),
+                    explode: raw.explode,
+                    allow_reserved: raw.allow_reserved,
+                    allow_empty_value: raw.allow_empty_value,
+                    source: Some(source_ref(self.document_id, use_pointer)),
+                })
+            }
+        }
+    }
+
+    fn parameter_checked(
         &self,
         parameter: &ObjectOrReference<OasParameter>,
         use_pointer: &str,
@@ -353,7 +418,7 @@ impl NormalizeContext<'_, '_> {
                 schema,
                 &child_pointer(&physical_pointer, "schema"),
                 SchemaPosition::Value,
-                &format!("{context} `{wire_name}`"),
+                &format!("parameter `{wire_name}`"),
             )?,
             style: resolved.style.map(style_wire),
             explode: resolved.explode,
@@ -378,29 +443,30 @@ impl NormalizeContext<'_, '_> {
             .resolve(request_body, context)
             .map_err(|error| error.at(self, use_pointer))?;
         let physical_pointer = self.component_pointer(request_body, use_pointer, context)?;
-        if resolved.content.is_empty() {
+        if !self.recover && resolved.content.is_empty() {
             return Err(ValidationError::MissingContent {
                 context: context.to_owned(),
             }
             .at(self, &physical_pointer));
         }
-        let Some((selected, selected_media)) = json_media_type(&resolved.content) else {
+        let selected = json_media_type(&resolved.content);
+        if !self.recover && selected.is_none() {
             return Err(ValidationError::MissingJsonContent {
                 context: context.to_owned(),
             }
             .at(self, &physical_pointer));
-        };
+        }
         let content_pointer = child_pointer(&physical_pointer, "content");
-        if selected_media.schema.is_none() {
+        if !self.recover && selected.is_some_and(|(_, media)| media.schema.is_none()) {
             return Err(ValidationError::MissingJsonSchema {
                 context: context.to_owned(),
             }
-            .at(self, &child_pointer(&content_pointer, selected)));
+            .at(self, &child_pointer(&content_pointer, selected.unwrap().0)));
         }
 
         let mut media_types = Vec::with_capacity(resolved.content.len());
         for (media, entry) in &resolved.content {
-            let position = if media == selected {
+            let position = if selected.is_some_and(|(selected, _)| media == selected) {
                 SchemaPosition::Value
             } else {
                 SchemaPosition::RetainedWire
@@ -455,6 +521,7 @@ impl NormalizeContext<'_, '_> {
     /// The `default` response is retained with empty content, wildcard and
     /// exact status selectors are kept as declared, and the projection is
     /// attached to the selected JSON entry when an output selector exists.
+    #[allow(clippy::too_many_lines)]
     fn responses(
         &self,
         responses: Option<&OasMap<String, ObjectOrReference<OasResponse>>>,
@@ -464,6 +531,9 @@ impl NormalizeContext<'_, '_> {
         output: Option<&SatayOutputOptions>,
     ) -> Result<Vec<Response>, NormalizeError> {
         let Some(responses) = responses else {
+            if self.recover {
+                return Ok(vec![]);
+            }
             return Err(ValidationError::MissingOperationResponses {
                 operation_id: context_id.to_owned(),
             }
@@ -480,28 +550,36 @@ impl NormalizeContext<'_, '_> {
             } else if let Some(class) = wildcard_status_class(status) {
                 ResponseStatus::Range(class)
             } else {
-                let Ok(code) = status.parse::<u16>() else {
-                    return Err(ValidationError::InvalidStatusCode {
-                        context: context.to_owned(),
-                        status: status.to_owned(),
+                match status.parse::<u16>() {
+                    Err(_) if self.recover => ResponseStatus::Invalid(status.clone()),
+                    Err(_) => {
+                        return Err(ValidationError::InvalidStatusCode {
+                            context: context.to_owned(),
+                            status: status.to_owned(),
+                        }
+                        .at(self, &use_pointer));
                     }
-                    .at(self, &use_pointer));
-                };
-                if !(100..=599).contains(&code) {
-                    return Err(ValidationError::OutOfRangeStatusCode {
-                        context: context.to_owned(),
-                        status_code: code,
+                    Ok(code) => {
+                        if !self.recover && !(100..=599).contains(&code) {
+                            return Err(ValidationError::OutOfRangeStatusCode {
+                                context: context.to_owned(),
+                                status_code: code,
+                            }
+                            .at(self, &use_pointer));
+                        }
+                        ResponseStatus::Exact(code)
                     }
-                    .at(self, &use_pointer));
                 }
-                ResponseStatus::Exact(code)
             };
             let resolved = self
                 .document
                 .resolve(response, &format!("{context} {status}"))
                 .map_err(|error| error.at(self, &use_pointer))?;
             let physical_pointer = self.component_pointer(response, &use_pointer, context)?;
-            if parsed_status == ResponseStatus::Default && !resolved.content.is_empty() {
+            if !self.recover
+                && parsed_status == ResponseStatus::Default
+                && !resolved.content.is_empty()
+            {
                 return Err(ValidationError::DefaultResponseBodyUnsupported {
                     context: context.to_owned(),
                 }
@@ -510,27 +588,50 @@ impl NormalizeContext<'_, '_> {
 
             let mut media_types = Vec::with_capacity(resolved.content.len());
             if !resolved.content.is_empty() {
-                let Some((selected, _)) = json_media_type(&resolved.content) else {
+                let selected = json_media_type(&resolved.content).map(|(selected, _)| selected);
+                if !self.recover && selected.is_none() {
                     return Err(ValidationError::MissingResponseJsonContent {
                         context: context.to_owned(),
                         status: status.to_owned(),
                     }
                     .at(self, &physical_pointer));
-                };
+                }
                 let content_pointer = child_pointer(&physical_pointer, "content");
                 let schema_context = format!("{context} {status} schema");
                 for (media, entry) in &resolved.content {
-                    let projection = match (media == selected, entry.schema.as_ref(), output) {
-                        (true, Some(schema), Some(output)) => Some(self.projection(
-                            schema,
-                            &child_pointer(&child_pointer(&content_pointer, media), "schema"),
-                            output,
-                            &schema_context,
-                            &output_pointer,
-                        )?),
+                    let projection = match (
+                        Some(media.as_str()) == selected,
+                        entry.schema.as_ref(),
+                        output,
+                    ) {
+                        (true, Some(schema), Some(output)) => {
+                            let pointer =
+                                child_pointer(&child_pointer(&content_pointer, media), "schema");
+                            let projection = self.projection(
+                                schema,
+                                &pointer,
+                                output,
+                                &schema_context,
+                                &output_pointer,
+                            );
+                            Some(match projection {
+                                Ok(projection) => projection,
+                                Err(error) if self.recover => ResponseProjection {
+                                    selector: OutputSelector {
+                                        unwrap_field: output.unwrap_field.as_str().to_owned(),
+                                        map_field: output
+                                            .map_field
+                                            .as_ref()
+                                            .map(|field| field.as_str().to_owned()),
+                                    },
+                                    output: self.invalid_use(&error, &pointer),
+                                },
+                                Err(error) => return Err(error),
+                            })
+                        }
                         _ => None,
                     };
-                    let position = if media == selected && projection.is_none() {
+                    let position = if Some(media.as_str()) == selected && projection.is_none() {
                         SchemaPosition::Value
                     } else {
                         SchemaPosition::RetainedWire
@@ -697,12 +798,14 @@ impl NormalizeContext<'_, '_> {
             ty: TypeExpr::Array(ArraySchema {
                 items: Box::new(mapped_use),
                 constraints: ArrayConstraints {
+                    unique_items: array.unique_items.unwrap_or(false),
                     min_items: array.min_items,
                     max_items: array.max_items,
                 },
             }),
             nullable: array_nullable,
             annotations: SchemaAnnotations {
+                const_value: array.const_value.clone(),
                 description: optional_description(&array.description),
                 format: array.format.clone(),
                 default: declared_default(array, &array_pointer, self.presence),

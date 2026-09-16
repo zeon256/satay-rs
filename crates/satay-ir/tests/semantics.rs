@@ -36,6 +36,7 @@ fn container_definition(shared: DefinitionId) -> Definition {
                         ty: TypeExpr::Ref(shared),
                         nullable: true,
                         annotations: SchemaAnnotations {
+                            const_value: None,
                             description: Some("first use".into()),
                             format: Some("first-format".into()),
                             default: Some(Value::Null),
@@ -51,6 +52,7 @@ fn container_definition(shared: DefinitionId) -> Definition {
                         ty: TypeExpr::Ref(shared),
                         nullable: false,
                         annotations: SchemaAnnotations {
+                            const_value: None,
                             description: Some("second use".into()),
                             format: Some("second-format".into()),
                             default: None,
@@ -74,6 +76,7 @@ fn required_nullable_default_and_use_annotations_remain_local() {
             ty: TypeExpr::Boolean,
             nullable: false,
             annotations: SchemaAnnotations {
+                const_value: None,
                 description: Some("definition description".into()),
                 format: Some("definition-format".into()),
                 default: Some(Value::Bool(true)),
@@ -148,6 +151,7 @@ fn numeric_bounds_retain_json_numbers_and_exclusivity() {
         SchemaUse {
             ty: TypeExpr::Integer(IntegerSchema {
                 constraints: NumericConstraints {
+                    declared: None,
                     minimum: Some(NumericBound {
                         value: Number::from(0),
                         exclusive: false,
@@ -161,6 +165,7 @@ fn numeric_bounds_retain_json_numbers_and_exclusivity() {
             }),
             nullable: false,
             annotations: SchemaAnnotations {
+                const_value: None,
                 format: Some("int32".into()),
                 ..SchemaAnnotations::default()
             },
@@ -170,6 +175,7 @@ fn numeric_bounds_retain_json_numbers_and_exclusivity() {
         "Maximum",
         SchemaUse::new(TypeExpr::Integer(IntegerSchema {
             constraints: NumericConstraints {
+                declared: None,
                 minimum: None,
                 maximum: Some(NumericBound {
                     value: Number::from(u64::MAX),
@@ -230,6 +236,7 @@ fn enum_const_and_additional_property_rules_remain_distinct() {
             ty: TypeExpr::String(StringSchema::default()),
             nullable: true,
             annotations: SchemaAnnotations {
+                const_value: None,
                 source: Some(source("/additionalProperties")),
                 ..SchemaAnnotations::default()
             },
@@ -487,6 +494,7 @@ fn build_coordinate_shapes(
                     }),
                     nullable: false,
                     annotations: SchemaAnnotations {
+                        const_value: None,
                         source: Some(source("/$defs/Coordinates")),
                         ..SchemaAnnotations::default()
                     },
@@ -509,6 +517,7 @@ fn policy_container_definition(target: DefinitionId, coordinates: DefinitionId) 
                         ty: TypeExpr::Ref(coordinates),
                         nullable: false,
                         annotations: SchemaAnnotations {
+                            const_value: None,
                             default: Some(Value::String("N/A".into())),
                             ..SchemaAnnotations::default()
                         },
@@ -544,6 +553,7 @@ fn policy_container_definition(target: DefinitionId, coordinates: DefinitionId) 
                         }),
                         nullable: false,
                         annotations: SchemaAnnotations {
+                            const_value: None,
                             default: None,
                             ..SchemaAnnotations::default()
                         },
@@ -590,6 +600,7 @@ fn record_definition() -> Definition {
                         }),
                         nullable: true,
                         annotations: SchemaAnnotations {
+                            const_value: None,
                             default: Some(Value::Bool(false)),
                             format: Some("sentinel".into()),
                             ..SchemaAnnotations::default()

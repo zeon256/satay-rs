@@ -69,9 +69,10 @@ pub use interpretation::{
 };
 pub use schema::{
     AdditionalProperties, ArrayConstraints, ArraySchema, CompositionKind, CompositionSchema,
-    Definition, DefinitionId, Discriminator, DiscriminatorMapping, IntegerSchema, NumberSchema,
-    NumericBound, NumericConstraints, ObjectSchema, Property, SchemaAnnotations, SchemaUse,
-    StringConstraints, StringSchema, TypeExpr,
+    DeclaredNumericConstraints, Definition, DefinitionId, Diagnostic, Discriminator,
+    DiscriminatorMapping, IntegerSchema, NumberSchema, NumericBound, NumericConstraints,
+    ObjectSchema, Property, SchemaAnnotations, SchemaUse, StringConstraints, StringSchema,
+    TypeExpr,
 };
 pub use security::{
     ApiKeyLocation, OAuthFlow, OAuthFlowKind, OAuthScope, SecurityRequirement,

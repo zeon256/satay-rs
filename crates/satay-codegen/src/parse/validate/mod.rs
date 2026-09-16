@@ -244,7 +244,7 @@ pub(crate) struct ValidatedParsedString {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct NotParsedString;
+pub(in crate::parse) struct NotParsedString;
 
 impl ValidatedParsedString {
     #[cfg(test)]
@@ -259,7 +259,7 @@ impl ValidatedParsedString {
         }
     }
 
-    fn try_from_type(ty: ValidatedType) -> Result<Self, NotParsedString> {
+    pub(in crate::parse) fn try_from_type(ty: ValidatedType) -> Result<Self, NotParsedString> {
         if matches!(
             ty.kind,
             ValidatedTypeKind::ParsedString(_) | ValidatedTypeKind::Coordinates(_)

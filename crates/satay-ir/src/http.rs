@@ -8,6 +8,8 @@ use crate::{SchemaUse, SourceRef};
 /// A complete owned HTTP API surface.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct HttpApi {
+    /// Failure of the HTTP root itself, checked before traversing paths.
+    pub diagnostic: Option<crate::Diagnostic>,
     /// Paths in caller order.
     pub paths: Vec<PathItem>,
     /// Root servers in caller order.
@@ -40,6 +42,8 @@ pub struct PathItem {
 /// One HTTP operation.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Operation {
+    /// Failure to normalize the response declaration, after parameters and body.
+    pub responses_diagnostic: Option<crate::Diagnostic>,
     /// Declared operation ID; `None` retains an undeclared ID without
     /// embedding any inferred name.
     pub source_id: Option<String>,
@@ -211,8 +215,10 @@ pub struct Response {
 ///
 /// No matching precedence is baked into storage; declaration order is caller
 /// order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResponseStatus {
+    /// A declared selector outside the supported status grammar.
+    Invalid(String),
     /// An exact status code.
     Exact(u16),
     /// A status range class; `2` covers 2xx.

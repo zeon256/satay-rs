@@ -208,7 +208,8 @@ fn inspect_use(
                 }
             }
         }
-        TypeExpr::Integer(_)
+        TypeExpr::Invalid(_)
+        | TypeExpr::Integer(_)
         | TypeExpr::Number(_)
         | TypeExpr::Boolean
         | TypeExpr::Null

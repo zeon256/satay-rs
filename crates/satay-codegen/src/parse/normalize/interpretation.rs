@@ -89,10 +89,11 @@ impl NormalizeContext<'_, '_> {
             .at(self, &location));
         }
 
-        if position == SchemaPosition::Property {
+        if position == SchemaPosition::Property && !self.recover {
             reject_options_with_ignore(&options, context)
                 .map_err(|error| error.at(self, &location))?;
-        } else {
+        }
+        if position != SchemaPosition::Property {
             reject_property_options_on_value(
                 options.treat_error_as_none,
                 options.none_if.as_deref(),
@@ -107,6 +108,10 @@ impl NormalizeContext<'_, '_> {
             .map_err(|error| error.at(self, &child_pointer(pointer, "const")))?;
         if !effective.is_empty() {
             let enum_variants = self.enum_variant_names(&options, effective, &location, context)?;
+            if position == SchemaPosition::Property {
+                reject_options_with_ignore(&options, context)
+                    .map_err(|error| error.at(self, &location))?;
+            }
             return Ok(InterpretedUse {
                 policy: self.property_policy(&options, position, &location)?,
                 enum_variants,
@@ -140,8 +145,9 @@ impl NormalizeContext<'_, '_> {
                     }
                     None => {
                         let integer_range = wire == SatayParseAsWire::IntegerRange;
-                        let bounds = numeric_constraints(schema, integer_range, context)
-                            .map_err(|error| error.at(self, pointer))?;
+                        let bounds =
+                            numeric_constraints(schema, integer_range, context, self.recover)
+                                .map_err(|error| error.at(self, pointer))?;
                         string = if integer_range {
                             StringInterpretation::IntegerRange {
                                 representation: integer_representation(options.integer_type),
@@ -168,10 +174,13 @@ impl NormalizeContext<'_, '_> {
         }
 
         if options.none_if.is_some() {
-            if !matches!(
+            if !(matches!(
                 string,
                 StringInterpretation::Scalar(_) | StringInterpretation::Coordinates(_)
-            ) {
+            ) || (self.recover
+                && schema_type == Some(OasSchemaType::String)
+                && schema.format.as_deref() == Some("uri")))
+            {
                 return Err(ValidationError::SatayNoneIfRequiresParsedString {
                     context: context.to_owned(),
                 }
@@ -195,6 +204,10 @@ impl NormalizeContext<'_, '_> {
             string = StringInterpretation::MappedBool(mapping);
         }
 
+        if position == SchemaPosition::Property {
+            reject_options_with_ignore(&options, context)
+                .map_err(|error| error.at(self, &location))?;
+        }
         Ok(InterpretedUse {
             string,
             integer,

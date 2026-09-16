@@ -40,13 +40,25 @@ pub(in crate::parse) fn normalize_spec(
     spec: &str,
     document_id: &str,
 ) -> Result<Api, NormalizeError> {
+    normalize(spec, document_id, false)
+}
+
+/// Retains recoverable failures at their semantic position for target validation.
+pub(in crate::parse) fn normalize_for_rust(
+    spec: &str,
+    document_id: &str,
+) -> Result<Api, NormalizeError> {
+    normalize(spec, document_id, true)
+}
+
+fn normalize(spec: &str, document_id: &str, recover: bool) -> Result<Api, NormalizeError> {
     let document = super::parse_document(spec)?;
     let resolved = resolve_document(&document).map_err(|source| NormalizeError::Validation {
         location: source::source_ref(document_id, ""),
         source: Box::new(source),
     })?;
     let presence = source::PresenceIndex::read(spec)?;
-    normalize_document(&resolved, document_id, &presence)
+    normalize_document(&resolved, document_id, &presence, recover)
 }
 
 /// Converts one resolved document with its presence index into an owned graph.
@@ -54,6 +66,7 @@ fn normalize_document<'doc>(
     document: &ResolvedDocument<'doc>,
     document_id: &str,
     presence: &source::PresenceIndex,
+    recover: bool,
 ) -> Result<Api, NormalizeError> {
     let root = SourceRef {
         document: document_id.to_owned(),
@@ -84,6 +97,7 @@ fn normalize_document<'doc>(
         presence,
         excluded: &excluded,
         definitions,
+        recover,
     };
 
     context.define_all(&mut builder)?;
@@ -122,6 +136,7 @@ fn reserve_definitions<'doc>(
 /// repeated read-only schema queries cannot leak traversal state.
 #[derive(Debug)]
 pub(in crate::parse) struct NormalizeContext<'a, 'doc> {
+    pub(in crate::parse) recover: bool,
     pub(in crate::parse) document: &'a ResolvedDocument<'doc>,
     pub(in crate::parse) document_id: &'a str,
     pub(in crate::parse) presence: &'a source::PresenceIndex,

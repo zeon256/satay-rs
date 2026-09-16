@@ -189,6 +189,7 @@ components:
         StringInterpretation::IntegerRange {
             representation: Some(IntegerRepresentation::U8),
             bounds: NumericConstraints {
+                declared: None,
                 minimum: Some(NumericBound {
                     value: Number::from(256),
                     exclusive: false
@@ -212,6 +213,7 @@ components:
         string(floating).interpretation,
         StringInterpretation::NumberRange {
             bounds: NumericConstraints {
+                declared: None,
                 minimum: Some(NumericBound {
                     value: Number::from_f64(-1.5).unwrap(),
                     exclusive: false

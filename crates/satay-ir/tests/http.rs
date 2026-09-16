@@ -181,6 +181,7 @@ fn operation(target: DefinitionId) -> Operation {
             }],
             source: None,
         }),
+        responses_diagnostic: None,
         responses: vec![Response {
             status: ResponseStatus::Exact(200),
             description: None,
@@ -332,7 +333,7 @@ fn retains_response_media_statuses_and_projection() {
     let statuses = operation
         .responses
         .iter()
-        .map(|response| response.status)
+        .map(|response| response.status.clone())
         .collect::<Vec<ResponseStatus>>();
     assert_eq!(
         statuses,
@@ -409,6 +410,7 @@ fn expected_error(owner: GraphOwner, target: DefinitionId, pointer: &str) -> Bui
 /// Builds the root/path/operation metadata fixture for `bearer`.
 fn metadata_http(bearer: DefinitionId) -> HttpApi {
     let mut http = HttpApi {
+        diagnostic: None,
         servers: vec![Server {
             url: "https://default.example".into(),
             description: Some("default".into()),
@@ -472,6 +474,7 @@ fn metadata_http(bearer: DefinitionId) -> HttpApi {
                     source: None,
                 }],
                 request_body: None,
+                responses_diagnostic: None,
                 responses: vec![],
                 servers: Some(vec![]),
                 security: Some(vec![SecurityRequirement { schemes: vec![] }]),
@@ -488,6 +491,7 @@ fn metadata_http(bearer: DefinitionId) -> HttpApi {
                 tags: vec![],
                 parameters: vec![],
                 request_body: None,
+                responses_diagnostic: None,
                 responses: vec![],
                 servers: None,
                 security: None,
@@ -514,6 +518,7 @@ fn projection_http(envelope: DefinitionId, pet: DefinitionId) -> HttpApi {
             tags: vec![],
             parameters: vec![],
             request_body: None,
+            responses_diagnostic: None,
             responses: vec![
                 Response {
                     status: ResponseStatus::Range(2),
