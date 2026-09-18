@@ -4,12 +4,6 @@ use oas3::spec::{
 };
 
 use crate::error::ValidationError;
-use crate::ident::type_ident;
-
-pub(super) fn schema_ref_type_name(reference: &str) -> Result<String, ValidationError> {
-    let reference = schema_component_ref(reference)?;
-    Ok(type_ident(reference.name()))
-}
 
 pub(super) fn schema_component_ref(
     reference: &str,
@@ -77,17 +71,4 @@ pub(super) fn schema_type_wire(schema_type: OasSchemaType) -> &'static str {
         OasSchemaType::Object => "object",
         OasSchemaType::Null => "null",
     }
-}
-
-pub(super) fn reject_one_of(
-    schema: &OasObjectSchema,
-    context: &str,
-) -> Result<(), ValidationError> {
-    if !schema.one_of.is_empty() {
-        return Err(ValidationError::UnsupportedComposition {
-            context: context.to_owned(),
-            keyword: "oneOf",
-        });
-    }
-    Ok(())
 }

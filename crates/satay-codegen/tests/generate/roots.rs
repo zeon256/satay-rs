@@ -25,7 +25,7 @@ fn both_root_layouts_compile_and_decode() {
         };
         source.push_str(r#"
 #[cfg(all(test, feature = "json"))]
-mod parity_consumer {
+mod consumer {
     use super::*;
     #[test]
     fn request_encoding() {

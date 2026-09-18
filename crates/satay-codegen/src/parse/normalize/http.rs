@@ -1,7 +1,6 @@
 //! Owned HTTP tree normalization for the OpenAPI-to-IR frontend.
 //!
-//! The converter mirrors the legacy `validate_operations`/`validate_operation`
-//! structure but emits owned [`satay_ir`] records: path-level and
+//! The converter emits owned [`satay_ir`] records: path-level and
 //! operation-local parameter lists stay separate in declaration order, every
 //! declared media entry is preserved with its original spelling, responses
 //! keep their declared status order, and projection selectors retain the
@@ -25,6 +24,7 @@ use oas3::spec::{
 use oas3::spec::{MediaType as OasMediaType, ObjectSchema};
 use serde_json::Value;
 
+use super::checks::{path_parameter_names, wildcard_status_class};
 use super::source::{child_pointer, source_ref};
 use super::{NormalizeContext, NormalizeError, SchemaPosition, ValidationErrorExt};
 use crate::error::ValidationError;
@@ -32,7 +32,6 @@ use crate::parse::helpers::{json_media_type, optional_description};
 use crate::parse::normalize::source::PresenceIndex;
 use crate::parse::reference::{schema_component_ref, schema_type_and_nullable};
 use crate::parse::satay::{SatayOperationOptions, SatayOutputOptions, operation_options};
-use crate::parse::validate::operation::{path_parameter_names, wildcard_status_class};
 use satay_ir::{
     ApiKeyLocation, ArrayConstraints, ArraySchema, HttpApi, HttpMethod, MediaType, OAuthFlow,
     OAuthFlowKind, OAuthScope, Operation, OperationInterpretation, OutputSelector, Parameter,

@@ -3,23 +3,23 @@ use crate::model::{
     Component, ComponentKind, ConstrainedType, CoordinateCodec, Enum, Field, RangeType,
     RangeTypeRef, TypeRef, Union, UnionTag, UnionTagStyle, UnionVariant,
 };
-use crate::parse::registry::TypeRegistry;
-use crate::parse::validate::{
-    ValidatedComponent, ValidatedComponentKind, ValidatedField, ValidatedFieldValue, ValidatedType,
-    ValidatedTypeKind, ValidatedUnion, ValidatedUnionTagStyle, ValidatedUnionVariant,
-    ValidatedUnionVariantKind,
+use crate::parse::rust::checked::{
+    CheckedComponent, CheckedComponentKind, CheckedField, CheckedFieldValue, CheckedType,
+    CheckedTypeKind, CheckedUnion, CheckedUnionTagStyle, CheckedUnionVariant,
+    CheckedUnionVariantKind,
 };
+use crate::parse::rust::registry::TypeRegistry;
 
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) struct SchemaLowerer<'a> {
-    components: &'a [ValidatedComponent],
+    components: &'a [CheckedComponent],
     component_kinds: BTreeMap<String, ComponentKind>,
     component_refs: BTreeMap<String, TypeRef>,
 }
 
 impl<'a> SchemaLowerer<'a> {
-    pub(super) fn new(components: &'a [ValidatedComponent]) -> Self {
+    pub(super) fn new(components: &'a [CheckedComponent]) -> Self {
         Self {
             components,
             component_kinds: BTreeMap::new(),
@@ -36,7 +36,7 @@ impl<'a> SchemaLowerer<'a> {
 
     pub(super) fn parse_type_ref_with_hint(
         &mut self,
-        ty: &ValidatedType,
+        ty: &CheckedType,
         type_name_hint: &str,
         registry: &mut TypeRegistry,
     ) -> TypeRef {
@@ -61,7 +61,7 @@ impl<'a> SchemaLowerer<'a> {
 
     fn parse_component(
         &mut self,
-        component: &ValidatedComponent,
+        component: &CheckedComponent,
         registry: &mut TypeRegistry,
     ) -> Component {
         let rust_name = type_ident(&component.schema_name);
@@ -76,7 +76,7 @@ impl<'a> SchemaLowerer<'a> {
 
     fn parse_component_kind(
         &mut self,
-        component: &ValidatedComponent,
+        component: &CheckedComponent,
         registry: &mut TypeRegistry,
     ) -> ComponentKind {
         let rust_name = type_ident(&component.schema_name);
@@ -85,13 +85,13 @@ impl<'a> SchemaLowerer<'a> {
         }
 
         let kind = match &component.kind {
-            ValidatedComponentKind::Reference(reference) => {
+            CheckedComponentKind::Reference(reference) => {
                 ComponentKind::Alias(self.component_ref(reference, registry))
             }
-            ValidatedComponentKind::Struct(fields) => ComponentKind::Struct(
+            CheckedComponentKind::Struct(fields) => ComponentKind::Struct(
                 self.parse_struct_fields(&component.schema_name, fields, registry),
             ),
-            ValidatedComponentKind::Type(ty) => self.parse_component_type(
+            CheckedComponentKind::Type(ty) => self.parse_component_type(
                 &component.schema_name,
                 &component.description,
                 ty,
@@ -107,17 +107,17 @@ impl<'a> SchemaLowerer<'a> {
         &mut self,
         schema_name: &str,
         description: &Option<String>,
-        ty: &ValidatedType,
+        ty: &CheckedType,
         registry: &mut TypeRegistry,
     ) -> ComponentKind {
         let rust_name = type_ident(schema_name);
 
         match (&ty.kind, ty.nullable, ty.validation.as_ref()) {
-            (ValidatedTypeKind::Enum(enum_), false, None) => ComponentKind::Enum(enum_.clone()),
-            (ValidatedTypeKind::AnyOf(union), false, None) => {
+            (CheckedTypeKind::Enum(enum_), false, None) => ComponentKind::Enum(enum_.clone()),
+            (CheckedTypeKind::AnyOf(union), false, None) => {
                 ComponentKind::Union(self.parse_union(union, schema_name, registry))
             }
-            (ValidatedTypeKind::Range(scalar), false, None) => ComponentKind::Range(RangeType {
+            (CheckedTypeKind::Range(scalar), false, None) => ComponentKind::Range(RangeType {
                 rust_name,
                 description: description.clone(),
                 scalar: *scalar,
@@ -140,7 +140,7 @@ impl<'a> SchemaLowerer<'a> {
                 );
                 ComponentKind::Alias(TypeRef::option(inner))
             }
-            (ValidatedTypeKind::Enum(_) | ValidatedTypeKind::Range(_), true, None) => {
+            (CheckedTypeKind::Enum(_) | CheckedTypeKind::Range(_), true, None) => {
                 let hint = format!("{schema_name} value");
                 ComponentKind::Alias(self.parse_type_ref_with_hint(ty, &hint, registry))
             }
@@ -151,7 +151,7 @@ impl<'a> SchemaLowerer<'a> {
     fn parse_struct_fields(
         &mut self,
         schema_name: &str,
-        fields: &[ValidatedField],
+        fields: &[CheckedField],
         registry: &mut TypeRegistry,
     ) -> Vec<Field> {
         let mut used = BTreeSet::new();
@@ -162,7 +162,7 @@ impl<'a> SchemaLowerer<'a> {
             let identifier = field
                 .identifier
                 .as_ref()
-                .map(|identifier| identifier.words().join("-"))
+                .map(|identifier| identifier.join("-"))
                 .unwrap_or_else(|| field.wire_name.clone());
             let ty = self.parse_type_ref_with_hint(
                 validated_ty,
@@ -170,18 +170,15 @@ impl<'a> SchemaLowerer<'a> {
                 registry,
             );
             let (treat_error_as_none, none_if) = match &field.value {
-                ValidatedFieldValue::Strict(_) => (false, vec![]),
-                ValidatedFieldValue::Lossy(_) => (true, vec![]),
-                ValidatedFieldValue::SentinelParsedString { sentinels, .. } => {
+                CheckedFieldValue::Strict(_) => (false, vec![]),
+                CheckedFieldValue::Lossy(_) => (true, vec![]),
+                CheckedFieldValue::SentinelParsedString { sentinels, .. } => {
                     (false, sentinels.as_slice().to_vec())
                 }
             };
             parsed.push(Field {
                 wire_name: field.wire_name.clone(),
-                identifier_words: field
-                    .identifier
-                    .as_ref()
-                    .map(|identifier| identifier.words().to_vec()),
+                identifier_words: field.identifier.clone(),
                 rust_name: unique_ident(field_ident(&identifier), &mut used),
                 description: field.description.clone(),
                 ty,
@@ -196,41 +193,46 @@ impl<'a> SchemaLowerer<'a> {
 
     fn parse_type_ref_base(
         &mut self,
-        kind: &ValidatedTypeKind,
+        kind: &CheckedTypeKind,
         type_name_hint: &str,
         description: &Option<String>,
         registry: &mut TypeRegistry,
     ) -> TypeRef {
         match kind {
-            ValidatedTypeKind::Named(rust_name) => self.component_ref(rust_name, registry),
-            ValidatedTypeKind::String => TypeRef::String,
-            ValidatedTypeKind::ParsedString(codec) => TypeRef::ParsedString(codec.clone()),
-            ValidatedTypeKind::Coordinates(coordinates) => {
+            CheckedTypeKind::Named(rust_name) => self.component_ref(rust_name, registry),
+            CheckedTypeKind::String => TypeRef::String,
+            CheckedTypeKind::ParsedString(codec) => TypeRef::ParsedString(codec.clone()),
+            CheckedTypeKind::Coordinates(coordinates) => {
                 let component = self.validated_component(coordinates.target());
                 let target = self.parse_component_kind(&component, registry);
-                TypeRef::Coordinates(CoordinateCodec::from_validated(coordinates, &target))
+                TypeRef::Coordinates(CoordinateCodec::from_parts(
+                    coordinates.target().to_owned(),
+                    coordinates.field_indices(),
+                    coordinates.delimiter().clone(),
+                    &target,
+                ))
             }
-            ValidatedTypeKind::ParsedInteger(parse_as) => TypeRef::ParsedInteger(*parse_as),
-            ValidatedTypeKind::Integer(integer_type) => TypeRef::Integer(*integer_type),
-            ValidatedTypeKind::F32 => TypeRef::F32,
-            ValidatedTypeKind::F64 => TypeRef::F64,
-            ValidatedTypeKind::Bool => TypeRef::Bool,
-            ValidatedTypeKind::Array(item) => TypeRef::Array(Box::new(
+            CheckedTypeKind::ParsedInteger(parse_as) => TypeRef::ParsedInteger(*parse_as),
+            CheckedTypeKind::Integer(integer_type) => TypeRef::Integer(*integer_type),
+            CheckedTypeKind::F32 => TypeRef::F32,
+            CheckedTypeKind::F64 => TypeRef::F64,
+            CheckedTypeKind::Bool => TypeRef::Bool,
+            CheckedTypeKind::Array(item) => TypeRef::Array(Box::new(
                 self.parse_type_ref_with_hint(item, &format!("{type_name_hint} item"), registry),
             )),
-            ValidatedTypeKind::Map(value) => TypeRef::Map(Box::new(self.parse_type_ref_with_hint(
+            CheckedTypeKind::Map(value) => TypeRef::Map(Box::new(self.parse_type_ref_with_hint(
                 value,
                 &format!("{type_name_hint} value"),
                 registry,
             ))),
-            ValidatedTypeKind::JsonValue => TypeRef::JsonValue,
-            ValidatedTypeKind::Enum(variants) => parse_inline_enum_ref(
+            CheckedTypeKind::JsonValue => TypeRef::JsonValue,
+            CheckedTypeKind::Enum(variants) => parse_inline_enum_ref(
                 variants.clone(),
                 type_name_hint,
                 description.clone(),
                 registry,
             ),
-            ValidatedTypeKind::AnyOf(union) => {
+            CheckedTypeKind::AnyOf(union) => {
                 // An untagged union with a single component reference accepts exactly
                 // that component's payloads, so the wrapper enum adds nothing.
                 if let Some(type_name) = single_reference_union_target(union) {
@@ -240,11 +242,11 @@ impl<'a> SchemaLowerer<'a> {
                     registry.inline_union_ref(type_name_hint, description.clone(), union)
                 }
             }
-            ValidatedTypeKind::InlineStruct(fields) => {
+            CheckedTypeKind::InlineStruct(fields) => {
                 let fields = self.parse_struct_fields(type_name_hint, fields, registry);
                 registry.inline_struct_ref(type_name_hint, description.clone(), fields)
             }
-            ValidatedTypeKind::Range(scalar) => {
+            CheckedTypeKind::Range(scalar) => {
                 registry.inline_range_ref(type_name_hint, description.clone(), *scalar)
             }
         }
@@ -252,7 +254,7 @@ impl<'a> SchemaLowerer<'a> {
 
     fn parse_union(
         &mut self,
-        union: &ValidatedUnion,
+        union: &CheckedUnion,
         type_name_hint: &str,
         registry: &mut TypeRegistry,
     ) -> Union {
@@ -261,8 +263,8 @@ impl<'a> SchemaLowerer<'a> {
             tag: union.tag.as_ref().map(|tag| UnionTag {
                 property_name: tag.property_name.clone(),
                 style: match tag.style {
-                    ValidatedUnionTagStyle::InternallyTagged => UnionTagStyle::InternallyTagged,
-                    ValidatedUnionTagStyle::EmbeddedField => UnionTagStyle::EmbeddedField,
+                    CheckedUnionTagStyle::InternallyTagged => UnionTagStyle::InternallyTagged,
+                    CheckedUnionTagStyle::EmbeddedField => UnionTagStyle::EmbeddedField,
                 },
             }),
         }
@@ -270,7 +272,7 @@ impl<'a> SchemaLowerer<'a> {
 
     fn parse_union_variants(
         &mut self,
-        variants: &[ValidatedUnionVariant],
+        variants: &[CheckedUnionVariant],
         type_name_hint: &str,
         registry: &mut TypeRegistry,
     ) -> Vec<UnionVariant> {
@@ -279,10 +281,10 @@ impl<'a> SchemaLowerer<'a> {
             .map(|variant| UnionVariant {
                 rust_name: variant.rust_name.clone(),
                 ty: match &variant.kind {
-                    ValidatedUnionVariantKind::Reference { type_name, .. } => {
+                    CheckedUnionVariantKind::Reference { type_name, .. } => {
                         self.component_ref(type_name, registry)
                     }
-                    ValidatedUnionVariantKind::Inline(ty) => self.parse_type_ref_with_hint(
+                    CheckedUnionVariantKind::Inline(ty) => self.parse_type_ref_with_hint(
                         ty,
                         &format!("{type_name_hint} {}", variant.rust_name),
                         registry,
@@ -319,7 +321,7 @@ impl<'a> SchemaLowerer<'a> {
         ty
     }
 
-    fn validated_component(&self, rust_name: &str) -> ValidatedComponent {
+    fn validated_component(&self, rust_name: &str) -> CheckedComponent {
         self.components
             .iter()
             .find(|component| type_ident(&component.schema_name) == rust_name)
@@ -328,14 +330,14 @@ impl<'a> SchemaLowerer<'a> {
     }
 }
 
-fn single_reference_union_target(union: &ValidatedUnion) -> Option<&str> {
+fn single_reference_union_target(union: &CheckedUnion) -> Option<&str> {
     if union.tag.is_some() || union.variants.len() != 1 {
         return None;
     }
 
     match &union.variants[0].kind {
-        ValidatedUnionVariantKind::Reference { type_name, .. } => Some(type_name),
-        ValidatedUnionVariantKind::Inline(_) => None,
+        CheckedUnionVariantKind::Reference { type_name, .. } => Some(type_name),
+        CheckedUnionVariantKind::Inline(_) => None,
     }
 }
 

@@ -1,37 +1,44 @@
 use oas3::spec::Spec as OasSpec;
 
-use crate::error::{ParseError, ValidationError};
+use crate::Error;
+use crate::error::ParseError;
 use crate::model::Api;
-use tracing::debug;
+use normalize::NormalizeError;
+use rust::LowerError;
 
-#[cfg(test)]
 mod diagnostic;
 mod helpers;
-mod lower;
-#[cfg(test)]
 mod normalize;
-#[cfg(test)]
-mod parity;
 mod reference;
-mod registry;
 mod resolve;
 mod rust;
 mod satay;
 #[cfg(test)]
 mod tests;
-pub(crate) mod validate;
 
 #[derive(Debug)]
 pub(crate) struct Document {
     spec: OasSpec,
 }
 
-pub(crate) fn parse_api(document: &Document) -> Result<Api, ValidationError> {
-    debug!("parsing API from document");
-
-    let resolved = resolve::resolve_document(document)?;
-    let validated = validate::validate_document(resolved)?;
-    lower::lower_document(&validated)
+pub(crate) fn semantic_api(spec: &str) -> Result<Api, Error> {
+    let api = normalize::normalize_for_rust(spec, "input.yaml").map_err(|error| match error {
+        NormalizeError::Parse(error) => Error::Parse(error),
+        NormalizeError::Validation { source, .. } => Error::Validation(*source),
+        error => Error::Internal {
+            message: error.to_string(),
+        },
+    })?;
+    match rust::lower_model(&api) {
+        Ok(model) => Ok(model),
+        Err(LowerError::Rust(error)) => Err(Error::Validation(error)),
+        Err(LowerError::Frontend(error)) => match diagnostic::try_restore(error) {
+            Ok(error) => Err(Error::Validation(error)),
+            Err(kind) => Err(Error::Internal {
+                message: format!("unrepresentable semantic diagnostic: {kind:?}"),
+            }),
+        },
+    }
 }
 
 pub(crate) fn parse_document(spec: &str) -> Result<Document, ParseError> {

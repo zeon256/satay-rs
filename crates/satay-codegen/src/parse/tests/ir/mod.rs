@@ -10,6 +10,7 @@ mod fixtures;
 mod http;
 mod interpretation;
 mod reachability;
+mod retention;
 mod schema;
 
 fn normalize(spec: &str) -> Api {

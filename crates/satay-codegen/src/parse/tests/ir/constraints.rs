@@ -4,7 +4,6 @@ use serde_json::json;
 use super::{definition, normalize, object};
 use crate::error::ValidationError;
 use crate::parse::normalize::{NormalizeError, normalize_spec};
-use crate::parse::{parse_api, parse_document};
 
 #[test]
 fn numeric_bounds_keep_exact_values_tightness_exclusivity_and_hint() {
@@ -115,8 +114,7 @@ components:
     assert_eq!(wide.constraints.maximum.as_ref().unwrap().value, 300.into());
 
     // Backend representability is independently rejected without excluding the semantic graph.
-    let document = parse_document(spec).unwrap();
-    assert!(parse_api(&document).is_err());
+    assert!(crate::generate(spec).is_err());
 }
 
 #[test]

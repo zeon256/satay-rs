@@ -4,22 +4,19 @@
     clippy::too_many_lines
 )]
 
-use crate::parse::{
-    normalize::{self, NormalizeError},
-    rust,
-};
-use crate::{RootModule, render};
+use crate::parse::{normalize, rust};
 
+use crate::Error;
 use crate::error::ValidationError;
 use crate::model::{
     Api, ApiKeyLocation, Component, ComponentKind, EnumFallback, Field, HttpMethod, IntegerLimit,
     IntegerType, Operation, Parameter, ParameterLocation, ParseAs, PathSegment, RangeScalar,
     RangeTypeRef, ResponseStatus, StringCodec, TypeRef, UnionTagStyle, Validation,
 };
-use crate::parse::{parse_api, parse_document};
 
 mod all_of;
 mod constraints;
+mod cutover;
 mod errors;
 mod extensions;
 mod groups;
@@ -33,44 +30,15 @@ const INLINE_CONSTRAINED_ENUM_RANGE: &str =
     include_str!("../../../../../tests/fixtures/parse-inline-constrained-enum-range.yaml");
 
 fn parse_valid(spec: &str) -> Api {
-    let document = parse_document(spec).expect("document parses");
-    let legacy = parse_api(&document).expect("OpenAPI validates");
     let semantic = normalize::normalize_for_rust(spec, "test.yaml").expect("valid spec normalizes");
-    for root_module in [RootModule::ModRs, RootModule::LibRs] {
-        let options = crate::GenerateOptions { root_module };
-        let expected = render::render_api(&legacy, options);
-        let actual = rust::lower_api(&semantic, options).expect("valid semantic IR lowers");
-        assert_eq!(actual.len(), expected.len(), "semantic file count");
-        for (actual, expected) in actual.iter().zip(&expected) {
-            assert_eq!(actual.relative_path, expected.relative_path);
-            if actual.contents != expected.contents {
-                let mismatch = actual
-                    .contents
-                    .lines()
-                    .zip(expected.contents.lines())
-                    .find(|(a, b)| a != b);
-                panic!(
-                    "semantic generation parity: {}: {mismatch:?}",
-                    actual.relative_path
-                );
-            }
-        }
-    }
-    legacy
+    rust::lower_model(&semantic).expect("valid semantic IR lowers")
 }
 
 fn parse_invalid(spec: &str) -> ValidationError {
-    let document = parse_document(spec).expect("document parses");
-    let expected = parse_api(&document).expect_err("OpenAPI must be rejected");
-    let actual = match normalize::normalize_for_rust(spec, "test.yaml") {
-        Ok(api) => rust::lower_api(&api, crate::GenerateOptions::default())
-            .expect_err("invalid semantic IR must be rejected")
-            .to_string(),
-        Err(NormalizeError::Validation { source, .. }) => source.to_string(),
-        Err(error) => error.to_string(),
-    };
-    assert_eq!(actual, expected.to_string(), "semantic diagnostic parity");
-    expected
+    match crate::generate(spec).expect_err("OpenAPI must be rejected") {
+        Error::Validation(error) => error,
+        error => panic!("expected validation error, got {error:?}"),
+    }
 }
 
 fn component<'a>(api: &'a Api, rust_name: &str) -> &'a Component {

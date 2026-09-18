@@ -1,8 +1,5 @@
-use oas3::spec::Spec as OasSpec;
-use tracing::debug;
-
+use super::checked::{CheckedComponent, CheckedOperation};
 use super::registry::TypeRegistry;
-use super::validate::{ValidatedComponent, ValidatedDocument, ValidatedOperation};
 use crate::error::ValidationError;
 use crate::ident::type_ident;
 use crate::model::{Api, ApiKeySecurityScheme};
@@ -10,33 +7,13 @@ use crate::model::{Api, ApiKeySecurityScheme};
 mod operation;
 mod schema;
 
-pub(crate) fn lower_document(document: &ValidatedDocument<'_>) -> Result<Api, ValidationError> {
-    debug!("lowering API from resolved document");
-
-    let spec = document.resolved.spec;
-    let server_url = parse_server_url(spec);
-    let api_key_security_schemes = operation::parse_api_key_security_schemes(&document.resolved)?;
-    let tags = spec
-        .tags
-        .iter()
-        .map(|tag| (tag.name.clone(), tag.description.clone()))
-        .collect::<Vec<_>>();
-    lower_parts(
-        server_url,
-        api_key_security_schemes,
-        &tags,
-        &document.components,
-        &document.operations,
-    )
-}
-
-/// Shared Rust model construction; no frontend document escapes the adapter.
+/// Builds the render model from Rust-owned checked values.
 pub(in crate::parse) fn lower_parts(
     server_url: String,
     api_key_security_schemes: Vec<ApiKeySecurityScheme>,
     tags: &[(String, Option<String>)],
-    validated_components: &[ValidatedComponent],
-    validated_operations: &[ValidatedOperation],
+    validated_components: &[CheckedComponent],
+    validated_operations: &[CheckedOperation],
 ) -> Result<Api, ValidationError> {
     let mut registry = TypeRegistry::default();
     for component in validated_components {
@@ -58,11 +35,4 @@ pub(in crate::parse) fn lower_parts(
         groups,
         operations,
     ))
-}
-
-fn parse_server_url(spec: &OasSpec) -> String {
-    spec.servers
-        .first()
-        .map(|server| server.url.clone())
-        .unwrap_or_default()
 }

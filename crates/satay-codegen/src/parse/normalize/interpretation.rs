@@ -21,6 +21,11 @@ use satay_ir::{
 };
 use serde_json::Value as JsonValue;
 
+use super::checks::{
+    annotation_only_all_of_ref_wrapper, reject_all_of_object_branch_keywords,
+    reject_all_of_sibling_keywords, unsupported_reference_schema_keyword,
+};
+use super::checks::{reject_options_with_ignore, reject_property_options_on_value};
 use super::constraint::numeric_constraints;
 use super::source::{child_pointer, source_ref};
 use super::{NormalizeContext, NormalizeError, SchemaPosition, ValidationErrorExt};
@@ -28,11 +33,6 @@ use crate::error::ValidationError;
 use crate::parse::reference::{schema_component_ref, schema_type_and_nullable, schema_type_wire};
 use crate::parse::satay::{
     SatayIntegerTypeWire, SatayParseAsWire, SataySchemaOptions, schema_options,
-};
-use crate::parse::validate::satay::{reject_options_with_ignore, reject_property_options_on_value};
-use crate::parse::validate::schema::{
-    annotation_only_all_of_ref_wrapper, reject_all_of_object_branch_keywords,
-    reject_all_of_sibling_keywords, unsupported_reference_schema_keyword,
 };
 
 /// One use's declared `x-satay` semantics, read exactly once.

@@ -4,6 +4,7 @@ use serde_json::Number;
 
 use crate::error::ValidationError;
 use crate::model::{FloatLimit, IntegerLimit, IntegerType, TypeRef, Validation};
+use crate::parse::helpers::{json_integer, reject_keyword};
 
 /// Scalar facts used by Rust width selection and constraint lowering.
 #[derive(Debug, Default)]
@@ -233,20 +234,6 @@ fn parse_array_validation(
     }
 }
 
-pub(in crate::parse) fn reject_keyword(
-    present: bool,
-    keyword: &'static str,
-    context: &str,
-) -> Result<(), ValidationError> {
-    if present {
-        return Err(ValidationError::UnsupportedKeyword {
-            context: context.to_owned(),
-            keyword: keyword.to_owned(),
-        });
-    }
-    Ok(())
-}
-
 fn optional_integer_minimum(
     schema: &ConstraintInput,
     context: &str,
@@ -421,29 +408,6 @@ fn tighter_float_maximum(
         (Some(limit), None) | (None, Some(limit)) => Some(limit),
         (None, None) => None,
     }
-}
-
-pub(in crate::parse) fn json_integer(
-    value: &Number,
-    context: &str,
-) -> Result<i128, ValidationError> {
-    if let Some(value) = value.as_i64() {
-        return Ok(i128::from(value));
-    }
-    if let Some(value) = value.as_u64() {
-        return Ok(i128::from(value));
-    }
-    let Some(value) = value.as_f64() else {
-        return Err(ValidationError::ExpectedInteger {
-            context: context.to_owned(),
-        });
-    };
-    if !value.is_finite() || value.fract() != 0.0 {
-        return Err(ValidationError::ExpectedInteger {
-            context: context.to_owned(),
-        });
-    }
-    Ok(value as i128)
 }
 
 fn normalize_integer_limits(

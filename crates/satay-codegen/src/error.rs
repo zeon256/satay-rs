@@ -22,4 +22,28 @@ pub enum Error {
     /// See [`ValidationError`] for the full list of validation-related errors.
     #[error(transparent)]
     Validation(#[from] ValidationError),
+
+    /// An internal compiler-stage failure that could not be represented by an
+    /// existing parse or validation diagnostic.
+    #[error("internal code generation error: {message}")]
+    Internal {
+        /// Description of the failed compiler invariant.
+        message: String,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Error;
+
+    #[test]
+    fn internal_errors_have_stable_context() {
+        let error = Error::Internal {
+            message: "semantic graph invariant failed".to_owned(),
+        };
+        assert_eq!(
+            error.to_string(),
+            "internal code generation error: semantic graph invariant failed"
+        );
+    }
 }
