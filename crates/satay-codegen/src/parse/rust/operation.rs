@@ -12,7 +12,10 @@ use crate::model::{
 };
 use crate::parse::helpers;
 use crate::parse::helpers::is_json_media_type;
-use crate::parse::validate::*;
+use crate::parse::rust::checked::{
+    CheckedOperation, CheckedParameter, CheckedRequestBody, CheckedResponse,
+    CheckedResponseProjection, CheckedTypeKind,
+};
 use satay_ir::{
     self as ir, ApiKeyLocation as SemanticApiKeyLocation, CompositionKind,
     HttpMethod as SemanticHttpMethod, ParameterLocation as SemanticParameterLocation,
@@ -56,7 +59,7 @@ pub(super) fn security_schemes(api: &ir::Api) -> Vec<ApiKeySecurityScheme> {
 pub(super) fn operations(
     api: &ir::Api,
     schemas: &mut Schemas<'_>,
-) -> Result<Vec<ValidatedOperation>, LowerError> {
+) -> Result<Vec<CheckedOperation>, LowerError> {
     if let Some(diagnostic) = &api.http().diagnostic {
         return Err(diagnostic.clone().into());
     }
@@ -108,7 +111,7 @@ pub(super) fn operations(
                             context: context.clone(),
                         }
                     })?;
-                    Ok(ValidatedRequestBody {
+                    Ok(CheckedRequestBody {
                         description: body.description.clone(),
                         content_type: media.media_type.clone(),
                         ty: schemas.value(schema, &context)?,
@@ -163,7 +166,7 @@ pub(super) fn operations(
                     match &media.projection {
                         Some(projection) => (
                             Some(schemas.projected_value(projection, &context)?),
-                            Some(ValidatedResponseProjection {
+                            Some(CheckedResponseProjection {
                                 unwrap_field: projection.selector.unwrap_field.clone(),
                                 map_field: projection.selector.map_field.clone(),
                             }),
@@ -179,7 +182,7 @@ pub(super) fn operations(
                         ),
                     }
                 };
-                responses.push(ValidatedResponse {
+                responses.push(CheckedResponse {
                     status,
                     description: response.description.clone(),
                     body,
@@ -194,7 +197,7 @@ pub(super) fn operations(
                     ValidationError::SatayOutputRequiresResponseBody { operation_id }.into(),
                 );
             }
-            output.push(ValidatedOperation {
+            output.push(CheckedOperation {
                 operation_id,
                 tags: operation.tags.clone(),
                 description: operation.description.clone(),
@@ -221,7 +224,7 @@ fn select_media<T>(content: &[T], name: impl Fn(&T) -> &str) -> Option<&T> {
 fn parameter_type(
     parameter: &ir::Parameter,
     schemas: &mut Schemas<'_>,
-) -> Result<ValidatedParameter, LowerError> {
+) -> Result<CheckedParameter, LowerError> {
     if let TypeExpr::Invalid(diagnostic) = &parameter.schema.ty {
         return Err(diagnostic.clone().into());
     }
@@ -316,13 +319,13 @@ fn parameter_type(
     let default = if parameter.required {
         None
     } else if let Some(value) = default_value.filter(|value| !value.is_null()) {
-        let resolved_ty = if matches!(ty.kind, ValidatedTypeKind::Named(_)) {
+        let resolved_ty = if matches!(ty.kind, CheckedTypeKind::Named(_)) {
             schemas.value(resolved, &context)?
         } else {
             ty.clone()
         };
         let default = policy::parse_parameter_default(value, &resolved_ty, wire_name)?;
-        let enum_validation = if matches!(resolved_ty.kind, ValidatedTypeKind::Enum(_)) {
+        let enum_validation = if matches!(resolved_ty.kind, CheckedTypeKind::Enum(_)) {
             constraint::parse_validation(&constraints(resolved), &TypeRef::String, &context)?
         } else {
             None
@@ -338,7 +341,7 @@ fn parameter_type(
         // compatibility policy in Rust; semantic IR still records their presence.
         None
     };
-    Ok(ValidatedParameter {
+    Ok(CheckedParameter {
         location,
         wire_name: wire_name.clone(),
         description: parameter.description.clone(),
@@ -398,7 +401,7 @@ fn method(method: ir::HttpMethod) -> HttpMethod {
         SemanticHttpMethod::Trace => HttpMethod::Trace,
     }
 }
-fn upsert_parameter(parameters: &mut Vec<ValidatedParameter>, parameter: ValidatedParameter) {
+fn upsert_parameter(parameters: &mut Vec<CheckedParameter>, parameter: CheckedParameter) {
     if let Some(existing) = parameters.iter_mut().find(|existing| {
         existing.location == parameter.location && existing.wire_name == parameter.wire_name
     }) {
@@ -408,10 +411,7 @@ fn upsert_parameter(parameters: &mut Vec<ValidatedParameter>, parameter: Validat
     }
 }
 
-fn validate_path_parameters(
-    path: &str,
-    parameters: &[ValidatedParameter],
-) -> Result<(), LowerError> {
+fn validate_path_parameters(path: &str, parameters: &[CheckedParameter]) -> Result<(), LowerError> {
     let declared = parameters
         .iter()
         .filter(|parameter| parameter.location == ParameterLocation::Path)

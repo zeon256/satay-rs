@@ -298,9 +298,6 @@ pub fn parse_as_rust_type(parse_as: ParseAs) -> syn::Type {
         ParseAs::OffsetDateTime => parse_quote!(satay_runtime::OffsetDateTime),
         ParseAs::UnixTime => parse_quote!(satay_runtime::OffsetDateTime),
         ParseAs::Time => parse_quote!(satay_runtime::Time),
-        ParseAs::IntegerRange | ParseAs::NumberRange => {
-            unreachable!("range parse-as uses generated range types")
-        }
     }
 }
 
@@ -325,9 +322,6 @@ pub fn parse_as_string_serde_leaf(parse_as: ParseAs) -> &'static str {
         ParseAs::OffsetDateTime => "as_offset_datetime",
         ParseAs::UnixTime => "as_unix_time",
         ParseAs::Time => "as_time",
-        ParseAs::IntegerRange | ParseAs::NumberRange => {
-            unreachable!("range parse-as uses generated range types")
-        }
     }
 }
 
@@ -351,9 +345,7 @@ pub fn parse_as_integer_serde_leaf(parse_as: ParseAs) -> &'static str {
         | ParseAs::Date
         | ParseAs::NaiveDateTime
         | ParseAs::OffsetDateTime
-        | ParseAs::Time
-        | ParseAs::IntegerRange
-        | ParseAs::NumberRange => unreachable!("only bool and unixtime can parse from integer"),
+        | ParseAs::Time => unreachable!("only bool and unixtime can parse from integer"),
     }
 }
 

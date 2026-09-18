@@ -358,9 +358,6 @@ fn parsed_value_expr(base: syn::Expr, parse_as: ParseAs, base_kind: ValueBase) -
         | ParseAs::F32
         | ParseAs::F64 => parse_quote!(&#base.to_string()),
         ParseAs::Bool => parse_quote!(satay_runtime::format_bool(#ref_arg)),
-        ParseAs::IntegerRange | ParseAs::NumberRange => {
-            unreachable!("range parse-as uses generated range types")
-        }
     }
 }
 

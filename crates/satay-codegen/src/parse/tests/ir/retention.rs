@@ -1,4 +1,3 @@
-use super::codegen;
 use crate::parse::normalize::normalize_for_rust;
 use satay_ir::{CompositionKind, PropertyPolicy, TypeExpr};
 use serde_json::Value;
@@ -44,7 +43,7 @@ components:
     Choice: {oneOf: [{type: string}, {type: integer}]}
 "#,
         );
-        codegen::generate(&source).unwrap();
+        crate::generate(&source).unwrap();
         normalize_for_rust(&source, "retention.yaml").unwrap()
     }; // Source text and frontend state have been dropped.
     let definition = |name| {

@@ -3,8 +3,6 @@ use std::{
     fmt::{self, Display},
 };
 
-use crate::parse::validate::ValidatedCoordinates;
-
 #[derive(Debug)]
 pub(crate) struct Api {
     pub(crate) server_url: String,
@@ -255,20 +253,25 @@ pub(crate) struct CoordinateCodec {
 }
 
 impl CoordinateCodec {
-    pub(crate) fn from_validated(validated: &ValidatedCoordinates, target: &ComponentKind) -> Self {
+    pub(crate) fn from_parts(
+        target_name: String,
+        field_indices: [usize; 2],
+        delimiter: CoordinateDelimiter,
+        target: &ComponentKind,
+    ) -> Self {
         let ComponentKind::Struct(fields) = target else {
             unreachable!("coordinate target is validated as a generated struct")
         };
         Self {
-            target: validated.target().to_owned(),
-            fields: validated.field_indices().map(|index| {
+            target: target_name,
+            fields: field_indices.map(|index| {
                 let field = &fields[index];
                 CoordinateField {
                     rust_name: field.rust_name.clone(),
                     scalar: CoordinateScalar::from_validated_type(&field.ty),
                 }
             }),
-            delimiter: validated.delimiter().clone(),
+            delimiter,
         }
     }
 
@@ -423,8 +426,6 @@ pub(crate) enum ParseAs {
     UnixTime,
     Url,
     Time,
-    IntegerRange,
-    NumberRange,
 }
 
 #[derive(Debug)]

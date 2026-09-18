@@ -18,6 +18,7 @@ mod parameters;
 mod parse_as;
 mod rejections;
 mod responses;
+mod roots;
 mod storage;
 mod structure;
 mod unions;

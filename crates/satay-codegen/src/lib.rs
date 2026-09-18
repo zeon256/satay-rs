@@ -61,8 +61,7 @@ pub fn generate(spec: &str) -> Result<Vec<GeneratedFile>, Error> {
 #[tracing::instrument(err)]
 pub fn generate_with(spec: &str, options: GenerateOptions) -> Result<Vec<GeneratedFile>, Error> {
     info!("parsing OpenAPI document");
-    let document = parse::parse_document(spec)?;
-    let api = parse::parse_api(&document)?;
+    let api = parse::semantic_api(spec)?;
     info!(
         components = api.components.len(),
         operations = api.operations.len(),

@@ -1,15 +1,14 @@
 //! Private OpenAPI-to-`satay-ir` frontend.
 //!
-//! Test-gated staging: no public generation or normalization API exists yet.
-//! [`normalize_spec`] runs the existing parser, resolver, and reachability
+//! [`normalize_for_rust`] runs the parser, resolver, and reachability
 //! selection, then produces an owned, self-contained [`satay_ir::Api`].
-//! Production `generate`, `generate_with`, and `parse_api` remain on the old
-//! path.
 
+mod checks;
 mod constraint;
 mod error;
 mod http;
 mod interpretation;
+mod reachability;
 mod schema;
 mod source;
 
@@ -18,9 +17,9 @@ pub(in crate::parse) use error::NormalizeError;
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::resolve::{ResolvedDocument, resolve_document};
-use super::validate::is_supported_openapi_version;
-use super::validate::reachability::excluded_component_schemas;
 use crate::error::ValidationError;
+use checks::is_supported_openapi_version;
+use reachability::excluded_component_schemas;
 
 use satay_ir::{Api, ApiBuilder, DefinitionId, SourceRef};
 
@@ -36,6 +35,7 @@ use schema::SchemaPosition;
 ///
 /// Reports parse, resolution, selection, semantic, and graph errors as a
 /// structured [`NormalizeError`].
+#[cfg(test)]
 pub(in crate::parse) fn normalize_spec(
     spec: &str,
     document_id: &str,

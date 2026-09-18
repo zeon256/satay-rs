@@ -12,8 +12,11 @@ use crate::model::{
     StringCodec, TypeRef,
 };
 use crate::parse::helpers;
-use crate::parse::satay::SatayIdentifier;
-use crate::parse::validate::*;
+use crate::parse::rust::checked::{
+    CheckedComponent, CheckedComponentKind, CheckedCoordinates, CheckedField, CheckedFieldValue,
+    CheckedParsedString, CheckedType, CheckedTypeKind, CheckedUnion, CheckedUnionTag,
+    CheckedUnionTagStyle, CheckedUnionVariant, CheckedUnionVariantKind, NonEmptySentinels,
+};
 use satay_ir::{
     self as ir, AdditionalProperties, CompositionKind, DecodePolicy, DiagnosticKind,
     IntegerInterpretation, PropertyPolicy, StringConstraints, StringInterpretation, StringSchema,
@@ -32,7 +35,7 @@ impl<'a> Schemas<'a> {
         Self { api, stack: vec![] }
     }
 
-    pub(super) fn components(&mut self) -> Result<Vec<ValidatedComponent>, LowerError> {
+    pub(super) fn components(&mut self) -> Result<Vec<CheckedComponent>, LowerError> {
         self.api
             .definitions()
             .map(|(_, definition)| self.component(definition))
@@ -43,21 +46,21 @@ impl<'a> Schemas<'a> {
         self.api.definition(id).expect("finalized graph reference")
     }
 
-    fn component(&mut self, definition: &ir::Definition) -> Result<ValidatedComponent, LowerError> {
+    fn component(&mut self, definition: &ir::Definition) -> Result<CheckedComponent, LowerError> {
         let context = format!("schema `{}`", definition.source_name);
         let kind = match &definition.schema.ty {
             TypeExpr::Ref(id) => {
-                ValidatedComponentKind::Reference(type_ident(&self.definition(*id).source_name))
+                CheckedComponentKind::Reference(type_ident(&self.definition(*id).source_name))
             }
             TypeExpr::Object(object) if !object.properties.is_empty() => {
-                ValidatedComponentKind::Struct(self.fields(&object.properties, &context)?)
+                CheckedComponentKind::Struct(self.fields(&object.properties, &context)?)
             }
             TypeExpr::Composition(composition) if composition.kind == CompositionKind::AllOf => {
                 let fields =
                     self.all_of(&definition.schema, &context, Some(&definition.source_name))?;
-                ValidatedComponentKind::Struct(fields)
+                CheckedComponentKind::Struct(fields)
             }
-            _ => ValidatedComponentKind::Type(self.value(&definition.schema, &context)?),
+            _ => CheckedComponentKind::Type(self.value(&definition.schema, &context)?),
         };
         let description =
             definition
@@ -66,10 +69,10 @@ impl<'a> Schemas<'a> {
                 .description
                 .clone()
                 .or_else(|| match &kind {
-                    ValidatedComponentKind::Type(ty) => ty.description.clone(),
+                    CheckedComponentKind::Type(ty) => ty.description.clone(),
                     _ => None,
                 });
-        Ok(ValidatedComponent {
+        Ok(CheckedComponent {
             schema_name: definition.source_name.clone(),
             description,
             kind,
@@ -81,11 +84,11 @@ impl<'a> Schemas<'a> {
         &mut self,
         projection: &ir::ResponseProjection,
         context: &str,
-    ) -> Result<ValidatedType, LowerError> {
+    ) -> Result<CheckedType, LowerError> {
         let mut output = self.value(&projection.output, context)?;
         output.nullable |= !projection.unwrap_required;
         if let Some(required) = projection.map_required {
-            let ValidatedTypeKind::Array(item) = &mut output.kind else {
+            let CheckedTypeKind::Array(item) = &mut output.kind else {
                 unreachable!("projected output lowers to an array")
             };
             item.nullable |= !required;
@@ -98,7 +101,7 @@ impl<'a> Schemas<'a> {
         &mut self,
         value: &ir::SchemaUse,
         context: &str,
-    ) -> Result<ValidatedType, LowerError> {
+    ) -> Result<CheckedType, LowerError> {
         let input = constraints(value);
         let mut nullable = value.nullable;
         let mut description = value.annotations.description.clone();
@@ -115,7 +118,7 @@ impl<'a> Schemas<'a> {
                         seen.push(id);
                         let target = self.definition(id);
                         if target.schema.annotations.description.is_some() {
-                            description = target.schema.annotations.description.clone();
+                            description.clone_from(&target.schema.annotations.description);
                             break;
                         }
                         if let TypeExpr::Ref(next) = target.schema.ty {
@@ -125,11 +128,11 @@ impl<'a> Schemas<'a> {
                         }
                     }
                 }
-                ValidatedTypeKind::Named(type_ident(&self.definition(*id).source_name))
+                CheckedTypeKind::Named(type_ident(&self.definition(*id).source_name))
             }
             TypeExpr::String(string) => {
                 if let Some(values) = effective_enum(string) {
-                    ValidatedTypeKind::Enum(Self::enum_type(
+                    CheckedTypeKind::Enum(Self::enum_type(
                         string,
                         values,
                         EnumFallback::None,
@@ -140,36 +143,30 @@ impl<'a> Schemas<'a> {
                         StringInterpretation::Plain
                             if value.annotations.format.as_deref() == Some("unixtime") =>
                         {
-                            ValidatedTypeKind::ParsedString(StringCodec::Standard(
-                                ParseAs::UnixTime,
-                            ))
+                            CheckedTypeKind::ParsedString(StringCodec::Standard(ParseAs::UnixTime))
                         }
                         StringInterpretation::Plain
                             if value.annotations.format.as_deref() == Some("uri") =>
                         {
-                            constraint::reject_keyword(
-                                input.pattern.is_some(),
-                                "pattern",
-                                context,
-                            )?;
-                            constraint::reject_keyword(
+                            helpers::reject_keyword(input.pattern.is_some(), "pattern", context)?;
+                            helpers::reject_keyword(
                                 input.min_length.is_some(),
                                 "minLength",
                                 context,
                             )?;
-                            constraint::reject_keyword(
+                            helpers::reject_keyword(
                                 input.max_length.is_some(),
                                 "maxLength",
                                 context,
                             )?;
-                            ValidatedTypeKind::ParsedString(StringCodec::Standard(ParseAs::Url))
+                            CheckedTypeKind::ParsedString(StringCodec::Standard(ParseAs::Url))
                         }
-                        StringInterpretation::Plain => ValidatedTypeKind::String,
-                        StringInterpretation::Scalar(scalar) => ValidatedTypeKind::ParsedString(
-                            StringCodec::Standard(parse_as(*scalar)),
-                        ),
+                        StringInterpretation::Plain => CheckedTypeKind::String,
+                        StringInterpretation::Scalar(scalar) => {
+                            CheckedTypeKind::ParsedString(StringCodec::Standard(parse_as(*scalar)))
+                        }
                         StringInterpretation::MappedBool(mapping) => {
-                            ValidatedTypeKind::ParsedString(StringCodec::MappedBool(
+                            CheckedTypeKind::ParsedString(StringCodec::MappedBool(
                                 BoolStringMapping::try_new(
                                     mapping.true_values().to_vec(),
                                     mapping.false_values().to_vec(),
@@ -183,7 +180,7 @@ impl<'a> Schemas<'a> {
                             bounds,
                         } => {
                             let input = numeric_input(bounds, value.annotations.format.clone());
-                            ValidatedTypeKind::Range(RangeScalar::Integer(
+                            CheckedTypeKind::Range(RangeScalar::Integer(
                                 constraint::parse_integer_type(
                                     &input,
                                     context,
@@ -192,7 +189,7 @@ impl<'a> Schemas<'a> {
                             ))
                         }
                         StringInterpretation::NumberRange { .. } => {
-                            ValidatedTypeKind::Range(match value.annotations.format.as_deref() {
+                            CheckedTypeKind::Range(match value.annotations.format.as_deref() {
                                 Some("float") => RangeScalar::F32,
                                 Some("double") | None => RangeScalar::F64,
                                 Some(format) => {
@@ -205,20 +202,20 @@ impl<'a> Schemas<'a> {
                             })
                         }
                         StringInterpretation::Coordinates(selector) => {
-                            ValidatedTypeKind::Coordinates(self.coordinates(selector, context)?)
+                            CheckedTypeKind::Coordinates(self.coordinates(selector, context)?)
                         }
                     }
                 }
             }
             TypeExpr::Integer(integer) => match integer.interpretation {
-                IntegerInterpretation::Bool => ValidatedTypeKind::ParsedInteger(ParseAs::Bool),
+                IntegerInterpretation::Bool => CheckedTypeKind::ParsedInteger(ParseAs::Bool),
                 IntegerInterpretation::Numeric { .. }
                     if value.annotations.format.as_deref() == Some("unixtime") =>
                 {
-                    ValidatedTypeKind::ParsedInteger(ParseAs::UnixTime)
+                    CheckedTypeKind::ParsedInteger(ParseAs::UnixTime)
                 }
                 IntegerInterpretation::Numeric { representation } => {
-                    ValidatedTypeKind::Integer(constraint::parse_integer_type(
+                    CheckedTypeKind::Integer(constraint::parse_integer_type(
                         &input,
                         context,
                         integer_representation(representation),
@@ -226,8 +223,8 @@ impl<'a> Schemas<'a> {
                 }
             },
             TypeExpr::Number(_) => match value.annotations.format.as_deref() {
-                Some("float") => ValidatedTypeKind::F32,
-                Some("double") | None => ValidatedTypeKind::F64,
+                Some("float") => CheckedTypeKind::F32,
+                Some("double") | None => CheckedTypeKind::F64,
                 Some(format) => {
                     return Err(ValidationError::UnsupportedNumberFormat {
                         context: context.to_owned(),
@@ -236,8 +233,8 @@ impl<'a> Schemas<'a> {
                     .into());
                 }
             },
-            TypeExpr::Boolean => ValidatedTypeKind::Bool,
-            TypeExpr::AnyJson => ValidatedTypeKind::JsonValue,
+            TypeExpr::Boolean => CheckedTypeKind::Bool,
+            TypeExpr::AnyJson => CheckedTypeKind::JsonValue,
             TypeExpr::Null => {
                 return Err(ValidationError::UnsupportedSchemaType {
                     context: context.to_owned(),
@@ -245,7 +242,7 @@ impl<'a> Schemas<'a> {
                 }
                 .into());
             }
-            TypeExpr::Array(array) => ValidatedTypeKind::Array(Box::new(
+            TypeExpr::Array(array) => CheckedTypeKind::Array(Box::new(
                 self.value(&array.items, &format!("{context} items"))?,
             )),
             TypeExpr::Object(object) => {
@@ -256,8 +253,8 @@ impl<'a> Schemas<'a> {
                     .into());
                 }
                 let item = match &object.additional_properties {
-                    AdditionalProperties::Allowed => ValidatedType {
-                        kind: ValidatedTypeKind::JsonValue,
+                    AdditionalProperties::Allowed => CheckedType {
+                        kind: CheckedTypeKind::JsonValue,
                         nullable: false,
                         validation: None,
                         description: None,
@@ -272,7 +269,7 @@ impl<'a> Schemas<'a> {
                         .into());
                     }
                 };
-                ValidatedTypeKind::Map(Box::new(item))
+                CheckedTypeKind::Map(Box::new(item))
             }
             TypeExpr::Composition(composition) if composition.kind == CompositionKind::AllOf => {
                 if let [branch] = composition.branches.as_slice()
@@ -285,12 +282,12 @@ impl<'a> Schemas<'a> {
                     }
                     return Ok(ty);
                 }
-                ValidatedTypeKind::InlineStruct(self.all_of(value, context, None)?)
+                CheckedTypeKind::InlineStruct(self.all_of(value, context, None)?)
             }
             TypeExpr::Composition(composition) => {
                 let (kind, union_nullable) = self.union(composition, context)?;
                 if description.is_none()
-                    && matches!(&kind, ValidatedTypeKind::Enum(enumeration) if enumeration.fallback == EnumFallback::OtherString)
+                    && matches!(&kind, CheckedTypeKind::Enum(enumeration) if enumeration.fallback == EnumFallback::OtherString)
                 {
                     description = composition.branches.iter().filter(|branch| matches!(&branch.ty, TypeExpr::String(string) if effective_enum(string).is_some())).find_map(|branch| branch.annotations.description.clone());
                 }
@@ -299,18 +296,18 @@ impl<'a> Schemas<'a> {
             }
         };
         let base = match &kind {
-            ValidatedTypeKind::String => Some(TypeRef::String),
-            ValidatedTypeKind::Integer(integer) => Some(TypeRef::Integer(*integer)),
-            ValidatedTypeKind::F32 => Some(TypeRef::F32),
-            ValidatedTypeKind::F64 => Some(TypeRef::F64),
-            ValidatedTypeKind::Array(_) => Some(TypeRef::Array(Box::new(TypeRef::Bool))),
+            CheckedTypeKind::String => Some(TypeRef::String),
+            CheckedTypeKind::Integer(integer) => Some(TypeRef::Integer(*integer)),
+            CheckedTypeKind::F32 => Some(TypeRef::F32),
+            CheckedTypeKind::F64 => Some(TypeRef::F64),
+            CheckedTypeKind::Array(_) => Some(TypeRef::Array(Box::new(TypeRef::Bool))),
             _ => None,
         };
         let validation = base
             .map(|base| constraint::parse_validation(&input, &base, context))
             .transpose()?
             .flatten();
-        Ok(ValidatedType {
+        Ok(CheckedType {
             kind,
             nullable,
             validation,
@@ -341,7 +338,7 @@ impl<'a> Schemas<'a> {
         &mut self,
         properties: &[ir::Property],
         context: &str,
-    ) -> Result<Vec<ValidatedField>, LowerError> {
+    ) -> Result<Vec<CheckedField>, LowerError> {
         let fields = self.field_results(properties, context)?;
         policy::validate_rust_field_identifier_collisions(context, &fields)?;
         Ok(fields)
@@ -351,7 +348,7 @@ impl<'a> Schemas<'a> {
         &mut self,
         properties: &[ir::Property],
         context: &str,
-    ) -> Result<Vec<ValidatedField>, LowerError> {
+    ) -> Result<Vec<CheckedField>, LowerError> {
         let mut fields = vec![];
         for property in properties {
             let field_context = helpers::property_context(context, &property.wire_name);
@@ -365,27 +362,25 @@ impl<'a> Schemas<'a> {
             let ty = self.value(&property.value, &field_context)?;
             let description = ty.description.clone();
             let value = match decoding {
-                DecodePolicy::PropagateError => ValidatedFieldValue::Strict(ty),
-                DecodePolicy::ErrorAsAbsent => ValidatedFieldValue::Lossy(ty),
+                DecodePolicy::PropagateError => CheckedFieldValue::Strict(ty),
+                DecodePolicy::ErrorAsAbsent => CheckedFieldValue::Lossy(ty),
                 DecodePolicy::SentinelAsAbsent(values) => {
-                    let ty = ValidatedParsedString::try_from_type(ty).map_err(|_| {
+                    let ty = CheckedParsedString::try_from_type(ty).map_err(|_| {
                         ValidationError::SatayNoneIfRequiresParsedString {
                             context: field_context.clone(),
                         }
                     })?;
-                    ValidatedFieldValue::SentinelParsedString {
+                    CheckedFieldValue::SentinelParsedString {
                         ty,
                         sentinels: NonEmptySentinels::new(values.values().to_vec())
                             .expect("checked semantic sentinels"),
                     }
                 }
             };
-            fields.push(ValidatedField {
+            fields.push(CheckedField {
                 wire_name: property.wire_name.clone(),
                 description,
-                identifier: identifier
-                    .as_ref()
-                    .map(|words| SatayIdentifier::from_words(words.clone())),
+                identifier: identifier.clone(),
                 required: property.required,
                 value,
             });
@@ -398,7 +393,7 @@ impl<'a> Schemas<'a> {
         value: &ir::SchemaUse,
         context: &str,
         name: Option<&str>,
-    ) -> Result<Vec<ValidatedField>, LowerError> {
+    ) -> Result<Vec<CheckedField>, LowerError> {
         if let Some(name) = name {
             self.push_all_of(name)?;
         }
@@ -429,7 +424,7 @@ impl<'a> Schemas<'a> {
         value: &ir::SchemaUse,
         context: &str,
         used: &mut BTreeSet<String>,
-        fields: &mut Vec<ValidatedField>,
+        fields: &mut Vec<CheckedField>,
     ) -> Result<(), LowerError> {
         let TypeExpr::Composition(composition) = &value.ty else {
             unreachable!("allOf dispatch")
@@ -447,7 +442,7 @@ impl<'a> Schemas<'a> {
         context: &str,
         index: usize,
         used: &mut BTreeSet<String>,
-        fields: &mut Vec<ValidatedField>,
+        fields: &mut Vec<CheckedField>,
     ) -> Result<(), LowerError> {
         match &value.ty {
             TypeExpr::Ref(id) => {
@@ -496,7 +491,7 @@ impl<'a> Schemas<'a> {
         &mut self,
         selector: &ir::CoordinatesInterpretation,
         context: &str,
-    ) -> Result<ValidatedCoordinates, LowerError> {
+    ) -> Result<CheckedCoordinates, LowerError> {
         let definition = self.coordinate_target(selector.target(), context)?;
         let name = &definition.source_name;
         let marker = format!("coordinates:{name}");
@@ -509,7 +504,7 @@ impl<'a> Schemas<'a> {
         self.stack.push(marker);
         let component = self.component(definition);
         self.stack.pop();
-        let ValidatedComponentKind::Struct(fields) = component?.kind else {
+        let CheckedComponentKind::Struct(fields) = component?.kind else {
             return Err(invalid_coordinates(
                 context,
                 format!("target `{name}` must be a generated object"),
@@ -522,7 +517,7 @@ impl<'a> Schemas<'a> {
             ));
         }
         let indices = self.coordinate_field_indices(&fields, selector, context, name)?;
-        Ok(ValidatedCoordinates::from_semantic(
+        Ok(CheckedCoordinates::from_semantic(
             type_ident(name),
             indices,
             CoordinateDelimiter::new(selector.delimiter().to_owned()).expect("checked delimiter"),
@@ -569,7 +564,7 @@ impl<'a> Schemas<'a> {
 
     fn coordinate_field_indices(
         &mut self,
-        fields: &[ValidatedField],
+        fields: &[CheckedField],
         selector: &ir::CoordinatesInterpretation,
         context: &str,
         name: &str,
@@ -586,7 +581,7 @@ impl<'a> Schemas<'a> {
                         format!("target `{name}` has no field `{wire_name}`"),
                     )
                 })?;
-            if !field.required || !matches!(field.value, ValidatedFieldValue::Strict(_)) {
+            if !field.required || !matches!(field.value, CheckedFieldValue::Strict(_)) {
                 return Err(invalid_coordinates(
                     context,
                     format!(
@@ -600,7 +595,7 @@ impl<'a> Schemas<'a> {
                 if ty.nullable {
                     break;
                 }
-                let ValidatedTypeKind::Named(ref rust_name) = ty.kind else {
+                let CheckedTypeKind::Named(ref rust_name) = ty.kind else {
                     break;
                 };
                 if !seen.insert(rust_name.clone()) {
@@ -619,7 +614,7 @@ impl<'a> Schemas<'a> {
                 }
                 ty = self.value(&definition.schema, context)?;
             }
-            if ty.nullable || !matches!(ty.kind, ValidatedTypeKind::F32 | ValidatedTypeKind::F64) {
+            if ty.nullable || !matches!(ty.kind, CheckedTypeKind::F32 | CheckedTypeKind::F64) {
                 return Err(invalid_coordinates(
                     &format!("{context} target field `{name}.{wire_name}`"),
                     "selected fields must resolve to nonnullable f32/f64 numbers",
@@ -635,11 +630,11 @@ impl<'a> Schemas<'a> {
         &mut self,
         composition: &ir::CompositionSchema,
         context: &str,
-    ) -> Result<(ValidatedTypeKind, bool), LowerError> {
+    ) -> Result<(CheckedTypeKind, bool), LowerError> {
         if let Some(discriminator) = &composition.discriminator {
             return self
                 .discriminator(composition, discriminator, context)
-                .map(|union| (ValidatedTypeKind::AnyOf(union), false));
+                .map(|union| (CheckedTypeKind::AnyOf(union), false));
         }
         if composition.kind == CompositionKind::AnyOf && composition.branches.len() >= 2 {
             let mut open = 0;
@@ -687,7 +682,7 @@ impl<'a> Schemas<'a> {
                     }
                 }
                 return Ok((
-                    ValidatedTypeKind::Enum(Self::enum_type(
+                    CheckedTypeKind::Enum(Self::enum_type(
                         &merged,
                         values,
                         EnumFallback::OtherString,
@@ -777,7 +772,7 @@ impl<'a> Schemas<'a> {
                 let type_name = type_ident(&schema_name);
                 (
                     type_name.clone(),
-                    ValidatedUnionVariantKind::Reference {
+                    CheckedUnionVariantKind::Reference {
                         schema_name,
                         type_name,
                     },
@@ -807,12 +802,12 @@ impl<'a> Schemas<'a> {
                 } else {
                     self.value(branch, context).map_err(|_| error())?
                 };
-                if let ValidatedTypeKind::AnyOf(union) = &ty.kind
+                if let CheckedTypeKind::AnyOf(union) = &ty.kind
                     && union.variants.len() == 1
                     && union
                         .tag
                         .as_ref()
-                        .is_some_and(|tag| tag.style == ValidatedUnionTagStyle::EmbeddedField)
+                        .is_some_and(|tag| tag.style == CheckedUnionTagStyle::EmbeddedField)
                 {
                     let mut variant = union.variants[0].clone();
                     variant.rust_name = unique_ident(variant.rust_name, &mut used);
@@ -822,9 +817,9 @@ impl<'a> Schemas<'a> {
                 }
                 let name =
                     policy::inline_union_enum_variant_name(&ty).unwrap_or_else(|| name.to_owned());
-                (name, ValidatedUnionVariantKind::Inline(ty))
+                (name, CheckedUnionVariantKind::Inline(ty))
             };
-            let variant = ValidatedUnionVariant {
+            let variant = CheckedUnionVariant {
                 rust_name: unique_ident(name, &mut used),
                 kind,
                 tag_value: None,
@@ -851,16 +846,13 @@ impl<'a> Schemas<'a> {
             .into());
         }
         if variants.len() == 1
-            && let ValidatedUnionVariantKind::Inline(ty) = &variants[0].kind
-            && matches!(
-                ty.kind,
-                ValidatedTypeKind::AnyOf(_) | ValidatedTypeKind::Map(_)
-            )
+            && let CheckedUnionVariantKind::Inline(ty) = &variants[0].kind
+            && matches!(ty.kind, CheckedTypeKind::AnyOf(_) | CheckedTypeKind::Map(_))
         {
             return Ok((ty.kind.clone(), nullable));
         }
         Ok((
-            ValidatedTypeKind::AnyOf(ValidatedUnion {
+            CheckedTypeKind::AnyOf(CheckedUnion {
                 variants,
                 tag: None,
             }),
@@ -874,7 +866,7 @@ impl<'a> Schemas<'a> {
         composition: &ir::CompositionSchema,
         discriminator: &ir::Discriminator,
         context: &str,
-    ) -> Result<ValidatedUnion, LowerError> {
+    ) -> Result<CheckedUnion, LowerError> {
         let keyword = if composition.kind == CompositionKind::OneOf {
             "oneOf"
         } else {
@@ -934,7 +926,7 @@ impl<'a> Schemas<'a> {
                 }
                 _ => error,
             })?;
-            let ValidatedComponentKind::Struct(fields) = component.kind else {
+            let CheckedComponentKind::Struct(fields) = component.kind else {
                 unreachable!("checked object component")
             };
             let field = fields
@@ -943,9 +935,9 @@ impl<'a> Schemas<'a> {
             let tag = match field {
                 None => None,
                 Some(field) => {
-                    if let ValidatedTypeKind::Enum(enumeration) = &field.value.ty().kind
+                    if let CheckedTypeKind::Enum(enumeration) = &field.value.ty().kind
                         && field.required
-                        && matches!(field.value, ValidatedFieldValue::Strict(_))
+                        && matches!(field.value, CheckedFieldValue::Strict(_))
                         && !field.value.ty().nullable
                         && enumeration.variants.len() == 1
                         && enumeration.fallback == EnumFallback::None
@@ -1010,23 +1002,23 @@ impl<'a> Schemas<'a> {
                 .into());
             }
             let type_name = type_ident(&schema_name);
-            variants.push(ValidatedUnionVariant {
+            variants.push(CheckedUnionVariant {
                 rust_name: unique_ident(type_name.clone(), &mut used),
-                kind: ValidatedUnionVariantKind::Reference {
+                kind: CheckedUnionVariantKind::Reference {
                     type_name,
                     schema_name,
                 },
                 tag_value: (!embedded).then_some(tag_value),
             });
         }
-        Ok(ValidatedUnion {
+        Ok(CheckedUnion {
             variants,
-            tag: Some(ValidatedUnionTag {
+            tag: Some(CheckedUnionTag {
                 property_name: discriminator.property_name.clone(),
                 style: if embedded {
-                    ValidatedUnionTagStyle::EmbeddedField
+                    CheckedUnionTagStyle::EmbeddedField
                 } else {
-                    ValidatedUnionTagStyle::InternallyTagged
+                    CheckedUnionTagStyle::InternallyTagged
                 },
             }),
         })
@@ -1070,7 +1062,7 @@ pub(super) fn constraints(value: &ir::SchemaUse) -> ConstraintInput {
         TypeExpr::String(string) => {
             input.min_length = string.constraints.min_length;
             input.max_length = string.constraints.max_length;
-            input.pattern = string.constraints.pattern.clone();
+            input.pattern.clone_from(&string.constraints.pattern);
         }
         TypeExpr::Array(array) => {
             input.min_items = array.constraints.min_items;
@@ -1088,11 +1080,15 @@ fn numeric_input(bounds: &ir::NumericConstraints, format: Option<String>) -> Con
         ..ConstraintInput::default()
     };
     if let Some(declared) = &bounds.declared {
-        input.minimum = declared.minimum.clone();
-        input.maximum = declared.maximum.clone();
-        input.exclusive_minimum = declared.exclusive_minimum.clone();
-        input.exclusive_maximum = declared.exclusive_maximum.clone();
-        input.multiple_of = declared.multiple_of.clone();
+        input.minimum.clone_from(&declared.minimum);
+        input.maximum.clone_from(&declared.maximum);
+        input
+            .exclusive_minimum
+            .clone_from(&declared.exclusive_minimum);
+        input
+            .exclusive_maximum
+            .clone_from(&declared.exclusive_maximum);
+        input.multiple_of.clone_from(&declared.multiple_of);
         return input;
     }
     if let Some(bound) = &bounds.minimum {

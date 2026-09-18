@@ -1,8 +1,5 @@
 use std::collections::BTreeSet;
 
-use oas3::spec::SecurityScheme as OasSecurityScheme;
-
-use super::super::resolve::ResolvedDocument;
 use super::schema::SchemaLowerer;
 use crate::error::ValidationError;
 use crate::ident::{
@@ -10,58 +7,17 @@ use crate::ident::{
     type_ident, unique_ident,
 };
 use crate::model::{
-    ApiGroup, ApiKeyLocation, ApiKeySecurityScheme, GroupOperation, Operation as SatayOperation,
-    Parameter, ParameterDefault, ParameterLocation, RequestBody, ResponseCase, ResponseProjection,
+    ApiGroup, ApiKeySecurityScheme, GroupOperation, Operation as SatayOperation, Parameter,
+    ParameterDefault, ParameterLocation, RequestBody, ResponseCase, ResponseProjection,
     ResponseStatus, TypeRef, is_array_type,
 };
-use crate::parse::registry::TypeRegistry;
-use crate::parse::validate::{
-    ValidatedOperation, ValidatedParameter, ValidatedRequestBody, ValidatedResponse,
+use crate::parse::rust::checked::{
+    CheckedOperation, CheckedParameter, CheckedRequestBody, CheckedResponse,
 };
-
-pub(super) fn parse_api_key_security_schemes(
-    document: &ResolvedDocument<'_>,
-) -> Result<Vec<ApiKeySecurityScheme>, ValidationError> {
-    let Some(components) = document.spec.components.as_ref() else {
-        return Ok(vec![]);
-    };
-
-    let mut used = BTreeSet::from([
-        "apply".to_owned(),
-        "base_url".to_owned(),
-        "string_storage".to_owned(),
-        "http".to_owned(),
-        "new".to_owned(),
-    ]);
-
-    let mut schemes = vec![];
-
-    for (scheme_name, scheme) in &components.security_schemes {
-        let context = format!("security scheme `{scheme_name}`");
-        let scheme = document.resolve(scheme, &context)?;
-        let OasSecurityScheme::ApiKey { name, location, .. } = scheme else {
-            continue;
-        };
-
-        let location = match location.as_str() {
-            "header" => ApiKeyLocation::Header,
-            "query" => ApiKeyLocation::Query,
-            _ => continue,
-        };
-        let wire_name = name.clone();
-        let rust_name = unique_ident(field_ident(&wire_name), &mut used);
-        schemes.push(ApiKeySecurityScheme {
-            location,
-            wire_name,
-            rust_name,
-        });
-    }
-
-    Ok(schemes)
-}
+use crate::parse::rust::registry::TypeRegistry;
 
 pub(super) fn parse_operations(
-    operations: &[ValidatedOperation],
+    operations: &[CheckedOperation],
     registry: &mut TypeRegistry,
     schemas: &mut SchemaLowerer<'_>,
 ) -> Result<Vec<SatayOperation>, ValidationError> {
@@ -226,7 +182,7 @@ fn unique_group_ident(
 }
 
 fn parse_operation(
-    operation: &ValidatedOperation,
+    operation: &CheckedOperation,
     registry: &mut TypeRegistry,
     schemas: &mut SchemaLowerer<'_>,
 ) -> Result<SatayOperation, ValidationError> {
@@ -275,7 +231,7 @@ fn parse_operation(
 }
 
 fn parse_parameter(
-    parameter: &ValidatedParameter,
+    parameter: &CheckedParameter,
     registry: &mut TypeRegistry,
     schemas: &mut SchemaLowerer<'_>,
     type_prefix: &str,
@@ -339,7 +295,7 @@ fn deduplicate_parameter_fields(parameters: &mut [Parameter]) {
 }
 
 fn parse_request_body(
-    request_body: Option<&ValidatedRequestBody>,
+    request_body: Option<&CheckedRequestBody>,
     parameters: &[Parameter],
     registry: &mut TypeRegistry,
     schemas: &mut SchemaLowerer<'_>,
@@ -367,7 +323,7 @@ fn parse_request_body(
 }
 
 fn parse_response(
-    response: &ValidatedResponse,
+    response: &CheckedResponse,
     registry: &mut TypeRegistry,
     schemas: &mut SchemaLowerer<'_>,
     type_prefix: &str,

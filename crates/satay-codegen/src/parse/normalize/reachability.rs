@@ -20,7 +20,7 @@ use super::super::helpers::json_media_type;
 use super::super::reference::schema_component_ref;
 use super::super::resolve::ResolvedDocument;
 use super::super::satay::coordinate_target_reference;
-use super::operation::{inferred_operation_id, operation_satay_skip};
+use super::checks::{inferred_operation_id, operation_satay_skip};
 use crate::error::ValidationError;
 use crate::model::HttpMethod;
 

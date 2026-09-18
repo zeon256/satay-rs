@@ -5,24 +5,24 @@ use crate::model::{
     Enum, EnumFallback, EnumVariant, FloatLimit, IntegerLimit, IntegerType, ParameterDefault,
     Validation,
 };
-use crate::parse::validate::{
-    ValidatedComponent, ValidatedComponentKind, ValidatedField, ValidatedOperation, ValidatedType,
-    ValidatedTypeKind, ValidatedUnionVariant, ValidatedUnionVariantKind,
+use crate::parse::rust::checked::{
+    CheckedComponent, CheckedComponentKind, CheckedField, CheckedOperation, CheckedType,
+    CheckedTypeKind, CheckedUnionVariant, CheckedUnionVariantKind,
 };
 use regex::Regex;
 use serde_json::Value as JsonValue;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(in crate::parse) fn plain_union_branch_shadows(
-    previous: &ValidatedUnionVariant,
-    current: &ValidatedUnionVariant,
+    previous: &CheckedUnionVariant,
+    current: &CheckedUnionVariant,
 ) -> bool {
     if let (
-        ValidatedUnionVariantKind::Reference {
+        CheckedUnionVariantKind::Reference {
             schema_name: previous_schema,
             ..
         },
-        ValidatedUnionVariantKind::Reference {
+        CheckedUnionVariantKind::Reference {
             schema_name: current_schema,
             ..
         },
@@ -34,7 +34,7 @@ pub(in crate::parse) fn plain_union_branch_shadows(
         return previous_schema == current_schema;
     }
 
-    let (ValidatedUnionVariantKind::Inline(previous), ValidatedUnionVariantKind::Inline(current)) =
+    let (CheckedUnionVariantKind::Inline(previous), CheckedUnionVariantKind::Inline(current)) =
         (&previous.kind, &current.kind)
     else {
         return false;
@@ -43,7 +43,7 @@ pub(in crate::parse) fn plain_union_branch_shadows(
     inline_plain_union_branch_shadows(previous, current)
 }
 
-fn inline_plain_union_branch_shadows(previous: &ValidatedType, current: &ValidatedType) -> bool {
+fn inline_plain_union_branch_shadows(previous: &CheckedType, current: &CheckedType) -> bool {
     if is_unconstrained_string_branch(previous) && is_inline_string_branch(current) {
         return true;
     }
@@ -66,23 +66,17 @@ fn inline_plain_union_branch_shadows(previous: &ValidatedType, current: &Validat
     is_unconstrained_bool_branch(previous) && is_inline_bool_branch(current)
 }
 
-fn is_unconstrained_string_branch(ty: &ValidatedType) -> bool {
-    matches!(ty.kind, ValidatedTypeKind::String) && ty.validation.is_none()
+fn is_unconstrained_string_branch(ty: &CheckedType) -> bool {
+    matches!(ty.kind, CheckedTypeKind::String) && ty.validation.is_none()
 }
 
-fn is_inline_string_branch(ty: &ValidatedType) -> bool {
-    matches!(
-        ty.kind,
-        ValidatedTypeKind::String | ValidatedTypeKind::Enum(_)
-    )
+fn is_inline_string_branch(ty: &CheckedType) -> bool {
+    matches!(ty.kind, CheckedTypeKind::String | CheckedTypeKind::Enum(_))
 }
 
-fn constrained_string_branch_shadows_enum(
-    previous: &ValidatedType,
-    current: &ValidatedType,
-) -> bool {
+fn constrained_string_branch_shadows_enum(previous: &CheckedType, current: &CheckedType) -> bool {
     let (
-        ValidatedTypeKind::String,
+        CheckedTypeKind::String,
         Some(Validation::String {
             min_length,
             max_length,
@@ -93,7 +87,7 @@ fn constrained_string_branch_shadows_enum(
         return false;
     };
 
-    let ValidatedTypeKind::Enum(enum_) = &current.kind else {
+    let CheckedTypeKind::Enum(enum_) = &current.kind else {
         return false;
     };
 
@@ -124,27 +118,27 @@ fn string_value_satisfies_length_bounds(
     true
 }
 
-fn is_unconstrained_number_branch(ty: &ValidatedType) -> bool {
-    matches!(ty.kind, ValidatedTypeKind::F32 | ValidatedTypeKind::F64) && ty.validation.is_none()
+fn is_unconstrained_number_branch(ty: &CheckedType) -> bool {
+    matches!(ty.kind, CheckedTypeKind::F32 | CheckedTypeKind::F64) && ty.validation.is_none()
 }
 
-fn is_inline_number_or_integer_branch(ty: &ValidatedType) -> bool {
+fn is_inline_number_or_integer_branch(ty: &CheckedType) -> bool {
     matches!(
         ty.kind,
-        ValidatedTypeKind::F32 | ValidatedTypeKind::F64 | ValidatedTypeKind::Integer(_)
+        CheckedTypeKind::F32 | CheckedTypeKind::F64 | CheckedTypeKind::Integer(_)
     )
 }
 
-fn unconstrained_integer_branch(ty: &ValidatedType) -> Option<IntegerType> {
+fn unconstrained_integer_branch(ty: &CheckedType) -> Option<IntegerType> {
     match (&ty.kind, ty.validation.as_ref()) {
-        (ValidatedTypeKind::Integer(integer_type), None) => Some(*integer_type),
+        (CheckedTypeKind::Integer(integer_type), None) => Some(*integer_type),
         _ => None,
     }
 }
 
-fn integer_branch(ty: &ValidatedType) -> Option<(IntegerType, Option<&Validation>)> {
+fn integer_branch(ty: &CheckedType) -> Option<(IntegerType, Option<&Validation>)> {
     match &ty.kind {
-        ValidatedTypeKind::Integer(integer_type) => Some((*integer_type, ty.validation.as_ref())),
+        CheckedTypeKind::Integer(integer_type) => Some((*integer_type, ty.validation.as_ref())),
         _ => None,
     }
 }
@@ -202,16 +196,16 @@ fn effective_integer_max(limit: IntegerLimit) -> i128 {
     }
 }
 
-fn is_unconstrained_bool_branch(ty: &ValidatedType) -> bool {
-    matches!(ty.kind, ValidatedTypeKind::Bool) && ty.validation.is_none()
+fn is_unconstrained_bool_branch(ty: &CheckedType) -> bool {
+    matches!(ty.kind, CheckedTypeKind::Bool) && ty.validation.is_none()
 }
 
-fn is_inline_bool_branch(ty: &ValidatedType) -> bool {
-    matches!(ty.kind, ValidatedTypeKind::Bool)
+fn is_inline_bool_branch(ty: &CheckedType) -> bool {
+    matches!(ty.kind, CheckedTypeKind::Bool)
 }
 
-pub(in crate::parse) fn inline_union_enum_variant_name(ty: &ValidatedType) -> Option<String> {
-    let ValidatedTypeKind::Enum(enum_) = &ty.kind else {
+pub(in crate::parse) fn inline_union_enum_variant_name(ty: &CheckedType) -> Option<String> {
+    let CheckedTypeKind::Enum(enum_) = &ty.kind else {
         return None;
     };
     if enum_.variants.len() == 1 {
@@ -225,7 +219,7 @@ pub(in crate::parse) fn inline_union_enum_variant_name(ty: &ValidatedType) -> Op
 }
 
 pub(in crate::parse) fn reject_any_of_cycles(
-    components: &[ValidatedComponent],
+    components: &[CheckedComponent],
 ) -> Result<(), ValidationError> {
     let components = components
         .iter()
@@ -262,82 +256,82 @@ pub(in crate::parse) fn reject_any_of_cycles(
     Ok(())
 }
 
-fn component_contains_union(component: &ValidatedComponent) -> bool {
+fn component_contains_union(component: &CheckedComponent) -> bool {
     match &component.kind {
-        ValidatedComponentKind::Reference(_) => false,
-        ValidatedComponentKind::Struct(fields) => fields
+        CheckedComponentKind::Reference(_) => false,
+        CheckedComponentKind::Struct(fields) => fields
             .iter()
             .any(|field| field.value.ty().contains_any_of()),
-        ValidatedComponentKind::Type(ty) => ty.contains_any_of(),
+        CheckedComponentKind::Type(ty) => ty.contains_any_of(),
     }
 }
 
 fn collect_component_union_targets(
-    component: &ValidatedComponent,
+    component: &CheckedComponent,
     schemas_by_rust_name: &BTreeMap<String, String>,
     targets: &mut Vec<String>,
 ) {
     match &component.kind {
-        ValidatedComponentKind::Reference(rust_name) => {
+        CheckedComponentKind::Reference(rust_name) => {
             if let Some(schema_name) = schemas_by_rust_name.get(rust_name) {
                 targets.push(schema_name.clone());
             }
         }
-        ValidatedComponentKind::Struct(fields) => {
+        CheckedComponentKind::Struct(fields) => {
             for field in fields {
                 collect_type_union_targets(field.value.ty(), schemas_by_rust_name, targets);
             }
         }
-        ValidatedComponentKind::Type(ty) => {
+        CheckedComponentKind::Type(ty) => {
             collect_type_union_targets(ty, schemas_by_rust_name, targets);
         }
     }
 }
 
 fn collect_type_union_targets(
-    ty: &ValidatedType,
+    ty: &CheckedType,
     schemas_by_rust_name: &BTreeMap<String, String>,
     targets: &mut Vec<String>,
 ) {
     match &ty.kind {
-        ValidatedTypeKind::AnyOf(union) => {
+        CheckedTypeKind::AnyOf(union) => {
             for variant in &union.variants {
                 match &variant.kind {
-                    ValidatedUnionVariantKind::Reference { schema_name, .. } => {
+                    CheckedUnionVariantKind::Reference { schema_name, .. } => {
                         targets.push(schema_name.clone());
                     }
-                    ValidatedUnionVariantKind::Inline(ty) => {
+                    CheckedUnionVariantKind::Inline(ty) => {
                         collect_type_union_targets(ty, schemas_by_rust_name, targets);
                     }
                 }
             }
         }
-        ValidatedTypeKind::Array(item) | ValidatedTypeKind::Map(item) => {
+        CheckedTypeKind::Array(item) | CheckedTypeKind::Map(item) => {
             collect_type_union_targets(item, schemas_by_rust_name, targets);
         }
-        ValidatedTypeKind::InlineStruct(fields) => {
+        CheckedTypeKind::InlineStruct(fields) => {
             for field in fields {
                 collect_type_union_targets(field.value.ty(), schemas_by_rust_name, targets);
             }
         }
-        ValidatedTypeKind::Named(rust_name) => {
+        CheckedTypeKind::Named(rust_name) => {
             if let Some(schema_name) = schemas_by_rust_name.get(rust_name) {
                 targets.push(schema_name.clone());
             }
         }
-        // Keep these arms explicit so future ValidatedTypeKind variants force a
+        // Keep these arms explicit so future CheckedTypeKind variants force a
         // decision about whether they can contain component references.
-        ValidatedTypeKind::String
-        | ValidatedTypeKind::ParsedString(_)
-        | ValidatedTypeKind::Coordinates(_)
-        | ValidatedTypeKind::ParsedInteger(_)
-        | ValidatedTypeKind::Integer(_)
-        | ValidatedTypeKind::F32
-        | ValidatedTypeKind::F64
-        | ValidatedTypeKind::Bool
-        | ValidatedTypeKind::JsonValue
-        | ValidatedTypeKind::Enum(_)
-        | ValidatedTypeKind::Range(_) => {}
+        CheckedTypeKind::String
+        | CheckedTypeKind::ParsedString(_)
+        | CheckedTypeKind::Coordinates(_)
+        | CheckedTypeKind::ParsedInteger(_)
+        | CheckedTypeKind::Integer(_)
+        | CheckedTypeKind::F32
+        | CheckedTypeKind::F64
+        | CheckedTypeKind::Bool
+        | CheckedTypeKind::JsonValue
+        | CheckedTypeKind::Enum(_)
+        | CheckedTypeKind::Range(_) => {}
     }
 }
 
@@ -376,8 +370,8 @@ fn visit_any_of_cycle(
 }
 
 pub(in crate::parse) fn validate_coordinate_uses(
-    components: &[ValidatedComponent],
-    operations: &[ValidatedOperation],
+    components: &[CheckedComponent],
+    operations: &[CheckedOperation],
 ) -> Result<(), ValidationError> {
     let by_name = components
         .iter()
@@ -428,36 +422,36 @@ pub(in crate::parse) fn validate_coordinate_uses(
 }
 
 fn check_coordinate_component(
-    component: &ValidatedComponent,
+    component: &CheckedComponent,
     field_codec: bool,
     context: &str,
-    components: &BTreeMap<String, &ValidatedComponent>,
+    components: &BTreeMap<String, &CheckedComponent>,
     visited: &mut BTreeSet<(String, bool)>,
 ) -> Result<(), ValidationError> {
     if !visited.insert((component.schema_name.clone(), field_codec)) {
         return Ok(());
     }
     match &component.kind {
-        ValidatedComponentKind::Reference(name) => check_coordinate_type(
-            &ValidatedType::named(name.clone()),
+        CheckedComponentKind::Reference(name) => check_coordinate_type(
+            &CheckedType::named(name.clone()),
             field_codec,
             context,
             components,
             visited,
         ),
-        ValidatedComponentKind::Type(ty) => {
+        CheckedComponentKind::Type(ty) => {
             check_coordinate_type(ty, field_codec, context, components, visited)
         }
-        ValidatedComponentKind::Struct(fields) => {
+        CheckedComponentKind::Struct(fields) => {
             check_coordinate_fields(fields, context, components, visited)
         }
     }
 }
 
 fn check_coordinate_fields(
-    fields: &[ValidatedField],
+    fields: &[CheckedField],
     context: &str,
-    components: &BTreeMap<String, &ValidatedComponent>,
+    components: &BTreeMap<String, &CheckedComponent>,
     visited: &mut BTreeSet<(String, bool)>,
 ) -> Result<(), ValidationError> {
     for field in fields {
@@ -473,47 +467,47 @@ fn check_coordinate_fields(
 }
 
 fn check_coordinate_type(
-    ty: &ValidatedType,
+    ty: &CheckedType,
     field_codec: bool,
     context: &str,
-    components: &BTreeMap<String, &ValidatedComponent>,
+    components: &BTreeMap<String, &CheckedComponent>,
     visited: &mut BTreeSet<(String, bool)>,
 ) -> Result<(), ValidationError> {
     match &ty.kind {
-        ValidatedTypeKind::Coordinates(_) if !field_codec => {
+        CheckedTypeKind::Coordinates(_) if !field_codec => {
             Err(ValidationError::SatayCoordinatesRequireStructField {
                 context: context.to_owned(),
             })
         }
-        ValidatedTypeKind::Named(name) => {
+        CheckedTypeKind::Named(name) => {
             if let Some(component) = components.get(name) {
                 check_coordinate_component(component, field_codec, context, components, visited)?;
             }
             Ok(())
         }
-        ValidatedTypeKind::Array(item) | ValidatedTypeKind::Map(item) => {
+        CheckedTypeKind::Array(item) | CheckedTypeKind::Map(item) => {
             check_coordinate_type(item, false, context, components, visited)
         }
-        ValidatedTypeKind::AnyOf(union) => {
+        CheckedTypeKind::AnyOf(union) => {
             for variant in &union.variants {
                 match &variant.kind {
-                    ValidatedUnionVariantKind::Reference { type_name, .. } => {
+                    CheckedUnionVariantKind::Reference { type_name, .. } => {
                         check_coordinate_type(
-                            &ValidatedType::named(type_name.clone()),
+                            &CheckedType::named(type_name.clone()),
                             false,
                             context,
                             components,
                             visited,
                         )?;
                     }
-                    ValidatedUnionVariantKind::Inline(ty) => {
+                    CheckedUnionVariantKind::Inline(ty) => {
                         check_coordinate_type(ty, false, context, components, visited)?;
                     }
                 }
             }
             Ok(())
         }
-        ValidatedTypeKind::InlineStruct(fields) => {
+        CheckedTypeKind::InlineStruct(fields) => {
             check_coordinate_fields(fields, context, components, visited)
         }
         _ => Ok(()),
@@ -522,7 +516,7 @@ fn check_coordinate_type(
 
 pub(in crate::parse) fn validate_rust_field_identifier_collisions(
     context: &str,
-    fields: &[ValidatedField],
+    fields: &[CheckedField],
 ) -> Result<(), ValidationError> {
     let mut normalized = BTreeMap::<String, (String, bool)>::new();
     let mut generated = BTreeMap::<String, String>::new();
@@ -533,7 +527,7 @@ pub(in crate::parse) fn validate_rust_field_identifier_collisions(
         let identifier = field
             .identifier
             .as_ref()
-            .map(|identifier| identifier.words().join("-"))
+            .map(|identifier| identifier.join("-"))
             .unwrap_or_else(|| field.wire_name.clone());
         let candidate = field_ident(&identifier);
 
@@ -620,11 +614,11 @@ pub(in crate::parse) fn validated_enum(
 }
 pub(in crate::parse) fn parse_parameter_default(
     value: &JsonValue,
-    ty: &ValidatedType,
+    ty: &CheckedType,
     wire_name: &str,
 ) -> Result<ParameterDefault, ValidationError> {
     match &ty.kind {
-        ValidatedTypeKind::String => Ok(ParameterDefault::String(
+        CheckedTypeKind::String => Ok(ParameterDefault::String(
             value
                 .as_str()
                 .ok_or_else(|| {
@@ -632,37 +626,37 @@ pub(in crate::parse) fn parse_parameter_default(
                 })?
                 .to_owned(),
         )),
-        ValidatedTypeKind::Integer(integer_type) => {
+        CheckedTypeKind::Integer(integer_type) => {
             parse_integer_parameter_default(value, *integer_type, wire_name)
         }
-        ValidatedTypeKind::F32 => parse_number_parameter_default(value, true, wire_name),
-        ValidatedTypeKind::F64 => parse_number_parameter_default(value, false, wire_name),
-        ValidatedTypeKind::Bool => Ok(ParameterDefault::Bool(value.as_bool().ok_or_else(
+        CheckedTypeKind::F32 => parse_number_parameter_default(value, true, wire_name),
+        CheckedTypeKind::F64 => parse_number_parameter_default(value, false, wire_name),
+        CheckedTypeKind::Bool => Ok(ParameterDefault::Bool(value.as_bool().ok_or_else(
             || invalid_parameter_default(wire_name, value, "expected a JSON boolean"),
         )?)),
-        ValidatedTypeKind::Enum(enum_) => parse_enum_parameter_default(value, enum_, wire_name),
-        ValidatedTypeKind::ParsedString(_)
-        | ValidatedTypeKind::Coordinates(_)
-        | ValidatedTypeKind::ParsedInteger(_) => Err(invalid_parameter_default(
+        CheckedTypeKind::Enum(enum_) => parse_enum_parameter_default(value, enum_, wire_name),
+        CheckedTypeKind::ParsedString(_)
+        | CheckedTypeKind::Coordinates(_)
+        | CheckedTypeKind::ParsedInteger(_) => Err(invalid_parameter_default(
             wire_name,
             value,
             "defaults for x-satay parsed parameters are not supported",
         )),
-        ValidatedTypeKind::Array(_) => Err(invalid_parameter_default(
+        CheckedTypeKind::Array(_) => Err(invalid_parameter_default(
             wire_name,
             value,
             "array parameter defaults are not supported",
         )),
-        ValidatedTypeKind::Range(_) => Err(invalid_parameter_default(
+        CheckedTypeKind::Range(_) => Err(invalid_parameter_default(
             wire_name,
             value,
             "range parameter defaults are not supported",
         )),
-        ValidatedTypeKind::Named(_)
-        | ValidatedTypeKind::Map(_)
-        | ValidatedTypeKind::JsonValue
-        | ValidatedTypeKind::AnyOf(_)
-        | ValidatedTypeKind::InlineStruct(_) => Err(invalid_parameter_default(
+        CheckedTypeKind::Named(_)
+        | CheckedTypeKind::Map(_)
+        | CheckedTypeKind::JsonValue
+        | CheckedTypeKind::AnyOf(_)
+        | CheckedTypeKind::InlineStruct(_) => Err(invalid_parameter_default(
             wire_name,
             value,
             "default is not supported for this parameter type",

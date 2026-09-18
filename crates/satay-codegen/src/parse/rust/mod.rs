@@ -1,8 +1,6 @@
-//! Rust validation and lowering. The semantic entry is staged privately.
-#[cfg(test)]
+//! Rust validation and lowering from the owned semantic contract.
 use crate::model;
-pub(in crate::parse) mod constraint;
-#[cfg(test)]
+mod constraint;
 #[derive(Debug, thiserror::Error)]
 pub(in crate::parse) enum LowerError {
     #[error(transparent)]
@@ -10,28 +8,17 @@ pub(in crate::parse) enum LowerError {
     #[error(transparent)]
     Frontend(#[from] satay_ir::Diagnostic),
 }
-#[cfg(test)]
+mod checked;
+mod lower;
 mod operation;
-pub(in crate::parse) mod policy;
-#[cfg(test)]
+mod policy;
+mod registry;
 mod schema;
 #[cfg(test)]
 mod tests;
 
-/// Private parity entry. The complete source input is the semantic contract.
-#[cfg(test)]
-pub(in crate::parse) fn lower_api(
-    api: &satay_ir::Api,
-    options: crate::GenerateOptions,
-) -> Result<Vec<crate::GeneratedFile>, LowerError> {
-    use crate::render;
-    Ok(render::render_api(&lower_model(api)?, options))
-}
-
 /// Produces the existing Rust model without consulting frontend state.
-#[cfg(test)]
-fn lower_model(api: &satay_ir::Api) -> Result<model::Api, LowerError> {
-    use crate::parse::lower;
+pub(in crate::parse) fn lower_model(api: &satay_ir::Api) -> Result<model::Api, LowerError> {
     let mut schemas = schema::Schemas::new(api);
     let components = schemas.components()?;
     policy::reject_any_of_cycles(&components)?;

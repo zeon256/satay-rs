@@ -18,21 +18,21 @@ use satay_ir::{
 };
 use serde_json::Value as JsonValue;
 
+use super::checks::{
+    annotation_only_all_of_ref_wrapper, reject_all_of_object_branch_keywords,
+    reject_all_of_sibling_keywords, reject_any_of_sibling_keywords,
+    reject_discriminator_union_sibling_keywords, reject_plain_one_of_sibling_keywords,
+    reject_preserved_unknown_keywords, unsupported_reference_schema_keyword, validate_enum_shape,
+};
 use super::constraint::{array_constraints, numeric_constraints, string_constraints};
 use super::interpretation::InterpretedUse;
 use super::source::{child_pointer, source_ref};
 use super::{NormalizeContext, NormalizeError, ValidationErrorExt};
 use crate::error::ValidationError;
 use crate::parse::helpers::optional_description;
+use crate::parse::helpers::reject_keyword;
 use crate::parse::reference::{schema_component_ref, schema_type_and_nullable};
 use crate::parse::satay::schema_options;
-use crate::parse::validate::constraint::reject_keyword;
-use crate::parse::validate::schema::{
-    annotation_only_all_of_ref_wrapper, reject_all_of_object_branch_keywords,
-    reject_all_of_sibling_keywords, reject_any_of_sibling_keywords,
-    reject_discriminator_union_sibling_keywords, reject_plain_one_of_sibling_keywords,
-    reject_preserved_unknown_keywords, unsupported_reference_schema_keyword, validate_enum_shape,
-};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum SchemaPosition {

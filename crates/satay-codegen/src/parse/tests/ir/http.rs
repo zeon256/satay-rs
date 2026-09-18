@@ -2,7 +2,6 @@ use super::{definition, normalize, object, string};
 use crate::error::ValidationError;
 use crate::model::TypeRef;
 use crate::parse::normalize::{self, NormalizeError, normalize_spec};
-use crate::parse::parity;
 use crate::parse::tests::parse_valid;
 use satay_ir::{
     AdditionalProperties, ApiKeyLocation, CompositionKind, HttpMethod, OAuthFlowKind,
@@ -1221,7 +1220,7 @@ paths:
         ValidationError::UnsupportedKeyword { keyword, .. } if keyword == "unevaluatedProperties"
     ));
 
-    parity::assert_generation(spec);
+    crate::generate(spec).expect("compatibility input generates");
     let legacy = parse_valid(spec);
     assert_eq!(
         legacy.operations[0].responses[0].body,
@@ -1236,7 +1235,7 @@ paths:
         "responses":{},
     }));
 
-    parity::assert_generation(&request);
+    crate::generate(&request).expect("compatibility input generates");
     assert!(matches!(
         validation_error(
             &request,
@@ -1448,7 +1447,7 @@ components:
     Hop: {$ref: '#/components/securitySchemes/Bad~1~0'}
     'Bad/~': {type: apiKey, name: secret, in: body}
 "#;
-    parity::assert_generation(spec);
+    crate::generate(spec).expect("compatibility input generates");
     let staged = normalize::normalize_for_rust(spec, "test.yaml").unwrap();
     for scheme in &staged.http().security_schemes {
         assert!(matches!(&scheme.kind, SecuritySchemeKind::ApiKey {

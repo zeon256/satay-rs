@@ -5,7 +5,7 @@ use crate::parse::tests::{INLINE_CONSTRAINED_ENUM_RANGE, parse_valid};
 use super::{definition, normalize, object, string};
 
 fn fixture(spec: &str) -> satay_ir::Api {
-    // The legacy parser is an independent oracle, never a normalization prerequisite.
+    // Verify Rust acceptance separately from the semantic assertions below.
     parse_valid(spec);
     normalize(spec)
 }

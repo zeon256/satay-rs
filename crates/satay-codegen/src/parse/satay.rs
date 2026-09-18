@@ -1,21 +1,16 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use oas3::spec::{
-    ObjectSchema as OasObjectSchema, Operation as OasOperation, SchemaType as OasSchemaType,
-    SpecificationExtensions,
+    ObjectSchema as OasObjectSchema, Operation as OasOperation, SpecificationExtensions,
 };
 use serde::Deserialize;
 
-use super::reference::schema_type_wire;
-use super::validate::constraint::parse_integer_type;
 use crate::error::ValidationError;
-use crate::ident::variant_ident;
-use crate::model::{IntegerType, ParseAs, RangeScalar};
 
 /// Typed schema-level `x-satay` wire options.
 ///
 /// Compatibility between these fields and the surrounding OpenAPI schema is
-/// validated in `parse/validate/satay.rs`. This type only defines the wire
+/// validated during semantic normalization. This type only defines the wire
 /// contract and rejects unknown fields.
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
@@ -58,10 +53,6 @@ pub(super) fn coordinate_target_reference(schema: &OasObjectSchema) -> Option<&s
 pub(crate) struct SatayIdentifier(Vec<String>);
 
 impl SatayIdentifier {
-    #[cfg(test)]
-    pub(in crate::parse) fn from_words(words: Vec<String>) -> Self {
-        Self(words)
-    }
     pub(crate) fn words(&self) -> &[String] {
         &self.0
     }
@@ -157,36 +148,6 @@ pub(crate) enum SatayParseAsWire {
     Coordinates,
 }
 
-impl SatayParseAsWire {
-    pub(super) fn into_parse_as(self) -> Option<ParseAs> {
-        Some(match self {
-            Self::U8 => ParseAs::U8,
-            Self::U16 => ParseAs::U16,
-            Self::U32 => ParseAs::U32,
-            Self::U64 => ParseAs::U64,
-            Self::I8 => ParseAs::I8,
-            Self::I16 => ParseAs::I16,
-            Self::I32 => ParseAs::I32,
-            Self::I64 => ParseAs::I64,
-            Self::F32 => ParseAs::F32,
-            Self::F64 => ParseAs::F64,
-            Self::Bool => ParseAs::Bool,
-            Self::Date => ParseAs::Date,
-            Self::NaiveDatetime => ParseAs::NaiveDateTime,
-            Self::OffsetDatetime => ParseAs::OffsetDateTime,
-            Self::Time => ParseAs::Time,
-            Self::IntegerRange => ParseAs::IntegerRange,
-            Self::NumberRange => ParseAs::NumberRange,
-            Self::Coordinates => return None,
-        })
-    }
-
-    pub(super) fn wire_name(self) -> &'static str {
-        self.into_parse_as()
-            .map_or("coordinates", satay_parse_as_wire)
-    }
-}
-
 /// Wire values for `x-satay.integer-type`. `Auto` asks codegen to infer the
 /// integer type from the schema.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -201,24 +162,6 @@ pub(crate) enum SatayIntegerTypeWire {
     I32,
     I64,
     Auto,
-}
-
-impl SatayIntegerTypeWire {
-    pub(super) fn into_integer_type(self) -> IntegerType {
-        match self {
-            Self::U8 => IntegerType::U8,
-            Self::U16 => IntegerType::U16,
-            Self::U32 => IntegerType::U32,
-            Self::U64 => IntegerType::U64,
-            Self::I8 => IntegerType::I8,
-            Self::I16 => IntegerType::I16,
-            Self::I32 => IntegerType::I32,
-            Self::I64 => IntegerType::I64,
-            Self::Auto => {
-                unreachable!("`auto` is handled before reaching `into_integer_type`")
-            }
-        }
-    }
 }
 
 /// Reads a schema-level `x-satay` extension through the vendor-neutral typed
@@ -241,138 +184,6 @@ pub(crate) fn operation_options(
     operation
         .extension_as::<SatayOperationOptions>("x-satay")
         .map_err(|source| ValidationError::extension_error(context, source))
-}
-
-pub(super) fn parse_satay_enum_variants(
-    mappings: Option<&BTreeMap<String, String>>,
-    context: &str,
-    enum_values: &BTreeSet<String>,
-) -> Result<BTreeMap<String, String>, ValidationError> {
-    let Some(mappings) = mappings else {
-        return Ok(BTreeMap::new());
-    };
-
-    let mut explicit = BTreeMap::new();
-    let mut explicit_names = BTreeSet::new();
-
-    for (wire_name, rust_name) in mappings {
-        if !enum_values.contains(wire_name) {
-            return Err(ValidationError::UnknownSatayEnumVariantValue {
-                context: context.to_owned(),
-                wire_name: wire_name.clone(),
-            });
-        }
-
-        let rust_name = variant_ident(rust_name);
-        if !explicit_names.insert(rust_name.clone()) {
-            return Err(ValidationError::DuplicateSatayEnumVariantName {
-                context: context.to_owned(),
-                rust_name,
-            });
-        }
-        explicit.insert(wire_name.clone(), rust_name);
-    }
-
-    Ok(explicit)
-}
-
-pub(super) fn validate_satay_integer_type(
-    schema_type: Option<OasSchemaType>,
-    parse_as: Option<ParseAs>,
-    integer_type: Option<SatayIntegerTypeWire>,
-    context: &str,
-) -> Result<(), ValidationError> {
-    let Some(integer_type) = integer_type else {
-        return Ok(());
-    };
-
-    if schema_type == Some(OasSchemaType::Integer) && parse_as == Some(ParseAs::Bool) {
-        return Err(ValidationError::SatayParseAsBoolWithIntegerType {
-            context: context.to_owned(),
-            integer_type: satay_integer_type_wire(integer_type).to_owned(),
-        });
-    }
-
-    let allowed = schema_type == Some(OasSchemaType::Integer)
-        || matches!(
-            (schema_type, parse_as),
-            (Some(OasSchemaType::String), Some(ParseAs::IntegerRange))
-        );
-
-    if allowed {
-        return Ok(());
-    }
-
-    Err(ValidationError::SatayIntegerTypeRequiresInteger {
-        context: context.to_owned(),
-        integer_type: satay_integer_type_wire(integer_type).to_owned(),
-        kind: schema_type
-            .map(schema_type_wire)
-            .unwrap_or("missing")
-            .to_owned(),
-    })
-}
-
-pub(super) fn parse_range_scalar(
-    schema: &OasObjectSchema,
-    parse_as: ParseAs,
-    integer_type: Option<IntegerType>,
-    context: &str,
-) -> Result<RangeScalar, ValidationError> {
-    match parse_as {
-        ParseAs::IntegerRange => Ok(RangeScalar::Integer(parse_integer_type(
-            schema,
-            context,
-            integer_type,
-        )?)),
-        ParseAs::NumberRange => match schema.format.as_deref() {
-            Some("float") => Ok(RangeScalar::F32),
-            Some("double") | None => Ok(RangeScalar::F64),
-            Some(format) => Err(ValidationError::UnsupportedNumberFormat {
-                context: context.to_owned(),
-                format: format.to_owned(),
-            }),
-        },
-        _ => unreachable!("range scalar requires a range parse-as value"),
-    }
-}
-
-pub(super) fn satay_parse_as_wire(parse_as: ParseAs) -> &'static str {
-    match parse_as {
-        ParseAs::U8 => "u8",
-        ParseAs::U16 => "u16",
-        ParseAs::U32 => "u32",
-        ParseAs::U64 => "u64",
-        ParseAs::I8 => "i8",
-        ParseAs::I16 => "i16",
-        ParseAs::I32 => "i32",
-        ParseAs::I64 => "i64",
-        ParseAs::F32 => "f32",
-        ParseAs::F64 => "f64",
-        ParseAs::Bool => "bool",
-        ParseAs::Url => "url",
-        ParseAs::Date => "date",
-        ParseAs::NaiveDateTime => "naive-datetime",
-        ParseAs::OffsetDateTime => "offset-datetime",
-        ParseAs::UnixTime => "unixtime",
-        ParseAs::Time => "time",
-        ParseAs::IntegerRange => "integer-range",
-        ParseAs::NumberRange => "number-range",
-    }
-}
-
-fn satay_integer_type_wire(integer_type: SatayIntegerTypeWire) -> &'static str {
-    match integer_type {
-        SatayIntegerTypeWire::U8 => "u8",
-        SatayIntegerTypeWire::U16 => "u16",
-        SatayIntegerTypeWire::U32 => "u32",
-        SatayIntegerTypeWire::U64 => "u64",
-        SatayIntegerTypeWire::I8 => "i8",
-        SatayIntegerTypeWire::I16 => "i16",
-        SatayIntegerTypeWire::I32 => "i32",
-        SatayIntegerTypeWire::I64 => "i64",
-        SatayIntegerTypeWire::Auto => "auto",
-    }
 }
 
 #[cfg(test)]
@@ -421,16 +232,8 @@ mod tests {
             .expect("valid extension")
             .expect("present extension");
 
-        assert_eq!(
-            options.parse_as.and_then(SatayParseAsWire::into_parse_as),
-            Some(ParseAs::U32)
-        );
-        assert_eq!(
-            options
-                .integer_type
-                .map(SatayIntegerTypeWire::into_integer_type),
-            Some(IntegerType::U16)
-        );
+        assert_eq!(options.parse_as, Some(SatayParseAsWire::U32));
+        assert_eq!(options.integer_type, Some(SatayIntegerTypeWire::U16));
         assert_eq!(options.treat_error_as_none, Some(true));
         assert_eq!(options.none_if, Some(vec![String::new(), "-".to_owned()]));
         assert_eq!(
@@ -461,10 +264,6 @@ mod tests {
             .expect("present extension");
 
         assert_eq!(auto_options.integer_type, Some(SatayIntegerTypeWire::Auto));
-        assert_eq!(
-            auto_options.integer_type.map(satay_integer_type_wire),
-            Some("auto")
-        );
 
         let absent_schema = schema_with_satay(json!({}));
         let absent_options = schema_options(&absent_schema, "schema `Count`")

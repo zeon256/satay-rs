@@ -6,7 +6,7 @@ use oas3::spec::ObjectSchema as OasObjectSchema;
 use serde_json::Number;
 
 use crate::error::ValidationError;
-use crate::parse::rust::constraint::{json_integer, reject_keyword};
+use crate::parse::helpers::{json_integer, reject_keyword};
 
 use satay_ir::{ArrayConstraints, NumericBound, NumericConstraints, StringConstraints};
 

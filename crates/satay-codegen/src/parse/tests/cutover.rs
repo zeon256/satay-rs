@@ -1,17 +1,30 @@
-use super::codegen;
+use super::parse_invalid;
+use crate::model::TypeRef;
+use crate::{Error, ValidationError};
 
 #[test]
 fn deferred_extension_errors_retain_their_payloads() {
-    for extension in [
-        "{parse-as: 42}",
-        "{none-if: false}",
-        "{integer-type: nope}",
-        "{ignore: [true]}",
+    for (extension, option) in [
+        ("{parse-as: 42}", "parse-as"),
+        ("{none-if: false}", "none-if"),
+        ("{integer-type: nope}", "integer-type"),
+        ("{ignore: [true]}", "ignore"),
     ] {
         let spec = format!(
             "openapi: 3.1.0\ninfo: {{title: Errors, version: '1'}}\npaths: {{}}\ncomponents:\n  schemas:\n    Record:\n      type: object\n      properties:\n        value: {{type: string, x-satay: {extension}}}\n"
         );
-        assert!(codegen::generate(&spec).is_err());
+        let ValidationError::InvalidExtension {
+            context,
+            path,
+            source,
+        } = parse_invalid(&spec)
+        else {
+            panic!("expected a typed extension error")
+        };
+        assert_eq!(context, "property `Record.value`");
+        assert_eq!(path, format!("x-satay.{option}"));
+        assert!(source.is_data());
+        assert_eq!((source.line(), source.column()), (0, 0));
     }
 }
 
@@ -20,7 +33,7 @@ fn first_error_follows_legacy_encounter_order() {
     let rust_error = "{type: integer, format: custom}";
     let semantic_error = "{type: string, minLength: 5, maxLength: 2}";
     for (first, second) in [(rust_error, semantic_error), (semantic_error, rust_error)] {
-        for body in [
+        for (index, body) in [
             format!(
                 "paths: {{}}\ncomponents:\n  schemas:\n    First: {first}\n    Second: {second}"
             ),
@@ -36,25 +49,51 @@ fn first_error_follows_legacy_encounter_order() {
             format!(
                 "paths:\n  /first:\n    get:\n      responses:\n        '200':\n          description: first\n          content:\n            application/json:\n              schema: {first}\n        '201':\n          description: second\n          content:\n            application/json:\n              schema: {second}"
             ),
-        ] {
+        ].into_iter().enumerate() {
             let spec = format!("openapi: 3.1.0\ninfo: {{title: Order, version: '1'}}\n{body}\n");
-            assert!(codegen::generate(&spec).is_err());
+            let context = [
+                "schema `First`",
+                "property `Record.first`",
+                "parameter `first`",
+                "operation `post_first` requestBody",
+                "operation `get_first` responses 200 schema",
+            ][index];
+            let expected = if first == rust_error {
+                ValidationError::UnsupportedIntegerFormat { context: context.to_owned(), format: "custom".to_owned() }
+            } else {
+                ValidationError::InvalidStringLengthBounds { context: context.to_owned(), min_length: 5, max_length: 2 }
+            };
+            let actual = parse_invalid(&spec);
+            assert_eq!(format!("{actual:?}"), format!("{expected:?}"));
+            assert_eq!(actual.to_string(), expected.to_string());
         }
     }
     // Resolution still wins over version checking, even in skipped operations.
-    assert!(codegen::generate("openapi: 3.0.3\ninfo: {title: Order, version: '1'}\npaths:\n  /skip:\n    get:\n      x-satay: {skip: true}\n      responses:\n        '200': {$ref: '#/components/responses/Missing'}\n").is_err());
-    for spec in [
-        "not: [valid",
-        "openapi: 3.1.0\ninfo: {title: Order, version: '1'}\n",
-        "{}",
-    ] {
-        assert!(codegen::generate(spec).is_err());
+    let error = parse_invalid(
+        "openapi: 3.0.3\ninfo: {title: Order, version: '1'}\npaths:\n  /skip:\n    get:\n      x-satay: {skip: true}\n      responses:\n        '200': {$ref: '#/components/responses/Missing'}\n",
+    );
+    let ValidationError::ResolveReference {
+        reference, source, ..
+    } = error
+    else {
+        panic!("resolution must precede version checking")
+    };
+    assert_eq!(reference, "#/components/responses/Missing");
+    assert!(
+        matches!(*source, ValidationError::MissingJsonPointerToken { token } if token == "Missing")
+    );
+    assert!(matches!(
+        parse_invalid("openapi: 3.1.0\ninfo: {title: Order, version: '1'}\n"),
+        ValidationError::MissingPaths
+    ));
+    for spec in ["not: [valid", "{}"] {
+        let error = crate::generate(spec).unwrap_err();
+        assert!(matches!(error, Error::Parse(_)), "{spec}: {error:?}");
     }
 }
 
 #[test]
 fn deferred_diagnostics_restore_nested_payloads_without_parsing_messages() {
-    use crate::ValidationError;
     use crate::parse::diagnostic;
     let source = serde_json::from_value::<bool>(serde_json::json!("not a boolean")).unwrap_err();
     let original = ValidationError::ResolveReference {
@@ -106,6 +145,11 @@ paths:
               schema: {{type: object, {wrapper_extra} properties: {{value: {{type: string}}}}}}
 "#
         );
-        codegen::generate(&spec).unwrap();
+        crate::generate(&spec).unwrap();
+        let api = super::parse_valid(&spec);
+        assert!(matches!(
+            &api.operations[0].responses[0].body,
+            Some(TypeRef::Option(inner)) if matches!(**inner, TypeRef::String)
+        ));
     }
 }
