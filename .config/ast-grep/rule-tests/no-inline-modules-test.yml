@@ -1,0 +1,11 @@
+id: no-inline-modules
+valid:
+  - 'pub mod serde_string { pub fn serialize() {} }'
+  - '#[cfg(test)] mod tests;'
+invalid:
+  - '#[cfg(test)] mod tests { #[test] fn catches() {} }'
+  - |
+    mod checks {
+        #[tokio::test]
+        async fn catches_async() {}
+    }

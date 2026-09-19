@@ -240,9 +240,30 @@ jobs:
           cargo run -p satay-storage --example bumpalo
           cargo run -p satay-storage --example hash_map
 
+  ast-grep:
+    name: AST Grep Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - name: Install ast-grep
+        env:
+          AST_GREP_VERSION: 0.44.0
+        run: |
+          set -euo pipefail
+
+          curl -sSfL \
+            "https://github.com/ast-grep/ast-grep/releases/download/${AST_GREP_VERSION}/app-x86_64-unknown-linux-gnu.zip" \
+            -o "$RUNNER_TEMP/ast-grep.zip"
+          unzip -q "$RUNNER_TEMP/ast-grep.zip" -d "$RUNNER_TEMP/ast-grep"
+          echo "$RUNNER_TEMP/ast-grep" >> "$GITHUB_PATH"
+      - name: Test rules
+        run: ast-grep test --skip-snapshot-tests
+      - name: Scan
+        run: ast-grep scan
+
   result:
     name: QC Result
-    needs: [changes, fmt, clippy, check, dylint, storage-no-std, test]
+    needs: [changes, fmt, clippy, check, dylint, storage-no-std, test, ast-grep]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -256,6 +277,7 @@ jobs:
             ${{ needs.dylint.result }}
             ${{ needs.storage-no-std.result }}
             ${{ needs.test.result }}
+            ${{ needs.ast-grep.result }}
         run: |
           set -euo pipefail
 
