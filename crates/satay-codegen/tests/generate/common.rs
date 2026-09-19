@@ -235,6 +235,12 @@ pub fn write_generated_files(generated_dir: &Path, files: &[GeneratedFile]) {
     }
 }
 
+pub const TEST_CRATE_LIB: &str = "pub mod generated;\n\n#[cfg(test)]\nmod tests;\n";
+
+pub fn write_fixture_tests(crate_dir: &Path, tests: &str) {
+    fs::write(crate_dir.join("src/tests.rs"), tests).expect("write fixture tests");
+}
+
 pub fn toml_string(value: &str) -> String {
     let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
     format!("\"{escaped}\"")

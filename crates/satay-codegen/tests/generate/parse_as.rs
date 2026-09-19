@@ -82,41 +82,13 @@ components:
     let runtime_path = runtime_path_toml();
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::BusServiceArrival;
-
-    #[test]
-    fn valid_nested_bus_is_some_and_invalid_buses_are_none() {
-        let service: BusServiceArrival = serde_json::from_str(
-            r#"{
-                "NextBus": {
-                    "OriginCode": "12345",
-                    "EstimatedArrival": "2024-08-14T16:41:48+08:00"
-                },
-                "NextBus2": {},
-                "NextBus3": {
-                    "OriginCode": "",
-                    "EstimatedArrival": ""
-                }
-            }"#,
-        )
-        .unwrap();
-
-        assert!(service.next_bus.is_some());
-        assert_eq!(service.next_bus.as_ref().unwrap().origin_code, 12345);
-        assert_eq!(service.next_bus2, None);
-        assert_eq!(service.next_bus3, None);
-
-        let encoded = serde_json::to_value(service).unwrap();
-        assert!(encoded.get("NextBus").is_some());
-        assert!(encoded.get("NextBus2").is_none());
-        assert!(encoded.get("NextBus3").is_none());
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/parse_as/referenced_treat_error_as_none_fields_decode_lossily/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(
@@ -288,66 +260,13 @@ components:
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn decodes_and_encodes_string_backed_values() {
-        let parts = operations::get_reading::get_reading_parts(GetReadingInput::new(42))
-            .expect("request parts");
-        assert_eq!(parts.uri, "/readings?readingId=42");
-
-        let response = satay_runtime::ResponseParts {
-            status: http::StatusCode::OK,
-            headers: http::HeaderMap::new(),
-            body: br#"{"id":"42","value":"1.25","count":"7","monitored":0,"seenAt":"2024-08-14T16:41:48+08:00","startsAt":"0620","noServiceAt":"","aliasId":"42","frequency":"14-17","tolerance":"1.5-2.75"}"#
-                .to_vec(),
-        };
-        let decoded: GetReadingResponse = operations::get_reading::decode_get_reading_response(response.as_bytes())
-            .expect("decoded response");
-
-        match decoded {
-            GetReadingResponse::Ok(reading) => {
-                assert_eq!(reading.id, 42);
-                assert_eq!(reading.value, 1.25);
-                assert_eq!(reading.count, 7);
-                assert!(!reading.monitored);
-                assert_eq!(reading.seen_at.offset().whole_hours(), 8);
-                let starts_at = reading.starts_at.expect("startsAt parsed");
-                assert_eq!(starts_at.hour(), 6);
-                assert_eq!(starts_at.minute(), 20);
-                assert_eq!(reading.no_service_at, None);
-                assert_eq!(reading.alias_id, 42);
-                assert_eq!(reading.frequency.min, Some(14));
-                assert_eq!(reading.frequency.max, Some(17));
-                assert_eq!(reading.tolerance.min, Some(1.5));
-                assert_eq!(reading.tolerance.max, Some(2.75));
-
-                let encoded = serde_json::to_value(&reading).unwrap();
-                assert_eq!(
-                    encoded,
-                    serde_json::json!({
-                        "id": "42",
-                        "value": "1.25",
-                        "count": "7",
-                        "monitored": 0,
-                        "seenAt": "2024-08-14T16:41:48+08:00",
-                        "startsAt": "0620",
-                        "noServiceAt": null,
-                        "aliasId": "42",
-                        "frequency": "14-17",
-                        "tolerance": "1.5-2.75"
-                    })
-                );
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/parse_as/x_satay_parse_as_generates_wire_backed_deserializers/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(crate_dir, "test", &[], "parse-as generated crate tests");
@@ -454,70 +373,13 @@ components:
     let runtime_path = runtime_path_toml();
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::Reading;
-
-    #[test]
-    fn sentinel_fields_decode_and_encode_strictly() {
-        let valid: Reading = serde_json::from_str(
-            r#"{"requiredWbgt":"28.7","optionalWbgt":"17.5","nullableWbgt":"12.0","maximumSpeed":"88"}"#,
-        )
-        .unwrap();
-        assert_eq!(valid.required_wbgt, Some(28.7));
-        assert_eq!(valid.optional_wbgt, Some(17.5));
-        assert_eq!(valid.nullable_wbgt, Some(12.0));
-        assert_eq!(valid.maximum_speed, Some(88));
-
-        let sentinel: Reading = serde_json::from_str(
-            r#"{"requiredWbgt":"-","optionalWbgt":"NA","nullableWbgt":"NA","maximumSpeed":"999"}"#,
-        )
-        .unwrap();
-        assert_eq!(sentinel.required_wbgt, None);
-        assert_eq!(sentinel.optional_wbgt, None);
-        assert_eq!(sentinel.nullable_wbgt, None);
-        assert_eq!(sentinel.maximum_speed, None);
-
-        let null_and_missing: Reading = serde_json::from_str(
-            r#"{"requiredWbgt":"28.7","nullableWbgt":null,"maximumSpeed":"88"}"#,
-        )
-        .unwrap();
-        assert_eq!(null_and_missing.optional_wbgt, None);
-        assert_eq!(null_and_missing.nullable_wbgt, None);
-
-        assert!(serde_json::from_str::<Reading>(
-            r#"{"optionalWbgt":"1","nullableWbgt":"2","maximumSpeed":"88"}"#,
-        )
-        .is_err());
-        assert!(serde_json::from_str::<Reading>(
-            r#"{"requiredWbgt":null,"nullableWbgt":"2","maximumSpeed":"88"}"#,
-        )
-        .is_err());
-        assert!(serde_json::from_str::<Reading>(
-            r#"{"requiredWbgt":"unknown","nullableWbgt":"2","maximumSpeed":"88"}"#,
-        )
-        .is_err());
-
-        let encoded = serde_json::to_value(Reading {
-            required_wbgt: None,
-            optional_wbgt: None,
-            nullable_wbgt: None,
-            maximum_speed: None,
-        })
-        .unwrap();
-        assert_eq!(
-            encoded,
-            serde_json::json!({
-                "requiredWbgt": "NA",
-                "nullableWbgt": "NA",
-                "maximumSpeed": "999"
-            })
-        );
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/parse_as/x_satay_none_if_generates_strict_optional_parsed_fields/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(crate_dir, "test", &[], "none-if generated crate tests");
@@ -664,152 +526,13 @@ components:
     let runtime_path = runtime_path_toml();
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::{GetIndicatorsInput, Indicators, operations};
-    use serde_json::{Value, json};
-
-    fn value_with(strict: Value, fallback: Value) -> Value {
-        json!({
-            "strict": strict,
-            "fallback": fallback,
-            "lossy": "Y",
-            "requiredNullable": "Y",
-            "noneMapped": "Y"
-        })
-    }
-
-    #[test]
-    fn configured_values_decode_and_use_first_values_for_serialization() {
-        for value in ["Y", "Yes", "1", "true"] {
-            let decoded: Indicators =
-                serde_json::from_value(value_with(json!(value), json!("Y"))).unwrap();
-            assert!(decoded.strict, "{value}");
-        }
-        for value in ["N", "No", "0", "false", ""] {
-            let decoded: Indicators =
-                serde_json::from_value(value_with(json!(value), json!("Y"))).unwrap();
-            assert!(!decoded.strict, "{value}");
-        }
-
-        let true_parts = operations::get_indicators::get_indicators_parts(
-            GetIndicatorsInput::new(true),
-        )
-        .unwrap();
-        assert_eq!(true_parts.uri, "/indicators?enabled=Y");
-        let false_parts = operations::get_indicators::get_indicators_parts(
-            GetIndicatorsInput::new(false),
-        )
-        .unwrap();
-        assert_eq!(false_parts.uri, "/indicators?enabled=N");
-
-        let encoded = serde_json::to_value(Indicators {
-            strict: true,
-            fallback: false,
-            lossy: None,
-            optional: None,
-            reusable: Some(true),
-            required_nullable: Some(false),
-            none_mapped: None,
-        })
-        .unwrap();
-        assert_eq!(
-            encoded,
-            json!({
-                "strict": "Y",
-                "fallback": "N",
-                "requiredNullable": "N",
-                "reusable": "Y",
-                "noneMapped": ""
-            })
-        );
-    }
-
-    #[test]
-    fn unknown_values_are_strict_unless_a_fallback_is_configured() {
-        let fallback: Indicators =
-            serde_json::from_value(value_with(json!("Y"), json!("upstream-drift"))).unwrap();
-        assert!(!fallback.fallback);
-
-        let lossy: Indicators = serde_json::from_value(json!({
-            "strict": "Y",
-            "fallback": "N",
-            "lossy": "upstream-drift",
-            "requiredNullable": "Y",
-            "noneMapped": "Y"
-        }))
-        .unwrap();
-        assert_eq!(lossy.lossy, None);
-
-        assert!(
-            serde_json::from_value::<Indicators>(value_with(json!("unknown"), json!("Y")))
-                .is_err()
-        );
-        assert!(
-            serde_json::from_value::<Indicators>(value_with(json!("yes"), json!("Y"))).is_err()
-        );
-        assert!(
-            serde_json::from_value::<Indicators>(value_with(json!(2), json!("Y"))).is_err()
-        );
-
-        let numeric: Indicators =
-            serde_json::from_value(value_with(json!(1), json!("Y"))).unwrap();
-        assert!(numeric.strict);
-        let boolean: Indicators =
-            serde_json::from_value(value_with(json!(false), json!("Y"))).unwrap();
-        assert!(!boolean.strict);
-    }
-
-    #[test]
-    fn nullable_and_none_if_fields_preserve_their_distinct_contracts() {
-        let decoded: Indicators = serde_json::from_value(json!({
-            "strict": "Y",
-            "fallback": "N",
-            "optional": null,
-            "requiredNullable": null,
-            "noneMapped": ""
-        }))
-        .unwrap();
-        assert_eq!(decoded.optional, None);
-        assert_eq!(decoded.required_nullable, None);
-        assert_eq!(decoded.none_mapped, None);
-
-        let missing_optional: Indicators = serde_json::from_value(json!({
-            "strict": "Y",
-            "fallback": "N",
-            "requiredNullable": "N",
-            "noneMapped": "N"
-        }))
-        .unwrap();
-        assert_eq!(missing_optional.optional, None);
-        assert_eq!(missing_optional.required_nullable, Some(false));
-        assert_eq!(missing_optional.none_mapped, Some(false));
-
-        assert!(serde_json::from_value::<Indicators>(json!({
-            "strict": null,
-            "fallback": "N",
-            "requiredNullable": "Y",
-            "noneMapped": "Y"
-        }))
-        .is_err());
-        assert!(serde_json::from_value::<Indicators>(json!({
-            "strict": "Y",
-            "fallback": "N",
-            "noneMapped": "Y"
-        }))
-        .is_err());
-        assert!(serde_json::from_value::<Indicators>(json!({
-            "strict": "Y",
-            "fallback": "N",
-            "requiredNullable": "Y",
-            "noneMapped": null
-        }))
-        .is_err());
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/parse_as/x_satay_bool_mappings_generate_configured_serde_behavior/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(
@@ -865,21 +588,13 @@ paths:
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn encodes_optional_date_query_parameter() {
-        let day = satay_runtime::parse_date("2024-07-16").unwrap();
-        let parts = operations::psi::psi_parts(PsiInput::new().date(day))
-            .expect("request parts");
-        assert_eq!(parts.uri, "/psi?date=2024-07-16");
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/parse_as/x_satay_parse_as_date_generates_query_parameter_encoding/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(
@@ -935,21 +650,13 @@ paths:
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn encodes_optional_naive_datetime_query_parameter() {
-        let at = satay_runtime::parse_naive_datetime("2024-07-16T23:59:00").unwrap();
-        let parts = operations::psi::psi_parts(PsiInput::new().date(at))
-            .expect("request parts");
-        assert_eq!(parts.uri, "/psi?date=2024-07-16T23%3A59%3A00");
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/parse_as/x_satay_parse_as_naive_datetime_generates_query_parameter_encoding/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(
@@ -1060,47 +767,13 @@ components:
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn encodes_unixtime_query_parameter_and_json_values() {
-        let at = satay_runtime::OffsetDateTime::from_unix_timestamp(1_719_892_800).unwrap();
-        let before_epoch = satay_runtime::OffsetDateTime::from_unix_timestamp(-1).unwrap();
-
-        let parts = operations::get_events::get_events_parts(GetEventsInput::new(at))
-            .expect("request parts");
-        assert_eq!(parts.uri, "/events?at=1719892800");
-
-        let event: Event = serde_json::from_value(serde_json::json!({
-            "startedAt": 1719892800,
-            "endedAt": null,
-            "createdAtString": "1719892800",
-            "endedAtString": "-1"
-        }))
-        .unwrap();
-
-        assert_eq!(event.started_at, at);
-        assert_eq!(event.ended_at, None);
-        assert_eq!(event.created_at_string, at);
-        assert_eq!(event.ended_at_string, Some(before_epoch));
-
-        let encoded = serde_json::to_value(event).unwrap();
-        assert_eq!(
-            encoded,
-            serde_json::json!({
-                "startedAt": 1719892800,
-                "endedAt": null,
-                "createdAtString": "1719892800",
-                "endedAtString": "-1"
-            })
-        );
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/parse_as/unixtime_format_generates_offset_datetime_types_and_seconds_encoding/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(crate_dir, "test", &[], "unixtime generated crate tests");

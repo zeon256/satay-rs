@@ -3,12 +3,40 @@ language: rust
 severity: error
 message: Inline test module bodies are not allowed; preserve the module's attributes and visibility, move its body to the Rust-resolved standalone module file, and replace `{ ... }` with `;`.
 note: >-
-  Scoped to inline modules whose body registers a test function (`#[test]`-family attribute),
-  matching the repository convention that test code lives in standalone test files while
-  production modules (e.g. the serde adapters in satay-runtime) remain inline.
+  Matches inline modules gated by `cfg(test)` (including compound `all`/`any` predicates),
+  plus ungated inline modules whose body directly registers a test function. Production
+  modules (e.g. the serde adapters in satay-runtime) remain allowed.
 ignores:
   - crates/satay-oas3/**
 utils:
+  positive-test-identifier:
+    all:
+      - kind: identifier
+        regex: '^(?:r#)?test$'
+      - not:
+          inside:
+            kind: token_tree
+            follows:
+              kind: identifier
+              regex: '^(?:r#)?not$'
+              stopBy: neighbor
+            stopBy: end
+  test-cfg-attribute:
+    kind: attribute_item
+    has:
+      kind: attribute
+      stopBy: neighbor
+      all:
+        - has:
+            kind: identifier
+            regex: '^(?:r#)?cfg$'
+            stopBy: neighbor
+        - has:
+            kind: token_tree
+            stopBy: neighbor
+            has:
+              matches: positive-test-identifier
+              stopBy: end
   test-attribute:
     kind: attribute_item
     has:
@@ -28,10 +56,23 @@ utils:
               regex: '^(?:r#)?(?:test|rstest|test_case|parameterized|test_with|wasm_bindgen_test|quickcheck|proptest|test_matrix|test_each_path)$'
               stopBy: neighbor
 rule:
-  kind: mod_item
-  has:
-    kind: declaration_list
-    stopBy: neighbor
-    has:
-      matches: test-attribute
-      stopBy: neighbor
+  all:
+    - kind: mod_item
+    - has:
+        kind: declaration_list
+        stopBy: neighbor
+    - any:
+        - follows:
+            matches: test-cfg-attribute
+            stopBy:
+              not:
+                any:
+                  - kind: attribute_item
+                  - kind: line_comment
+                  - kind: block_comment
+        - has:
+            kind: declaration_list
+            stopBy: neighbor
+            has:
+              matches: test-attribute
+              stopBy: neighbor

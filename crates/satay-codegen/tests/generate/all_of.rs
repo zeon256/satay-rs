@@ -120,33 +120,11 @@ components:
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn decodes_flattened_all_of_fields() {
-        let response = satay_runtime::ResponseParts {
-            status: http::StatusCode::OK,
-            headers: http::HeaderMap::new(),
-            body: br#"{"id":"base-1","name":"Ada","nickname":"ace"}"#.to_vec(),
-        };
-
-        let decoded: GetChildResponse = operations::get_child::decode_get_child_response(response.as_bytes())
-            .expect("decoded response");
-        match decoded {
-            GetChildResponse::Ok(child) => {
-                assert_eq!(child.id, "base-1");
-                assert_eq!(child.name, "Ada");
-                assert_eq!(child.nickname, Some("ace".to_owned()));
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!("tests/all_of/generated_all_of_struct_decodes_flattened_fields/tests.rs"),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(crate_dir, "test", &[], "allOf generated crate tests");
@@ -369,36 +347,13 @@ components:
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn decodes_inline_all_of_array_items() {
-        let response = satay_runtime::ResponseParts {
-            status: http::StatusCode::OK,
-            headers: http::HeaderMap::new(),
-            body: br#"{"object":"list","data":[{"role":"user","content":"hello","id":"chatcmpl-1-0","content_parts":[{"type":"text","text":"hello"}]}],"first_id":"chatcmpl-1-0","last_id":"chatcmpl-1-0","has_more":false}"#.to_vec(),
-        };
-
-        let decoded: ListMessagesResponse = operations::list_messages::decode_list_messages_response(response.as_bytes())
-            .expect("decoded response");
-        match decoded {
-            ListMessagesResponse::Ok(list) => {
-                assert_eq!(list.data.len(), 1);
-                let item = &list.data[0];
-                assert_eq!(item.role, "user");
-                assert_eq!(item.content, "hello");
-                assert_eq!(item.id, "chatcmpl-1-0");
-                assert_eq!(item.content_parts.as_ref().expect("content parts").len(), 1);
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/all_of/generated_inline_all_of_array_items_decode_flattened_fields/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(

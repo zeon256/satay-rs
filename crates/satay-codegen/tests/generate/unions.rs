@@ -716,31 +716,13 @@ components:
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn any_of_uses_first_matching_branch() {
-        let response = satay_runtime::ResponseParts {
-            status: http::StatusCode::OK,
-            headers: http::HeaderMap::new(),
-            body: br#"{"id":"1","slug":"specific"}"#.to_vec(),
-        };
-
-        let decoded: GetEntityResponse = operations::get_entity::decode_get_entity_response(response.as_bytes())
-            .expect("decoded response");
-        match decoded {
-            GetEntityResponse::Ok(Entity::Loose(value)) => {
-                assert_eq!(value.id, "1");
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/unions/generated_any_of_deserializes_with_first_matching_branch/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(crate_dir, "test", &[], "anyOf generated crate tests");
@@ -821,34 +803,13 @@ components:
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn one_of_tool_union_deserializes_by_type_field() {
-        let response = satay_runtime::ResponseParts {
-            status: http::StatusCode::OK,
-            headers: http::HeaderMap::new(),
-            body: br#"{"tools":[{"type":"function","function":"lookup"}]}"#.to_vec(),
-        };
-
-        let decoded: GetAssistantResponse = operations::get_assistant::decode_get_assistant_response(response.as_bytes())
-            .expect("decoded response");
-        match decoded {
-            GetAssistantResponse::Ok(value) => match &value.tools[0] {
-                AssistantObjectToolsItem::AssistantToolsFunction(tool) => {
-                    assert_eq!(tool.function, "lookup");
-                }
-                other => panic!("unexpected tool: {other:?}"),
-            },
-            other => panic!("unexpected response: {other:?}"),
-        }
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/unions/generated_one_of_tool_union_deserializes_by_singleton_type_field/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(crate_dir, "test", &[], "oneOf generated crate tests");
@@ -867,56 +828,13 @@ fn generated_nullable_inline_primitive_one_of_deserializes_and_serializes() {
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn string_content_deserializes_to_string_variant() {
-        let value: Message = serde_json::from_str(r#"{"content":"hello"}"#)
-            .expect("message with string content");
-
-        match value.content {
-            Some(MessageContent::String(text)) => assert_eq!(text, "hello"),
-            other => panic!("unexpected content: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn array_content_deserializes_to_array_variant() {
-        let value: Message = serde_json::from_str(
-            r#"{"content":[{"type":"text","text":"hello"}]}"#,
-        )
-        .expect("message with array content");
-
-        match value.content {
-            Some(MessageContent::Array(parts)) => {
-                assert_eq!(parts.len(), 1);
-                assert_eq!(parts[0].text, "hello");
-            }
-            other => panic!("unexpected content: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn null_content_deserializes_to_none() {
-        let value: Message = serde_json::from_str(r#"{"content":null}"#)
-            .expect("message with null content");
-
-        assert_eq!(value.content, None);
-    }
-
-    #[test]
-    fn absent_optional_content_serializes_as_absent() {
-        let value: Message = Message { content: None };
-        let encoded = serde_json::to_value(value).expect("serialized message");
-
-        assert_eq!(encoded, serde_json::json!({}));
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/unions/generated_nullable_inline_primitive_one_of_deserializes_and_serializes/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(
@@ -996,58 +914,13 @@ components:
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn one_of_inline_singleton_deserializes_string_branch() {
-        let response = satay_runtime::ResponseParts {
-            status: http::StatusCode::OK,
-            headers: http::HeaderMap::new(),
-            body: br#""auto""#.to_vec(),
-        };
-
-        let decoded: GetFormatResponse = operations::get_format::decode_get_format_response(response.as_bytes())
-            .expect("decoded response");
-        match decoded {
-            GetFormatResponse::Ok(AssistantsApiResponseFormatOption::Auto(value)) => {
-                assert_eq!(value, AssistantsApiResponseFormatOptionAuto::Auto);
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn one_of_inline_singleton_deserializes_object_branch() {
-        let response = satay_runtime::ResponseParts {
-            status: http::StatusCode::OK,
-            headers: http::HeaderMap::new(),
-            body: br#"{"type":"json_object"}"#.to_vec(),
-        };
-
-        let decoded: GetFormatResponse = operations::get_format::decode_get_format_response(response.as_bytes())
-            .expect("decoded response");
-        match decoded {
-            GetFormatResponse::Ok(AssistantsApiResponseFormatOption::ResponseFormatJsonObject(value)) => {
-                assert_eq!(value.r#type, ResponseFormatJsonObjectType::JsonObject);
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn one_of_inline_singleton_serializes_string_branch() {
-        let value = AssistantsApiResponseFormatOption::Auto(
-            AssistantsApiResponseFormatOptionAuto::Auto,
-        );
-        let encoded = serde_json::to_value(value).expect("serialized response format");
-        assert_eq!(encoded, serde_json::json!("auto"));
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/unions/generated_one_of_inline_singleton_branch_serializes_and_deserializes/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(
@@ -1118,64 +991,13 @@ components:
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn one_of_inline_multi_value_deserializes_string_branch() {
-        let response = satay_runtime::ResponseParts {
-            status: http::StatusCode::OK,
-            headers: http::HeaderMap::new(),
-            body: br#""auto""#.to_vec(),
-        };
-
-        let decoded: GetToolChoiceResponse = operations::get_tool_choice::decode_get_tool_choice_response(response.as_bytes())
-            .expect("decoded response");
-        match decoded {
-            GetToolChoiceResponse::Ok(AssistantsApiToolChoiceOption::Enum(value)) => {
-                assert_eq!(value, AssistantsApiToolChoiceOptionEnum::Auto);
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn one_of_inline_multi_value_deserializes_object_branch() {
-        let response = satay_runtime::ResponseParts {
-            status: http::StatusCode::OK,
-            headers: http::HeaderMap::new(),
-            body: br#"{"type":"function","function":{"name":"my_function"}}"#.to_vec(),
-        };
-
-        let decoded: GetToolChoiceResponse = operations::get_tool_choice::decode_get_tool_choice_response(response.as_bytes())
-            .expect("decoded response");
-        match decoded {
-            GetToolChoiceResponse::Ok(
-                AssistantsApiToolChoiceOption::AssistantsNamedToolChoice(value),
-            ) => {
-                assert_eq!(value.r#type, AssistantsNamedToolChoiceType::Function);
-                assert_eq!(
-                    value.function.expect("function choice").name,
-                    "my_function"
-                );
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn one_of_inline_multi_value_serializes_string_branch() {
-        let value: AssistantsApiToolChoiceOption = AssistantsApiToolChoiceOption::Enum(
-            AssistantsApiToolChoiceOptionEnum::Required,
-        );
-        let encoded = serde_json::to_value(value).expect("serialized tool choice");
-        assert_eq!(encoded, serde_json::json!("required"));
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/unions/generated_one_of_inline_multi_value_branch_serializes_and_deserializes/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(
@@ -1248,49 +1070,13 @@ components:
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn tagged_union_deserializes_response() {
-        let response = satay_runtime::ResponseParts {
-            status: http::StatusCode::OK,
-            headers: http::HeaderMap::new(),
-            body: br#"{"kind":"cat","name":"Milo","lives":9}"#.to_vec(),
-        };
-
-        let decoded: GetPetResponse = operations::get_pet::decode_get_pet_response(response.as_bytes())
-            .expect("decoded response");
-        match decoded {
-            GetPetResponse::Ok(Pet::Cat(value)) => {
-                assert_eq!(value.name, "Milo");
-                assert_eq!(value.lives, 9);
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn tagged_union_serializes_tag() {
-        let value = Pet::Dog(Dog {
-            name: "Rex".to_owned(),
-            bark_volume: 7,
-        });
-        let encoded = serde_json::to_value(value).expect("serialized pet");
-        assert_eq!(
-            encoded,
-            serde_json::json!({
-                "kind": "dog",
-                "name": "Rex",
-                "barkVolume": 7
-            })
-        );
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/unions/generated_discriminator_union_serializes_and_deserializes_with_tag/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(
@@ -1373,51 +1159,13 @@ components:
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn embedded_tag_union_deserializes_response() {
-        let response = satay_runtime::ResponseParts {
-            status: http::StatusCode::OK,
-            headers: http::HeaderMap::new(),
-            body: br#"{"id":"call_1","type":"custom","custom":"payload"}"#.to_vec(),
-        };
-
-        let decoded: GetToolResponse = operations::get_tool::decode_get_tool_response(response.as_bytes())
-            .expect("decoded response");
-        match decoded {
-            GetToolResponse::Ok(ToolCall::CustomToolCall(value)) => {
-                assert_eq!(value.id, "call_1");
-                assert_eq!(value.r#type, CustomToolCallType::Custom);
-                assert_eq!(value.custom, "payload");
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn embedded_tag_union_serializes_branch_type() {
-        let value = ToolCall::FunctionToolCall(FunctionToolCall {
-            id: "call_2".to_owned(),
-            r#type: FunctionToolCallType::Function,
-            function: "lookup".to_owned(),
-        });
-        let encoded = serde_json::to_value(value).expect("serialized tool call");
-        assert_eq!(
-            encoded,
-            serde_json::json!({
-                "id": "call_2",
-                "type": "function",
-                "function": "lookup"
-            })
-        );
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/unions/generated_embedded_discriminator_union_uses_branch_type_field/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(
@@ -1497,51 +1245,13 @@ components:
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn const_tag_union_deserializes_response() {
-        let response = satay_runtime::ResponseParts {
-            status: http::StatusCode::OK,
-            headers: http::HeaderMap::new(),
-            body: br#"{"id":"call_1","type":"custom","custom":"payload"}"#.to_vec(),
-        };
-
-        let decoded: GetToolResponse = operations::get_tool::decode_get_tool_response(response.as_bytes())
-            .expect("decoded response");
-        match decoded {
-            GetToolResponse::Ok(ToolCall::CustomToolCall(value)) => {
-                assert_eq!(value.id, "call_1");
-                assert_eq!(value.r#type, CustomToolCallType::Custom);
-                assert_eq!(value.custom, "payload");
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn const_tag_union_serializes_branch_type() {
-        let value = ToolCall::FunctionToolCall(FunctionToolCall {
-            id: "call_2".to_owned(),
-            r#type: FunctionToolCallType::Function,
-            function: "lookup".to_owned(),
-        });
-        let encoded = serde_json::to_value(value).expect("serialized tool call");
-        assert_eq!(
-            encoded,
-            serde_json::json!({
-                "id": "call_2",
-                "type": "function",
-                "function": "lookup"
-            })
-        );
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/unions/generated_const_embedded_discriminator_union_round_trips/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(
@@ -1677,52 +1387,11 @@ components:
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn nested_union_deserializes_by_embedded_tag() {
-        let widget: Widget =
-            serde_json::from_str(r#"{"id":"w1","status":{"type":"on","since":"today"}}"#)
-                .expect("deserialized widget");
-        match widget.status {
-            Some(WidgetStatus::StatusOn(status)) => {
-                assert_eq!(status.r#type, StatusOnType::On);
-                assert_eq!(status.since, "today");
-            }
-            other => panic!("unexpected status: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn nested_union_serializes_embedded_tag() {
-        let widget = Widget {
-            id: "w2".to_owned(),
-            status: Some(WidgetStatus::StatusOff(StatusOff {
-                r#type: StatusOffType::Off,
-            })),
-        };
-        let encoded = serde_json::to_value(widget).expect("serialized widget");
-        assert_eq!(
-            encoded,
-            serde_json::json!({
-                "id": "w2",
-                "status": {"type": "off"}
-            })
-        );
-    }
-
-    #[test]
-    fn nested_union_null_round_trips() {
-        let widget: Widget = serde_json::from_str(r#"{"id":"w3","status":null}"#)
-            .expect("deserialized widget with null status");
-        assert!(widget.status.is_none());
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!("tests/unions/generated_nested_multi_branch_union_round_trips/tests.rs"),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(
@@ -1803,34 +1472,11 @@ components:
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn wrapped_union_branch_round_trips() {
-        let params: Params =
-            serde_json::from_str(r#"{"budget":5}"#).expect("deserialized params");
-        match &params {
-            Params::AutoParams(auto) => assert_eq!(auto.budget, 5),
-            other => panic!("unexpected params: {other:?}"),
-        }
-        let encoded = serde_json::to_value(&params).expect("serialized params");
-        assert_eq!(encoded, serde_json::json!({"budget": 5}));
-    }
-
-    #[test]
-    fn wrapped_enum_property_round_trips() {
-        let profile: Profile = serde_json::from_str(r#"{"relationship":"friend"}"#)
-            .expect("deserialized profile");
-        assert_eq!(profile.relationship, Relationship::Friend);
-        let encoded = serde_json::to_value(&profile).expect("serialized profile");
-        assert_eq!(encoded, serde_json::json!({"relationship": "friend"}));
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!("tests/unions/generated_all_of_ref_wrapper_unwraps_round_trip/tests.rs"),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(

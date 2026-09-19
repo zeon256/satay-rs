@@ -162,64 +162,13 @@ fn generated_wildcard_range_decodes_with_exact_status_precedence() {
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn decodes_range_body_with_concrete_status() {
-        let response = satay_runtime::ResponseParts {
-            status: http::StatusCode::TOO_MANY_REQUESTS,
-            headers: http::HeaderMap::new(),
-            body: br#"{"message":"slow down"}"#.to_vec(),
-        };
-        let decoded: GetUserResponse = operations::get_user::decode_get_user_response(response.as_bytes())
-            .expect("decoded response");
-
-        match decoded {
-            GetUserResponse::ClientError(status, error) => {
-                assert_eq!(status, http::StatusCode::TOO_MANY_REQUESTS);
-                assert_eq!(error.message, "slow down");
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn exact_status_shadows_covering_range() {
-        let response = satay_runtime::ResponseParts {
-            status: http::StatusCode::NOT_FOUND,
-            headers: http::HeaderMap::new(),
-            body: Vec::new(),
-        };
-        let decoded: GetUserResponse = operations::get_user::decode_get_user_response(response.as_bytes())
-            .expect("decoded response");
-
-        assert!(matches!(decoded, GetUserResponse::NotFound));
-    }
-
-    #[test]
-    fn statuses_outside_declared_ranges_stay_unexpected() {
-        let response = satay_runtime::ResponseParts {
-            status: http::StatusCode::INTERNAL_SERVER_ERROR,
-            headers: http::HeaderMap::new(),
-            body: b"boom".to_vec(),
-        };
-        let decoded: GetUserResponse = operations::get_user::decode_get_user_response(response.as_bytes())
-            .expect("decoded response");
-
-        match decoded {
-            GetUserResponse::UnexpectedStatus(status, body) => {
-                assert_eq!(status, http::StatusCode::INTERNAL_SERVER_ERROR);
-                assert_eq!(body, b"boom");
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/responses/generated_wildcard_range_decodes_with_exact_status_precedence/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(
@@ -271,66 +220,13 @@ fn generated_response_projection_decodes_wire_wrappers() {
 
     write_manifest(crate_dir, &runtime_path_toml(), false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn unwraps_value_payload() {
-        let response = satay_runtime::ResponseParts {
-            status: http::StatusCode::OK,
-            headers: http::HeaderMap::new(),
-            body: br#"{
-                "odata.metadata":"https://example.test/metadata",
-                "value":[
-                    {"id":"10","name":"Airport Express"},
-                    {"id":"20","name":"City Loop"}
-                ]
-            }"#.to_vec(),
-        };
-        let decoded: GetServicesResponse = operations::get_services::decode_get_services_response(response.as_bytes())
-            .expect("projected services");
-
-        match decoded {
-            GetServicesResponse::Ok(services) => {
-                assert_eq!(services.len(), 2);
-                assert_eq!(services[0].id, "10");
-                assert_eq!(services[1].name, "City Loop");
-            }
-            other => panic!("unexpected response: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn unwraps_and_maps_link_payload() {
-        let response = satay_runtime::ResponseParts {
-            status: http::StatusCode::OK,
-            headers: http::HeaderMap::new(),
-            body: br#"{
-                "value":[
-                    {"Link":"https://example.test/a","Description":"A"},
-                    {"Link":"https://example.test/b","Description":"B"}
-                ]
-            }"#.to_vec(),
-        };
-        let decoded: GetLinksResponse = operations::get_links::decode_get_links_response(response.as_bytes())
-            .expect("projected links");
-
-        match decoded {
-            GetLinksResponse::Ok(links) => assert_eq!(
-                links,
-                vec![
-                    "https://example.test/a".to_owned(),
-                    "https://example.test/b".to_owned(),
-                ]
-            ),
-            other => panic!("unexpected response: {other:?}"),
-        }
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/responses/generated_response_projection_decodes_wire_wrappers/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(
@@ -350,33 +246,12 @@ fn optional_projected_fields_preserve_public_types_and_decoding() {
     let temp = tempfile::tempdir().unwrap();
     write_manifest(temp.path(), &runtime_path_toml(), false, false);
     write_generated_files(&temp.path().join("src/generated"), &files);
-    fs::write(temp.path().join("src/lib.rs"), r##"
-pub mod generated;
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-    fn response(body: &[u8]) -> satay_runtime::ResponseParts<Vec<u8>> {
-        satay_runtime::ResponseParts {
-            status: http::StatusCode::OK,
-            headers: http::HeaderMap::new(),
-            body: body.to_vec(),
-        }
-    }
-    #[test]
-    fn missing_unwrapped_and_mapped_values_remain_optional() {
-        for body in [b"{}".as_slice(), br#"{"value":null}"#] {
-            let decoded: GetServicesResponse = operations::get_services::decode_get_services_response(response(body).as_bytes()).unwrap();
-            assert!(matches!(decoded, GetServicesResponse::Ok(None)));
-            let decoded: GetLinksResponse = operations::get_links::decode_get_links_response(response(body).as_bytes()).unwrap();
-            assert!(matches!(decoded, GetLinksResponse::Ok(None)));
-        }
-        let decoded: GetLinksResponse = operations::get_links::decode_get_links_response(
-            response(br#"{"value":[{}, {"Link":null}, {"Link":"found"}]}"#).as_bytes()
-        ).unwrap();
-        let GetLinksResponse::Ok(Some(values)) = decoded else { panic!("projected links") };
-        assert_eq!(values, vec![None, None, Some("found".to_owned())]);
-    }
-}
-"##).unwrap();
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/responses/optional_projected_fields_preserve_public_types_and_decoding/tests.rs"
+        ),
+    );
+    fs::write(temp.path().join("src/lib.rs"), TEST_CRATE_LIB).unwrap();
     run_temp_cargo(temp.path(), "test", &[], "optional response projections");
 }
