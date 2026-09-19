@@ -382,31 +382,13 @@ components:
 
     write_manifest(crate_dir, &runtime_path, false, false);
     write_generated_files(&generated_dir, &files);
-    let lib_contents = r##"pub mod generated;
-
-#[cfg(test)]
-mod tests {
-    use super::generated::*;
-
-    #[test]
-    fn action_applies_base_url_and_api_keys() {
-        let request = Api::new()
-            .account_key("secret")
-            .api_key("query secret")
-            .untagged()
-            .get_user("42")
-            .request()
-            .expect("action request");
-
-        assert_eq!(
-            request.uri().to_string(),
-            "https://api.example.test/v1/users/42?api_key=query%20secret"
-        );
-        let account_key = http::header::HeaderName::from_bytes(b"AccountKey").unwrap();
-        assert_eq!(request.headers().get(account_key).unwrap(), "secret");
-    }
-}
-"##;
+    write_fixture_tests(
+        temp.path(),
+        include_str!(
+            "tests/structure/server_security_and_api_action_helpers_are_generated/tests.rs"
+        ),
+    );
+    let lib_contents = TEST_CRATE_LIB;
     fs::write(crate_dir.join("src/lib.rs"), lib_contents).expect("write lib");
 
     run_temp_cargo(crate_dir, "test", &[], "secured generated crate tests");
