@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.4](https://github.com/zeon256/satay-rs/compare/satay-ir-v0.17.3...satay-ir-v0.17.4) - 2026-09-19
+
+### Added
+
+- *(codegen)* normalize OpenAPI into satay-ir
+- *(ir)* complete semantic API contract
+- *(ir)* add semantic schema graph foundation
+
+### Other
+
+- *(codegen)* establish semantic IR migration parity
+- *(codegen)* lower semantic IR into the Rust model
+
 ### Added
 
 - *(ir)* add a standalone semantic schema graph with forward references, graph-local definition IDs, and structural finalization errors
