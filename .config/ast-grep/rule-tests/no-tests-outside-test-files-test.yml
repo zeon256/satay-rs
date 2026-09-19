@@ -1,0 +1,97 @@
+id: no-tests-outside-test-files
+valid:
+  - |
+    /// # Examples
+    ///
+    /// ```
+    /// let value = documented();
+    /// assert_eq!(value, 1);
+    /// ```
+    fn documented() -> u32 {
+        1
+    }
+  - '#[cfg(test)] mod tests;'
+  - |
+    #[cfg(test)]
+    fn unit_helper() {}
+  - |
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn integration_helper() {}
+  - |
+    #[cfg(test)]
+    const TEST_TIMEOUT: u64 = 30;
+  - |
+    #[runtime::test]
+    mod fixture;
+
+    fn unrelated() {}
+  - '#[fixture] fn reusable_fixture() {}'
+  - '#[serial] fn serialization_helper() {}'
+invalid:
+  - '#[test] fn catches() {}'
+  - |
+    #[test]
+    #[should_panic]
+    fn catches() {}
+  - '#[tokio::test] async fn catches() {}'
+  - |
+    #[tokio::test(flavor = "multi_thread")]
+    async fn catches() {}
+  - '#[async_std::test] async fn catches() {}'
+  - '#[runtime::flavor::test] async fn catches() {}'
+  - '#[::tokio::test] async fn catches() {}'
+  - '#[r#runtime::r#test] async fn catches() {}'
+  - |
+    #[test]
+    // separated by a line comment
+    fn catches() {}
+  - |
+    #[test]
+    /* separated by a block comment */
+    fn catches() {}
+  - |
+    # /* comment */ [test]
+    fn catches() {}
+  - |
+    #[tokio /* comment */ :: test]
+    async fn catches() {}
+  - |
+    #[rstest]
+    #[case(1)]
+    fn catches(x: i32) {
+        let _ = x;
+    }
+  - '#[rstest::rstest] fn catches(x: i32) { let _ = x; }'
+  - |
+    #[test_case(1; "one")]
+    fn catches(x: i32) {
+        let _ = x;
+    }
+  - |
+    #[test_case::test_case(2)]
+    fn catches(x: i32) {
+        let _ = x;
+    }
+  - |
+    #[parameterized(value = { 1, 2 })]
+    fn catches(x: i32) {
+        let _ = x;
+    }
+  - |
+    #[test_with::test_with("fixture.txt")]
+    fn catches() {}
+  - '#[wasm_bindgen_test] fn catches() {}'
+  - '#[quickcheck_macros::quickcheck] fn catches(x: bool) { let _ = x; }'
+  - |
+    #[test_strategy::proptest]
+    fn catches(x: i32) {
+        let _ = x;
+    }
+  - |
+    #[test_matrix::test_matrix([1, 2])]
+    fn catches(x: i32) {
+        let _ = x;
+    }
+  - |
+    #[test_each_file::test_each_path("fixtures/*.txt")]
+    fn catches() {}
