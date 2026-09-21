@@ -22,7 +22,7 @@ use super::super::resolve::ResolvedDocument;
 use super::super::satay::coordinate_target_reference;
 use super::checks::{inferred_operation_id, operation_satay_skip};
 use crate::error::ValidationError;
-use crate::model::HttpMethod;
+use satay_ir::HttpMethod;
 
 /// Which media types of a content map contribute schema references.
 #[derive(Debug, Clone, Copy)]

@@ -1,72 +1,112 @@
+use quote::ToTokens;
+
+use super::ast::*;
 use super::*;
+use syn::{Item, ItemStruct};
 
-#[test]
-fn lowers_inline_constrained_enum_and_range_schemas_to_ir() {
-    let api = parse_valid(INLINE_CONSTRAINED_ENUM_RANGE);
+/// Extracts top-level type item names (structs, enums, type aliases) in order.
+fn type_item_names(file: &syn::File) -> Vec<String> {
+    file.items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Struct(item) => Some(item.ident.to_string()),
+            Item::Enum(item) => Some(item.ident.to_string()),
+            Item::Type(item) => Some(item.ident.to_string()),
+            _ => None,
+        })
+        .collect()
+}
 
-    let search = component(&api, "Search");
-    match &search.kind {
-        ComponentKind::Struct(fields) => {
-            match &field(fields, "code").ty {
-                TypeRef::Constrained { rust_name, inner } => {
-                    assert_eq!(rust_name, "SearchCode");
-                    assert_eq!(inner.as_ref(), &TypeRef::String);
-                }
-                other => panic!("expected constrained code field, got {other:?}"),
+/// Extracts names of structs rendered as validation newtypes (`nutype::nutype`).
+fn nutype_struct_names(file: &syn::File) -> Vec<String> {
+    file.items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Struct(item)
+                if item
+                    .attrs
+                    .iter()
+                    .any(|attr| norm(&attr.path()) == norm_str("nutype::nutype")) =>
+            {
+                Some(item.ident.to_string())
             }
-            assert_eq!(
-                field(fields, "state").ty,
-                TypeRef::Named("SearchState".to_owned())
-            );
-            assert_eq!(
-                field(fields, "window").ty,
-                TypeRef::Range(RangeTypeRef {
-                    rust_name: "SearchWindow".to_owned(),
-                    scalar: RangeScalar::Integer(IntegerType::U8),
-                })
-            );
-        }
-        other => panic!("expected Search struct, got {other:?}"),
-    }
+            _ => None,
+        })
+        .collect()
+}
 
-    let state = component(&api, "SearchState");
-    match &state.kind {
-        ComponentKind::Enum(enum_) => {
-            let variants = &enum_.variants;
-            assert_eq!(variants[0].rust_name, "Open");
-            assert_eq!(variants[1].rust_name, "Closed");
-            assert_eq!(enum_.fallback, EnumFallback::None);
-        }
-        other => panic!("expected SearchState enum, got {other:?}"),
-    }
+/// Whether a field carries the serde optional marker
+/// (`serde(default, skip_serializing_if = "Option::is_none")`).
+fn field_is_optional(item: &ItemStruct, name: &str) -> bool {
+    attr_contains(
+        &field(item, name).attrs,
+        r#"skip_serializing_if = "Option::is_none""#,
+    )
+}
 
-    let window = component(&api, "SearchWindow");
-    match &window.kind {
-        ComponentKind::Range(range) => {
-            assert_eq!(range.scalar, RangeScalar::Integer(IntegerType::U8));
-        }
-        other => panic!("expected SearchWindow range, got {other:?}"),
-    }
+/// Whether any attribute contains `fragment` (normalized tokens).
+fn attr_contains(attrs: &[syn::Attribute], fragment: &str) -> bool {
+    attrs.iter().any(|attr| contains_tokens(attr, fragment))
+}
 
-    assert_eq!(api.constrained_types.len(), 1);
-    assert_eq!(api.constrained_types[0].rust_name, "SearchCode");
-    match &api.constrained_types[0].validation {
-        Validation::String {
-            min_length,
-            max_length,
-            pattern,
-        } => {
-            assert_eq!(*min_length, Some(2));
-            assert_eq!(*max_length, Some(8));
-            assert_eq!(*pattern, None);
-        }
-        other => panic!("expected string validation, got {other:?}"),
+/// Asserts that `needles` appear in the given order within `haystack`
+/// (normalized token text).
+fn token_order(haystack: &impl ToTokens, needles: &[&str]) {
+    let text = norm(haystack);
+    let mut cursor = 0;
+    for needle in needles {
+        let pos = text
+            .find(&norm_str(needle))
+            .unwrap_or_else(|| panic!("fragment `{needle}` not found in generated output"));
+        assert!(pos >= cursor, "fragment `{needle}` appears out of order");
+        cursor = pos;
     }
 }
 
 #[test]
+fn lowers_inline_constrained_enum_and_range_schemas_to_ir() {
+    let files = generate_valid(INLINE_CONSTRAINED_ENUM_RANGE);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let search = find_struct(&types, "Search");
+    assert_eq!(field_names(search), ["code", "state", "window"]);
+    assert_field(search, "code", "SearchCode");
+    assert_field(search, "state", "SearchState");
+    assert_field(search, "window", "SearchWindow");
+
+    let state = find_enum(&types, "SearchState");
+    // NOTE: `EnumFallback::None` is validated through the emitted variant list;
+    // no additional unknown-value variant is synthesized.
+    assert_eq!(variant_names(state), ["Open", "Closed"]);
+    assert!(attr_contains(
+        &variant(state, "Open").attrs,
+        r#"serde(rename = "open")"#
+    ));
+    assert!(attr_contains(
+        &variant(state, "Closed").attrs,
+        r#"serde(rename = "closed")"#
+    ));
+
+    let window = find_struct(&types, "SearchWindow");
+    assert_field(window, "min", "Option<u8>");
+    assert_field(window, "max", "Option<u8>");
+    assert!(
+        contains_tokens(&types, "parse_range::<u8>"),
+        "range scalar must decode as u8"
+    );
+
+    // NOTE: `api.constrained_types` is expressed through the single emitted
+    // validation newtype carrying its string length validation.
+    assert_eq!(nutype_struct_names(&types), ["SearchCode"]);
+    let code = find_struct(&types, "SearchCode");
+    assert_tuple_struct(&types, "SearchCode", "String");
+    assert_attr_contains(&code.attrs, "nutype::nutype", "len_char_min = 2");
+    assert_attr_contains(&code.attrs, "nutype::nutype", "len_char_max = 8");
+}
+
+#[test]
 fn parses_components_operations_and_json_media_types_into_ir() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -155,126 +195,146 @@ components:
 "#,
     );
 
-    assert_eq!(api.components.len(), 3);
-    assert!(api.constrained_types.is_empty());
-    assert_eq!(api.server_url, "https://api.example.test/v1");
-    assert_eq!(api.api_key_security_schemes.len(), 2);
-    assert_eq!(
-        api.api_key_security_schemes[0].location,
-        ApiKeyLocation::Header
-    );
-    assert_eq!(api.api_key_security_schemes[0].wire_name, "AccountKey");
-    assert_eq!(api.api_key_security_schemes[0].rust_name, "account_key");
-    assert_eq!(
-        api.api_key_security_schemes[1].location,
-        ApiKeyLocation::Query
-    );
-    assert_eq!(api.api_key_security_schemes[1].wire_name, "api_key");
-    assert_eq!(api.api_key_security_schemes[1].rust_name, "api_key");
+    let mod_file = parse_rust(file(&files, "mod.rs"));
+    let server_url = find_const(&mod_file, "SERVER_URL");
+    assert!(contains_tokens(
+        &server_url,
+        r#""https://api.example.test/v1""#
+    ));
 
-    let update_user_request = component(&api, "UpdateUserRequest");
-    match &update_user_request.kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(fields.len(), 1);
-            let name = field(fields, "name");
-            assert_eq!(name.rust_name, "name");
-            assert_eq!(name.ty, TypeRef::String);
-            assert!(name.required);
-        }
-        other => panic!("expected UpdateUserRequest struct, got {other:?}"),
+    // NOTE: the component count (3) and the absence of constrained types are
+    // expressed through the complete emitted type-item list.
+    let types = parse_rust(file(&files, "types.rs"));
+    assert_eq!(
+        type_item_names(&types),
+        ["UpdateUserRequest", "User", "UserStatus"]
+    );
+    assert!(nutype_struct_names(&types).is_empty());
+
+    let update_user_request = find_struct(&types, "UpdateUserRequest");
+    assert_eq!(field_names(update_user_request), ["name"]);
+    assert_field(update_user_request, "name", "S");
+    assert!(
+        !field_is_optional(update_user_request, "name"),
+        "required property must not carry the serde optional marker"
+    );
+
+    let status = find_enum(&types, "UserStatus");
+    assert_eq!(variant_names(status), ["Active", "Suspended"]);
+    assert!(attr_contains(
+        &variant(status, "Active").attrs,
+        r#"serde(rename = "active")"#
+    ));
+    assert!(attr_contains(
+        &variant(status, "Suspended").attrs,
+        r#"serde(rename = "suspended")"#
+    ));
+
+    let user = find_struct(&types, "User");
+    assert_eq!(field_names(user), ["id", "status", "age"]);
+    assert_field(user, "id", "S");
+    assert_field(user, "status", "UserStatus");
+    assert_field(user, "age", "Option<i64>");
+    assert!(
+        !field_is_optional(user, "id") && !field_is_optional(user, "status"),
+        "required properties must not carry the serde optional marker"
+    );
+    assert!(field_is_optional(user, "age"));
+
+    let api_file = parse_rust(file(&files, "api.rs"));
+    let api_struct = find_struct(&api_file, "Api");
+    // The two api-key schemes render as builder fields; the bearer scheme does
+    // not. Declaration order is preserved.
+    assert_eq!(
+        field_names(api_struct),
+        ["base_url", "account_key", "api_key", "__satay_storage"]
+    );
+    assert!(contains_tokens(
+        &field(api_struct, "account_key"),
+        "Option<String>"
+    ));
+    assert!(contains_tokens(
+        &field(api_struct, "api_key"),
+        "Option<String>"
+    ));
+    let apply = find_method(&api_file, "Api", "apply");
+    assert!(
+        contains_tokens(&apply, r#""AccountKey""#),
+        "header api key must use its wire name"
+    );
+    assert!(
+        contains_tokens(&apply, r#""api_key""#),
+        "query api key must use its wire name"
+    );
+
+    let parts = parse_rust(file(&files, "get_user/parts.rs"));
+    let input = find_struct(&parts, "GetUserInput");
+    assert_eq!(
+        field_names(input),
+        ["user_id", "body", "include_details", "body_2"]
+    );
+    assert_field(input, "user_id", "S");
+    assert_field(input, "body", "Option<i32>");
+    assert_field(input, "include_details", "bool");
+    assert_field(input, "body_2", "UpdateUserRequest<S>");
+    // NOTE: the serde optional marker exists only on model structs; parameter
+    // requiredness is expressed by `Option`-wrapping (optional parameters get a
+    // builder method, required ones are constructor-only).
+    assert!(has_method(&parts, "GetUserInput", "body"));
+    for name in ["user_id", "include_details", "body_2"] {
+        assert!(
+            !has_method(&parts, "GetUserInput", name),
+            "required parameter `{name}` must be constructor-only"
+        );
     }
 
-    let user_status = component(&api, "UserStatus");
-    match &user_status.kind {
-        ComponentKind::Enum(enum_) => {
-            let variants = &enum_.variants;
-            assert_eq!(variants.len(), 2);
-            assert_eq!(variants[0].wire_name, "active");
-            assert_eq!(variants[0].rust_name, "Active");
-            assert_eq!(variants[1].wire_name, "suspended");
-            assert_eq!(variants[1].rust_name, "Suspended");
-            assert_eq!(enum_.fallback, EnumFallback::None);
-        }
-        other => panic!("expected UserStatus enum, got {other:?}"),
-    }
-
-    let user = component(&api, "User");
-    match &user.kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(fields.len(), 3);
-
-            let id = field(fields, "id");
-            assert_eq!(id.ty, TypeRef::String);
-            assert!(id.required);
-
-            let status = field(fields, "status");
-            assert_eq!(status.ty, TypeRef::Named("UserStatus".to_owned()));
-            assert!(status.required);
-
-            let age = field(fields, "age");
-            assert_eq!(age.ty, TypeRef::Integer(IntegerType::I64));
-            assert!(!age.required);
-        }
-        other => panic!("expected User struct, got {other:?}"),
-    }
-
-    assert_eq!(api.operations.len(), 1);
-    let operation = &api.operations[0];
-    assert_eq!(operation.fn_name, "get_user");
-    assert_eq!(operation.input_name, "GetUserInput");
-    assert_eq!(operation.response_name, "GetUserResponse");
-    assert_eq!(operation.method, HttpMethod::Get);
-    assert_eq!(operation.path, "/users/{userId}");
-    assert_eq!(operation.path_segments.len(), 2);
-    assert_literal_segment(&operation.path_segments[0], "/users/");
-    assert_parameter_segment(&operation.path_segments[1], "userId");
-
-    assert_eq!(operation.parameters.len(), 3);
-    let user_id = parameter(operation, "userId");
-    assert_eq!(user_id.location, ParameterLocation::Path);
-    assert_eq!(user_id.rust_name, "user_id");
-    assert_eq!(user_id.ty, TypeRef::String);
-    assert!(user_id.required);
-
-    let body = parameter(operation, "body");
-    assert_eq!(body.location, ParameterLocation::Query);
-    assert_eq!(body.rust_name, "body");
-    assert_eq!(body.ty, TypeRef::Integer(IntegerType::I32));
-    assert!(!body.required);
-
-    let include_details = parameter(operation, "includeDetails");
-    assert_eq!(include_details.location, ParameterLocation::Query);
-    assert_eq!(include_details.rust_name, "include_details");
-    assert_eq!(include_details.ty, TypeRef::Bool);
-    assert!(include_details.required);
-
-    let request_body = operation.request_body.as_ref().expect("request body");
-    assert_eq!(request_body.field_name, "body_2");
-    assert_eq!(
-        request_body.content_type,
-        "application/vnd.acme.user+json; charset=utf-8"
+    let new = find_method(&parts, "GetUserInput", "new");
+    token_order(
+        new,
+        &[
+            "user_id: impl Into<S>",
+            "include_details: bool",
+            "body_2: UpdateUserRequest<S>",
+        ],
     );
-    assert_eq!(
-        request_body.ty,
-        TypeRef::Named("UpdateUserRequest".to_owned())
-    );
-    assert!(request_body.required);
 
-    assert_eq!(operation.responses.len(), 2);
-    assert_eq!(operation.responses[0].status, ResponseStatus::Exact(200));
-    assert_eq!(operation.responses[0].variant_name, "Ok");
-    assert_eq!(
-        operation.responses[0].body,
-        Some(TypeRef::Named("User".to_owned()))
+    // NOTE: path wire segments are rendered positionally; the path parameter's
+    // wire name is not retained beyond the declared template.
+    let parts_fn = find_fn(&parts, "get_user_parts");
+    token_order(
+        parts_fn,
+        &["uri.push_str(\"/users/\")", "append_path_segment"],
     );
-    assert_eq!(operation.responses[1].status, ResponseStatus::Exact(404));
-    assert_eq!(operation.responses[1].variant_name, "NotFound");
-    assert_eq!(operation.responses[1].body, None);
+    assert!(contains_tokens(&parts_fn, r#""includeDetails""#,));
+    assert!(contains_tokens(
+        &parts_fn,
+        r#""application/vnd.acme.user+json; charset=utf-8""#
+    ));
+
+    let json_file = parse_rust(file(&files, "get_user/json.rs"));
+    let decode = find_fn(&json_file, "decode_get_user_response");
+    let response = find_enum(&parts, "GetUserResponse");
+    assert_eq!(
+        variant_names(response),
+        ["Ok", "NotFound", "UnexpectedStatus"]
+    );
+    assert_doc(&variant(response, "Ok").attrs, "Found");
+    assert_doc(&variant(response, "NotFound").attrs, "Missing");
+    token_order(
+        decode,
+        &[
+            "200 =>",
+            "from_json_slice::<User<S>>(body)",
+            "404 =>",
+            "GetUserResponse::<S>::NotFound",
+            "_ =>",
+        ],
+    );
 }
 
 #[test]
 fn lowers_alias_refs_before_rendering() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -318,31 +378,32 @@ components:
 "#,
     );
 
-    let reading = component(&api, "Reading");
-    match &reading.kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(
-                field(fields, "id").ty,
-                TypeRef::ParsedString(StringCodec::Standard(ParseAs::U32))
-            );
-            assert_eq!(
-                field(fields, "nickname").ty,
-                TypeRef::Option(Box::new(TypeRef::String))
-            );
-        }
-        other => panic!("expected Reading struct, got {other:?}"),
-    }
-
-    let reading_id = parameter(&api.operations[0], "readingId");
-    assert_eq!(
-        reading_id.ty,
-        TypeRef::ParsedString(StringCodec::Standard(ParseAs::U32))
+    let types = parse_rust(file(&files, "types.rs"));
+    let reading = find_struct(&types, "Reading");
+    assert_eq!(field_names(reading), ["id", "nickname"]);
+    assert_field(reading, "id", "u32");
+    assert_field(reading, "nickname", "Option<S>");
+    // NOTE: the codec string is a string literal inside the serde attribute, so
+    // the check is token-level against the quoted literal.
+    assert!(
+        contains_tokens(&field(reading, "id"), r#""serde_string::as_u32""#),
+        "alias id must decode through the u32 string codec"
     );
+
+    let reading_id = find_type_alias(&types, "ReadingId");
+    assert!(contains_tokens(&reading_id, "u32"));
+    let optional_name = find_type_alias(&types, "OptionalName");
+    assert!(contains_tokens(&optional_name, "Option<S>"));
+
+    let parts = parse_rust(file(&files, "get_reading/parts.rs"));
+    let input = find_struct(&parts, "GetReadingInput");
+    // The non-`Option` parameter field expresses requiredness.
+    assert_field(input, "reading_id", "u32");
 }
 
 #[test]
 fn infers_and_overrides_integer_types() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -380,40 +441,38 @@ components:
 "#,
     );
 
-    let direction = component(&api, "Direction");
-    match &direction.kind {
-        ComponentKind::Nutype(constrained) => {
-            assert_eq!(constrained.inner, TypeRef::Integer(IntegerType::I32));
-        }
-        other => panic!("expected Direction nutype, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
 
-    let byte = component(&api, "Byte");
-    match &byte.kind {
-        ComponentKind::Nutype(constrained) => {
-            assert_eq!(constrained.inner, TypeRef::Integer(IntegerType::I64));
-        }
-        other => panic!("expected Byte nutype, got {other:?}"),
-    }
+    let direction = find_struct(&types, "Direction");
+    assert_tuple_struct(&types, "Direction", "i32");
+    assert_attr_contains(&direction.attrs, "nutype::nutype", "greater_or_equal = 1");
+    assert_attr_contains(&direction.attrs, "nutype::nutype", "less_or_equal = 2");
 
-    let legacy_direction = component(&api, "LegacyDirection");
-    match &legacy_direction.kind {
-        ComponentKind::Nutype(constrained) => {
-            assert_eq!(constrained.inner, TypeRef::Integer(IntegerType::I32));
-        }
-        other => panic!("expected LegacyDirection nutype, got {other:?}"),
-    }
+    let byte = find_struct(&types, "Byte");
+    assert_tuple_struct(&types, "Byte", "i64");
+    assert_attr_contains(&byte.attrs, "nutype::nutype", "greater_or_equal = 0");
+    assert_attr_contains(&byte.attrs, "nutype::nutype", "less_or_equal = 255");
 
-    let unbounded = component(&api, "Unbounded");
-    match &unbounded.kind {
-        ComponentKind::Alias(ty) => assert_eq!(ty, &TypeRef::Integer(IntegerType::I32)),
-        other => panic!("expected Unbounded alias, got {other:?}"),
-    }
+    let legacy_direction = find_struct(&types, "LegacyDirection");
+    assert_tuple_struct(&types, "LegacyDirection", "i32");
+    assert_attr_contains(
+        &legacy_direction.attrs,
+        "nutype::nutype",
+        "greater_or_equal = 1",
+    );
+    assert_attr_contains(
+        &legacy_direction.attrs,
+        "nutype::nutype",
+        "less_or_equal = 2",
+    );
+
+    let unbounded = find_type_alias(&types, "Unbounded");
+    assert!(contains_tokens(&unbounded, "i32"));
 }
 
 #[test]
 fn parses_type_array_nullability_and_numeric_exclusive_bounds() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -438,47 +497,27 @@ components:
 "#,
     );
 
-    match &component(&api, "OptionalName").kind {
-        ComponentKind::Alias(TypeRef::Option(inner)) => match inner.as_ref() {
-            TypeRef::Constrained { rust_name, inner } => {
-                assert_eq!(rust_name, "OptionalNameValue");
-                assert_eq!(inner.as_ref(), &TypeRef::String);
-            }
-            other => panic!("expected nullable constrained string, got {other:?}"),
-        },
-        other => panic!("expected OptionalName nullable alias, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
 
-    match &component(&api, "Window").kind {
-        ComponentKind::Nutype(constrained) => {
-            assert_eq!(constrained.inner, TypeRef::Integer(IntegerType::U8));
-            match &constrained.validation {
-                Validation::Integer { minimum, maximum } => {
-                    assert_eq!(
-                        minimum,
-                        &Some(IntegerLimit {
-                            value: 0,
-                            exclusive: true,
-                        })
-                    );
-                    assert_eq!(
-                        maximum,
-                        &Some(IntegerLimit {
-                            value: 10,
-                            exclusive: true,
-                        })
-                    );
-                }
-                other => panic!("expected integer validation, got {other:?}"),
-            }
-        }
-        other => panic!("expected Window nutype, got {other:?}"),
-    }
+    let optional_name = find_type_alias(&types, "OptionalName");
+    assert!(contains_tokens(&optional_name, "Option<OptionalNameValue>"));
+    let optional_name_value = find_struct(&types, "OptionalNameValue");
+    assert_tuple_struct(&types, "OptionalNameValue", "String");
+    assert_attr_contains(
+        &optional_name_value.attrs,
+        "nutype::nutype",
+        "len_char_min = 1",
+    );
+
+    let window = find_struct(&types, "Window");
+    assert_tuple_struct(&types, "Window", "u8");
+    assert_attr_contains(&window.attrs, "nutype::nutype", "greater = 0");
+    assert_attr_contains(&window.attrs, "nutype::nutype", "less = 10");
 }
 
 #[test]
 fn lowers_const_string_property_to_singleton_enum() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -504,30 +543,28 @@ components:
 "#,
     );
 
-    match &component(&api, "CacheControl").kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(
-                field(fields, "type").ty,
-                TypeRef::Named("CacheControlType".to_owned())
-            );
-        }
-        other => panic!("expected CacheControl struct, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
 
-    match &component(&api, "CacheControlType").kind {
-        ComponentKind::Enum(enum_) => {
-            assert_eq!(enum_.variants.len(), 1);
-            assert_eq!(enum_.variants[0].wire_name, "ephemeral");
-            assert_eq!(enum_.variants[0].rust_name, "Ephemeral");
-            assert_eq!(enum_.fallback, EnumFallback::None);
-        }
-        other => panic!("expected CacheControlType enum, got {other:?}"),
-    }
+    let cache_control = find_struct(&types, "CacheControl");
+    assert_eq!(field_names(cache_control), ["r#type"]);
+    assert_field(cache_control, "r#type", "CacheControlType");
+
+    let cache_control_type = find_enum(&types, "CacheControlType");
+    assert_eq!(variant_names(cache_control_type), ["Ephemeral"]);
+    assert!(attr_contains(
+        &variant(cache_control_type, "Ephemeral").attrs,
+        r#"serde(rename = "ephemeral")"#
+    ));
+    let as_str = find_method(&types, "CacheControlType", "as_str");
+    assert!(contains_tokens(
+        &as_str,
+        r#"Self::Ephemeral => "ephemeral""#
+    ));
 }
 
 #[test]
 fn lowers_single_ref_nullable_any_of_to_option_of_ref() {
-    let api = parse_valid(
+    let files = generate_valid(
         r##"
 openapi: 3.1.0
 info:
@@ -559,27 +596,22 @@ components:
 "##,
     );
 
-    match &component(&api, "User").kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(
-                field(fields, "profile").ty,
-                TypeRef::Option(Box::new(TypeRef::Named("Profile".to_owned())))
-            );
-        }
-        other => panic!("expected User struct, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
+    let user = find_struct(&types, "User");
+    assert_field(user, "profile", "Option<Profile<S>>");
+
+    let profile = find_struct(&types, "Profile");
+    assert_eq!(field_names(profile), ["id"]);
 
     assert!(
-        !api.components
-            .iter()
-            .any(|component| component.rust_name == "UserProfile"),
+        !contains_ident(&types, "UserProfile"),
         "single-reference untagged union must not synthesize a wrapper component"
     );
 }
 
 #[test]
 fn lowers_wrapped_single_ref_nullable_any_of_to_option_of_ref() {
-    let api = parse_valid(
+    let files = generate_valid(
         r##"
 openapi: 3.1.0
 info:
@@ -613,27 +645,22 @@ components:
 "##,
     );
 
-    match &component(&api, "User").kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(
-                field(fields, "profile").ty,
-                TypeRef::Option(Box::new(TypeRef::Named("Profile".to_owned())))
-            );
-        }
-        other => panic!("expected User struct, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
+    let user = find_struct(&types, "User");
+    assert_field(user, "profile", "Option<Profile<S>>");
+
+    let profile = find_struct(&types, "Profile");
+    assert_eq!(field_names(profile), ["id"]);
 
     assert!(
-        !api.components
-            .iter()
-            .any(|component| component.rust_name == "UserProfile"),
+        !contains_ident(&types, "UserProfile"),
         "single-reference untagged union must not synthesize a wrapper component"
     );
 }
 
 #[test]
 fn parses_wildcard_response_range_after_exact_statuses() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -677,23 +704,43 @@ components:
 "#,
     );
 
-    let operation = &api.operations[0];
-    assert_eq!(operation.responses.len(), 3);
-    assert_eq!(operation.responses[0].status, ResponseStatus::Exact(200));
-    assert_eq!(operation.responses[0].variant_name, "Ok");
-    assert_eq!(operation.responses[1].status, ResponseStatus::Exact(404));
-    assert_eq!(operation.responses[1].variant_name, "NotFound");
-    assert_eq!(operation.responses[2].status, ResponseStatus::Range(4));
-    assert_eq!(operation.responses[2].variant_name, "ClientError");
+    let parts = parse_rust(file(&files, "get_user/parts.rs"));
+    let response = find_enum(&parts, "GetUserResponse");
     assert_eq!(
-        operation.responses[2].body,
-        Some(TypeRef::Named("ErrorResponse".to_owned()))
+        variant_names(response),
+        ["Ok", "NotFound", "ClientError", "UnexpectedStatus"]
+    );
+    assert_doc(&variant(response, "Ok").attrs, "Found user");
+    assert_doc(&variant(response, "NotFound").attrs, "Not found");
+    assert_doc(&variant(response, "ClientError").attrs, "Client error");
+    assert!(
+        contains_tokens(
+            &variant(response, "ClientError"),
+            "http::StatusCode, ErrorResponse<S>"
+        ),
+        "range responses carry their concrete status and projected body"
+    );
+
+    let json_file = parse_rust(file(&files, "get_user/json.rs"));
+    let decode = find_fn(&json_file, "decode_get_user_response");
+    token_order(
+        decode,
+        &[
+            "200 =>",
+            "from_json_slice::<User<S>>(body)",
+            "404 =>",
+            "GetUserResponse::<S>::NotFound",
+            "400..=499 =>",
+            "from_json_slice::<ErrorResponse<S>>(body)",
+            "GetUserResponse::<S>::ClientError(status, value)",
+            "_ =>",
+        ],
     );
 }
 
 #[test]
 fn folds_nullable_optional_query_and_header_parameters() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -740,27 +787,52 @@ paths:
 "#,
     );
 
-    let operation = &api.operations[0];
-
-    for wire_name in ["q", "page", "x-trace"] {
-        let param = parameter(operation, wire_name);
-        assert!(!param.required, "{wire_name} must stay optional");
-        assert_eq!(param.ty, TypeRef::String, "{wire_name} folds to plain T");
+    // NOTE: parameter-level IR facts (plain `T`, `I64`, constrained inner) are
+    // expressed through the `Option`-wrapped builder input fields and the
+    // emitted validation newtype.
+    let parts = parse_rust(file(&files, "ping/parts.rs"));
+    let input = find_struct(&parts, "PingInput");
+    assert_eq!(
+        field_names(input),
+        ["q", "page", "limit", "x_trace", "count"]
+    );
+    assert_field(input, "q", "Option<S>");
+    assert_field(input, "page", "Option<S>");
+    assert_field(input, "limit", "Option<i64>");
+    assert_field(input, "x_trace", "Option<S>");
+    assert_field(input, "count", "Option<PingCountParameter>");
+    for name in ["q", "page", "limit", "x_trace", "count"] {
+        assert!(
+            has_method(&parts, "PingInput", name),
+            "folded parameter `{name}` must keep a builder method"
+        );
     }
 
-    let limit = parameter(operation, "limit");
-    assert!(!limit.required);
-    assert_eq!(limit.ty, TypeRef::Integer(IntegerType::I64));
+    let parts_fn = find_fn(&parts, "ping_parts");
+    for wire_name in ["q", "page", "limit", "count"] {
+        assert!(
+            contains_tokens(&parts_fn, &format!(r#""{wire_name}""#)),
+            "query parameter `{wire_name}` must use its wire name"
+        );
+    }
+    assert!(
+        contains_tokens(&parts_fn, r#""x-trace""#),
+        "header parameter must use its wire name"
+    );
+    token_order(
+        parts_fn,
+        &["append_query_pair", "insert_header", "\"x-trace\""],
+    );
 
     // Constraints on the peeled branch survive as a validation newtype.
-    let count = parameter(operation, "count");
-    assert!(!count.required);
-    match &count.ty {
-        TypeRef::Constrained { inner, .. } => {
-            assert_eq!(inner.as_ref(), &TypeRef::Integer(IntegerType::U64));
-        }
-        other => panic!("expected constrained count parameter, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
+    let count_parameter = find_struct(&types, "PingCountParameter");
+    assert_tuple_struct(&types, "PingCountParameter", "u64");
+    assert_attr_contains(
+        &count_parameter.attrs,
+        "nutype::nutype",
+        "greater_or_equal = 1",
+    );
 }
 
 #[test]

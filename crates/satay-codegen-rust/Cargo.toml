@@ -1,0 +1,22 @@
+[package]
+name = "satay-codegen-rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Generate Rust client code from the Satay semantic IR"
+repository = "https://github.com/zeon256/satay-rs"
+homepage = "https://github.com/zeon256/satay-rs"
+documentation = "https://docs.rs/satay-codegen-rust"
+rust-version.workspace = true
+
+[dependencies]
+heck = "0.5"
+prettyplease.workspace = true
+proc-macro2.workspace = true
+quote.workspace = true
+regex.workspace = true
+satay-ir.workspace = true
+serde_json.workspace = true
+syn = { workspace = true, features = ["visit-mut"] }
+thiserror.workspace = true
+tracing.workspace = true

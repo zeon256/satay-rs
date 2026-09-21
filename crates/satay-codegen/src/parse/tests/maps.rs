@@ -1,12 +1,12 @@
 use satay_ir::{AdditionalProperties, TypeExpr};
 
-use crate::parse::normalize::normalize_spec;
-
+use super::ast::*;
 use super::*;
+use syn::Fields;
 
 #[test]
 fn parses_typed_map_property() {
-    let api = parse_valid(
+    let files = generate_valid(
         r##"
 openapi: 3.1.0
 info:
@@ -33,19 +33,23 @@ components:
 "##,
     );
 
-    match &component(&api, "Environment").kind {
-        ComponentKind::Struct(fields) => {
-            let metadata = field(fields, "metadata");
-            assert_eq!(metadata.ty, TypeRef::Map(Box::new(TypeRef::String)));
-            assert!(metadata.required);
-        }
-        other => panic!("expected Environment struct, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
+    let environment = find_struct(&types, "Environment");
+    assert_field(environment, "metadata", "BTreeMap<S, S>");
+    // Required properties are not Option-wrapped and carry no serde default.
+    let metadata = field(environment, "metadata");
+    assert!(
+        !metadata
+            .attrs
+            .iter()
+            .any(|attr| norm(attr).contains(&norm_str("serde (default"))),
+        "required field `Environment.metadata` must not be optional"
+    );
 }
 
 #[test]
 fn parses_map_of_component_refs() {
-    let api = parse_valid(
+    let files = generate_valid(
         r##"
 openapi: 3.1.0
 info:
@@ -77,21 +81,15 @@ components:
 "##,
     );
 
-    match &component(&api, "Toolset").kind {
-        ComponentKind::Struct(fields) => {
-            let configs = field(fields, "configs");
-            assert_eq!(
-                configs.ty,
-                TypeRef::Map(Box::new(TypeRef::Named("ToolConfig".to_owned())))
-            );
-        }
-        other => panic!("expected Toolset struct, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
+    // The property is not required, so the map is Option-wrapped in the output.
+    let toolset = find_struct(&types, "Toolset");
+    assert_field(toolset, "configs", "Option<BTreeMap<S, ToolConfig>>");
 }
 
 #[test]
 fn parses_freeform_map_property() {
-    let api = parse_valid(
+    let files = generate_valid(
         r##"
 openapi: 3.1.0
 info:
@@ -117,18 +115,18 @@ components:
 "##,
     );
 
-    match &component(&api, "OutputFormat").kind {
-        ComponentKind::Struct(fields) => {
-            let schema = field(fields, "schema");
-            assert_eq!(schema.ty, TypeRef::Map(Box::new(TypeRef::JsonValue)));
-        }
-        other => panic!("expected OutputFormat struct, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
+    let output_format = find_struct(&types, "OutputFormat");
+    assert_field(
+        output_format,
+        "schema",
+        "BTreeMap<S, satay_runtime::JsonValue>",
+    );
 }
 
 #[test]
 fn parses_empty_schema_component_as_json_value_alias() {
-    let api = parse_valid(
+    let files = generate_valid(
         r##"
 openapi: 3.1.0
 info:
@@ -154,24 +152,19 @@ components:
 "##,
     );
 
-    match &component(&api, "JsonValue").kind {
-        ComponentKind::Alias(alias) => assert_eq!(*alias, TypeRef::JsonValue),
-        other => panic!("expected JsonValue alias, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
+    let alias = find_type_alias(&types, "JsonValue");
+    assert_eq!(norm(&alias.ty), norm_str("satay_runtime::JsonValue"));
 
-    match &component(&api, "Event").kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(field(fields, "payload").ty, TypeRef::JsonValue);
-        }
-        other => panic!("expected Event struct, got {other:?}"),
-    }
+    let event = find_struct(&types, "Event");
+    assert_field(event, "payload", "satay_runtime::JsonValue");
 }
 
 #[test]
 fn parses_array_of_maps_of_empty_schema_refs() {
     // The Anthropic `input_examples` shape: array items are maps whose values
     // reference an empty-schema component.
-    let api = parse_valid(
+    let files = generate_valid(
         r##"
 openapi: 3.1.0
 info:
@@ -199,24 +192,27 @@ components:
 "##,
     );
 
-    match &component(&api, "BashTool").kind {
-        ComponentKind::Struct(fields) => {
-            let input_examples = field(fields, "input_examples");
-            assert_eq!(
-                input_examples.ty,
-                TypeRef::Array(Box::new(TypeRef::Map(Box::new(TypeRef::JsonValue))))
-            );
-            assert!(!input_examples.required);
-        }
-        other => panic!("expected BashTool struct, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
+    let bash_tool = find_struct(&types, "BashTool");
+    // NOTE: the model's `!required` fact surfaces publicly as the
+    // `Option<...>` wrapper plus its serde skip/default attribute.
+    assert_field(
+        bash_tool,
+        "input_examples",
+        "Option<Vec<BTreeMap<S, satay_runtime::JsonValue>>>",
+    );
+    assert_attr_contains(
+        &field(bash_tool, "input_examples").attrs,
+        "cfg_attr",
+        r#"serde(default, skip_serializing_if = "Option::is_none")"#,
+    );
 }
 
 #[test]
 fn parses_nullable_map_union_wrapper() {
     // The BetaMCPToolset.configs shape: `anyOf: [map, null]` hoists the map
     // out of the wrapper union and renders as an optional map.
-    let api = parse_valid(
+    let files = generate_valid(
         r##"
 openapi: 3.1.0
 info:
@@ -250,30 +246,18 @@ components:
 "##,
     );
 
-    match &component(&api, "Toolset").kind {
-        ComponentKind::Struct(fields) => {
-            let configs = field(fields, "configs");
-            assert_eq!(
-                configs.ty,
-                TypeRef::Option(Box::new(TypeRef::Map(Box::new(TypeRef::Named(
-                    "ToolConfig".to_owned()
-                )))))
-            );
-        }
-        other => panic!("expected Toolset struct, got {other:?}"),
-    }
-
+    let types = parse_rust(file(&files, "types.rs"));
+    let toolset = find_struct(&types, "Toolset");
+    assert_field(toolset, "configs", "Option<BTreeMap<S, ToolConfig>>");
     assert!(
-        !api.components
-            .iter()
-            .any(|component| component.rust_name == "ToolsetConfigs"),
+        !contains_ident(&types, "ToolsetConfigs"),
         "nullable map wrapper must not synthesize a wrapper component"
     );
 }
 
 #[test]
 fn parses_map_with_nullable_values() {
-    let api = parse_valid(
+    let files = generate_valid(
         r##"
 openapi: 3.1.0
 info:
@@ -300,30 +284,32 @@ components:
 "##,
     );
 
-    match &component(&api, "UpdateRequest").kind {
-        ComponentKind::Struct(fields) => {
-            let metadata = field(fields, "metadata");
-            // The single inline string branch keeps its untagged wrapper enum
-            // (collapsing inline branches is tracked by issue #48); the wire
-            // format is a plain nullable string either way.
-            assert_eq!(
-                metadata.ty,
-                TypeRef::Map(Box::new(TypeRef::Option(Box::new(TypeRef::Named(
-                    "UpdateRequestMetadataValue".to_owned()
-                )))))
-            );
-        }
-        other => panic!("expected UpdateRequest struct, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
+    // The single inline string branch keeps its untagged wrapper enum
+    // (collapsing inline branches is tracked by issue #48); the wire
+    // format is a plain nullable string either way.
+    let update_request = find_struct(&types, "UpdateRequest");
+    assert_field(
+        update_request,
+        "metadata",
+        "Option<BTreeMap<S, Option<UpdateRequestMetadataValue<S>>>>",
+    );
 
-    match &component(&api, "UpdateRequestMetadataValue").kind {
-        ComponentKind::Union(union) => {
-            assert!(union.tag.is_none());
-            assert_eq!(union.variants.len(), 1);
-            assert_eq!(union.variants[0].ty, TypeRef::String);
-        }
-        other => panic!("expected UpdateRequestMetadataValue union, got {other:?}"),
-    }
+    let union = find_enum(&types, "UpdateRequestMetadataValue");
+    assert!(
+        union
+            .attrs
+            .iter()
+            .any(|attr| norm(attr).contains(&norm_str("untagged"))),
+        "wrapper enum must be untagged"
+    );
+    assert_eq!(variant_names(union), ["String"]);
+    let string_fields = match &variant(union, "String").fields {
+        Fields::Unnamed(fields) => fields,
+        other => panic!("expected tuple variant, got {}", norm(other)),
+    };
+    assert_eq!(string_fields.unnamed.len(), 1);
+    assert_eq!(norm(&string_fields.unnamed[0].ty), norm_str("S"));
 }
 
 #[test]
@@ -353,8 +339,8 @@ components:
         type:
           type: string
 "##;
-    let api = parse_valid(spec);
-    let semantic = normalize_spec(spec, "maps.yaml").unwrap();
+    let files = generate_valid(spec);
+    let semantic = normalize_spec(spec);
     let (_, input) = semantic
         .definitions()
         .find(|(_, d)| d.source_name == "InputSchema")
@@ -368,13 +354,10 @@ components:
     assert_eq!(input.properties[0].wire_name, "type");
     assert!(input.properties[0].required);
 
-    match &component(&api, "InputSchema").kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(fields.len(), 1);
-            assert_eq!(fields[0].wire_name, "type");
-        }
-        other => panic!("expected InputSchema struct, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
+    let input_schema = find_struct(&types, "InputSchema");
+    assert_eq!(field_names(input_schema), ["r#type"]);
+    assert_field(input_schema, "r#type", "S");
 }
 
 #[test]
@@ -514,7 +497,7 @@ components:
 
 #[test]
 fn parses_freeform_map_component_as_alias() {
-    let api = parse_valid(
+    let files = generate_valid(
         r##"
 openapi: 3.1.0
 info:
@@ -542,28 +525,21 @@ components:
 "##,
     );
 
-    match &component(&api, "Freeform").kind {
-        ComponentKind::Alias(ty) => {
-            assert_eq!(ty, &TypeRef::Map(Box::new(TypeRef::JsonValue)));
-        }
-        other => panic!("expected Freeform alias, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
+    let alias = find_type_alias(&types, "Freeform");
+    assert_eq!(
+        norm(&alias.ty),
+        norm_str("BTreeMap<S, satay_runtime::JsonValue>")
+    );
 
     // Alias refs are inlined at lowering; the field carries the map shape.
-    match &component(&api, "Holder").kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(
-                field(fields, "value").ty,
-                TypeRef::Map(Box::new(TypeRef::JsonValue))
-            );
-        }
-        other => panic!("expected Holder struct, got {other:?}"),
-    }
+    let holder = find_struct(&types, "Holder");
+    assert_field(holder, "value", "BTreeMap<S, satay_runtime::JsonValue>");
 }
 
 #[test]
 fn parses_typed_map_component() {
-    let api = parse_valid(
+    let files = generate_valid(
         r##"
 openapi: 3.1.0
 info:
@@ -585,12 +561,9 @@ components:
 "##,
     );
 
-    match &component(&api, "Labels").kind {
-        ComponentKind::Alias(ty) => {
-            assert_eq!(ty, &TypeRef::Map(Box::new(TypeRef::String)));
-        }
-        other => panic!("expected Labels alias, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
+    let alias = find_type_alias(&types, "Labels");
+    assert_eq!(norm(&alias.ty), norm_str("BTreeMap<S, S>"));
 }
 
 #[test]

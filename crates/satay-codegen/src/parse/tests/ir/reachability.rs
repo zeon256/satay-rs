@@ -1,7 +1,7 @@
 use super::normalize;
 use crate::error::ValidationError;
 use crate::parse::normalize::{NormalizeError, normalize_spec};
-use crate::parse::tests::parse_valid;
+use crate::parse::tests::generate_valid;
 
 #[test]
 fn operationless_paths_retain_parameters_and_shared_paths_drop_only_skipped_operations() {
@@ -112,7 +112,7 @@ components:
     Skipped: {type: string}
 "#;
 
-    parse_valid(spec);
+    generate_valid(spec);
     crate::generate(spec).expect("compatibility input generates");
 
     let NormalizeError::ExcludedDefinition { name, location } =

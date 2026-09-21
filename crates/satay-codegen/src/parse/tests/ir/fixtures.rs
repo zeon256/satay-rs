@@ -1,12 +1,12 @@
 use satay_ir::{IntegerInterpretation, PropertyPolicy, StringInterpretation, TypeExpr};
 
-use crate::parse::tests::{INLINE_CONSTRAINED_ENUM_RANGE, parse_valid};
+use crate::parse::tests::{INLINE_CONSTRAINED_ENUM_RANGE, generate_valid};
 
 use super::{definition, normalize, object, string};
 
 fn fixture(spec: &str) -> satay_ir::Api {
     // Verify Rust acceptance separately from the semantic assertions below.
-    parse_valid(spec);
+    generate_valid(spec);
     normalize(spec)
 }
 

@@ -1,6 +1,6 @@
 use super::checked::{CheckedComponent, CheckedOperation};
+use super::error::ValidationError;
 use super::registry::TypeRegistry;
-use crate::error::ValidationError;
 use crate::ident::type_ident;
 use crate::model::{Api, ApiKeySecurityScheme};
 
@@ -8,7 +8,7 @@ mod operation;
 mod schema;
 
 /// Builds the render model from Rust-owned checked values.
-pub(in crate::parse) fn lower_parts(
+pub(crate) fn lower_parts(
     server_url: String,
     api_key_security_schemes: Vec<ApiKeySecurityScheme>,
     tags: &[(String, Option<String>)],

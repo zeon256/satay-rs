@@ -3,11 +3,11 @@
 > Easily turn your data structure libraries to support `no_std` via storage type families.
 
 ```rust
-#[cfg(feature = "alloc")] {
-use satay_storage::{AllocStorage, BoxedStorage, Map, Storage};
 use core::convert::Infallible;
 
+#[cfg(feature = "alloc")]
 fn main() -> Result<(), Infallible> {
+    use satay_storage::{AllocStorage, BoxedStorage, Map, Storage};
     let storage = AllocStorage;
     let names = storage.try_contiguous([
         storage.try_text("Milo")?,
@@ -27,6 +27,8 @@ fn main() -> Result<(), Infallible> {
     
     Ok(())
 }
+# #[cfg(not(feature = "alloc"))]
+# fn main() {}
 ```
 
 | Policy | Text | Contiguous | Map |

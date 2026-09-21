@@ -1,13 +1,126 @@
-use satay_ir::{CompositionKind, TypeExpr};
+use satay_ir::{
+    Api, CompositionKind, CompositionSchema, ObjectSchema, Property, SchemaUse, TypeExpr,
+};
 
-use crate::parse::normalize::normalize_spec;
-
+use super::ast::*;
 use super::*;
+use syn::{Expr, ExprLit, Fields, Item, Lit, Pat, Stmt};
 
+/// Finds a definition by source name.
+fn definition<'a>(api: &'a Api, name: &str) -> &'a satay_ir::Definition {
+    api.definitions()
+        .find(|(_, definition)| definition.source_name == name)
+        .map(|(_, definition)| definition)
+        .unwrap_or_else(|| panic!("missing definition `{name}`"))
+}
+
+/// Composition of a definition's root schema use.
+fn composition<'a>(api: &'a Api, name: &str) -> &'a CompositionSchema {
+    let TypeExpr::Composition(composition) = &definition(api, name).schema.ty else {
+        panic!("expected `{name}` to be a composition");
+    };
+    composition
+}
+
+/// Property of an IR object schema by wire name.
+fn property<'a>(object: &'a ObjectSchema, name: &str) -> &'a Property {
+    object
+        .properties
+        .iter()
+        .find(|prop| prop.wire_name == name)
+        .unwrap_or_else(|| panic!("object has no property `{name}`"))
+}
+
+/// Source name of a reference branch's resolved definition.
+fn ref_branch_source_name<'a>(api: &'a Api, branch: &SchemaUse) -> &'a str {
+    let TypeExpr::Ref(id) = &branch.ty else {
+        panic!("expected a reference branch");
+    };
+    &api.definition(*id).expect("valid reference").source_name
+}
+
+/// Tuple-variant payload types of a generated union enum, in declaration order.
+fn variant_payload_types(item: &syn::ItemEnum) -> Vec<String> {
+    item.variants
+        .iter()
+        .filter_map(|variant| match &variant.fields {
+            Fields::Unnamed(fields) => fields.unnamed.first().map(|field| norm(&field.ty)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Wire names of a generated enum's variants, read from its `as_str` arms.
+fn enum_wire_names(file: &syn::File, name: &str) -> Vec<String> {
+    let as_str = find_method(file, name, "as_str");
+    let Some(Stmt::Expr(Expr::Match(expr), _)) = as_str.block.stmts.last() else {
+        panic!("`{name}.as_str` does not end in a match");
+    };
+    expr.arms
+        .iter()
+        .filter_map(|arm| {
+            let Pat::Path(path) = &arm.pat else {
+                return None;
+            };
+            if path
+                .path
+                .segments
+                .last()
+                .is_some_and(|segment| segment.ident == "Other")
+            {
+                return None;
+            }
+            let Expr::Lit(ExprLit {
+                lit: Lit::Str(text),
+                ..
+            }) = &*arm.body
+            else {
+                return None;
+            };
+            Some(text.value())
+        })
+        .collect()
+}
+
+/// Asserts a generated enum is a closed set (no `Other` fallback variant).
+fn assert_closed_enum(file: &syn::File, name: &str) {
+    assert!(
+        !variant_names(find_enum(file, name)).contains(&"Other".to_owned()),
+        "enum `{name}` unexpectedly has an `Other` fallback variant"
+    );
+    assert!(
+        find_method(file, name, "as_str").sig.constness.is_some(),
+        "closed enum `{name}` must use `const fn as_str`"
+    );
+}
+
+/// Asserts a generated open string enum keeps its `Other` fallback variant.
+fn assert_open_string_enum(file: &syn::File, name: &str) {
+    assert_eq!(
+        variant_names(find_enum(file, name))
+            .last()
+            .map(String::as_str),
+        Some("Other"),
+        "open string enum `{name}` must keep its `Other` fallback variant"
+    );
+    assert!(
+        find_method(file, name, "as_str").sig.constness.is_none(),
+        "open string enum `{name}` must use a non-`const` `as_str`"
+    );
+}
+
+/// Whether any struct, enum, or type alias with the name exists in the file.
+fn has_item_named(file: &syn::File, name: &str) -> bool {
+    file.items.iter().any(|item| match item {
+        Item::Struct(inner) => inner.ident == name,
+        Item::Enum(inner) => inner.ident == name,
+        Item::Type(inner) => inner.ident == name,
+        _ => false,
+    })
+}
 #[test]
 fn parses_any_of_component_and_inline_refs_into_ir() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -53,56 +166,44 @@ components:
           anyOf:
             - $ref: '#/components/schemas/Organization'
             - $ref: '#/components/schemas/User'
-"#,
+"#;
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let search_result = find_enum(&types, "SearchResult");
+    assert_attr_contains(&search_result.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(variant_names(search_result), ["User", "Organization"]);
+    assert_eq!(
+        variant_payload_types(search_result),
+        [norm_str("User<S>"), norm_str("Organization<S>")]
     );
 
-    let search_result = component(&api, "SearchResult");
-    match &search_result.kind {
-        ComponentKind::Union(union) => {
-            assert!(union.tag.is_none());
-            let variants = &union.variants;
-            assert_eq!(variants.len(), 2);
-            assert_eq!(variants[0].rust_name, "User");
-            assert_eq!(variants[0].ty, TypeRef::Named("User".to_owned()));
-            assert_eq!(variants[1].rust_name, "Organization");
-            assert_eq!(variants[1].ty, TypeRef::Named("Organization".to_owned()));
-        }
-        other => panic!("expected SearchResult union, got {other:?}"),
-    }
+    let envelope = find_struct(&types, "Envelope");
+    assert_eq!(field_names(envelope), ["item"]);
+    assert_field(envelope, "item", "EnvelopeItem<S>");
 
-    let envelope = component(&api, "Envelope");
-    match &envelope.kind {
-        ComponentKind::Struct(fields) => {
-            let item = field(fields, "item");
-            assert_eq!(item.ty, TypeRef::Named("EnvelopeItem".to_owned()));
-            assert!(item.required);
-        }
-        other => panic!("expected Envelope struct, got {other:?}"),
-    }
-
-    let envelope_item = component(&api, "EnvelopeItem");
-    match &envelope_item.kind {
-        ComponentKind::Union(union) => {
-            assert!(union.tag.is_none());
-            let variants = &union.variants;
-            assert_eq!(variants[0].rust_name, "Organization");
-            assert_eq!(variants[0].ty, TypeRef::Named("Organization".to_owned()));
-            assert_eq!(variants[1].rust_name, "User");
-            assert_eq!(variants[1].ty, TypeRef::Named("User".to_owned()));
-        }
-        other => panic!("expected EnvelopeItem union, got {other:?}"),
-    }
-
+    let envelope_item = find_enum(&types, "EnvelopeItem");
+    assert_attr_contains(&envelope_item.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(variant_names(envelope_item), ["Organization", "User"]);
     assert_eq!(
-        api.operations[0].responses[0].body,
-        Some(TypeRef::Named("SearchResult".to_owned()))
+        variant_payload_types(envelope_item),
+        [norm_str("Organization<S>"), norm_str("User<S>")]
+    );
+
+    // The operation response body decodes the SearchResult component.
+    let parts = parse_rust(file(&files, "search/parts.rs"));
+    let response = find_enum(&parts, "SearchResponse");
+    assert_eq!(variant_names(response), ["Ok", "UnexpectedStatus"]);
+    assert_eq!(
+        variant_payload_types(response)[0],
+        norm_str("SearchResult<S>")
     );
 }
 
 #[test]
 fn parses_one_of_component_and_inline_refs_into_ir() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -164,66 +265,48 @@ components:
               - $ref: '#/components/schemas/AssistantToolsCode'
               - $ref: '#/components/schemas/AssistantToolsFileSearch'
               - $ref: '#/components/schemas/AssistantToolsFunction'
-"#,
+"#;
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let assistant_tool = find_enum(&types, "AssistantTool");
+    assert_attr_contains(&assistant_tool.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(
+        variant_names(assistant_tool),
+        [
+            "AssistantToolsCode",
+            "AssistantToolsFileSearch",
+            "AssistantToolsFunction"
+        ]
+    );
+    assert_eq!(
+        variant_payload_types(assistant_tool),
+        [
+            norm_str("AssistantToolsCode"),
+            norm_str("AssistantToolsFileSearch"),
+            norm_str("AssistantToolsFunction"),
+        ]
     );
 
-    let assistant_tool = component(&api, "AssistantTool");
-    match &assistant_tool.kind {
-        ComponentKind::Union(union) => {
-            assert!(union.tag.is_none());
-            let variants = &union.variants;
-            assert_eq!(variants.len(), 3);
-            assert_eq!(variants[0].rust_name, "AssistantToolsCode");
-            assert_eq!(
-                variants[0].ty,
-                TypeRef::Named("AssistantToolsCode".to_owned())
-            );
-            assert_eq!(variants[1].rust_name, "AssistantToolsFileSearch");
-            assert_eq!(
-                variants[1].ty,
-                TypeRef::Named("AssistantToolsFileSearch".to_owned())
-            );
-            assert_eq!(variants[2].rust_name, "AssistantToolsFunction");
-            assert_eq!(
-                variants[2].ty,
-                TypeRef::Named("AssistantToolsFunction".to_owned())
-            );
-        }
-        other => panic!("expected AssistantTool union, got {other:?}"),
-    }
+    let assistant = find_struct(&types, "AssistantObject");
+    assert_field(assistant, "tools", "Vec<AssistantObjectToolsItem>");
 
-    let assistant = component(&api, "AssistantObject");
-    match &assistant.kind {
-        ComponentKind::Struct(fields) => {
-            let tools = field(fields, "tools");
-            assert_eq!(
-                tools.ty,
-                TypeRef::Array(Box::new(TypeRef::Named(
-                    "AssistantObjectToolsItem".to_owned()
-                )))
-            );
-            assert!(tools.required);
-        }
-        other => panic!("expected AssistantObject struct, got {other:?}"),
-    }
-
-    let tools_item = component(&api, "AssistantObjectToolsItem");
-    match &tools_item.kind {
-        ComponentKind::Union(union) => {
-            assert!(union.tag.is_none());
-            let variants = &union.variants;
-            assert_eq!(variants[0].rust_name, "AssistantToolsCode");
-            assert_eq!(variants[1].rust_name, "AssistantToolsFileSearch");
-            assert_eq!(variants[2].rust_name, "AssistantToolsFunction");
-        }
-        other => panic!("expected AssistantObjectToolsItem union, got {other:?}"),
-    }
+    let tools_item = find_enum(&types, "AssistantObjectToolsItem");
+    assert_attr_contains(&tools_item.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(
+        variant_names(tools_item),
+        [
+            "AssistantToolsCode",
+            "AssistantToolsFileSearch",
+            "AssistantToolsFunction"
+        ]
+    );
 }
 
 #[test]
 fn parses_one_of_with_inline_singleton_string_enum_branch() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -279,44 +362,46 @@ components:
         - $ref: '#/components/schemas/ResponseFormatText'
         - $ref: '#/components/schemas/ResponseFormatJsonObject'
         - $ref: '#/components/schemas/ResponseFormatJsonSchema'
-"#,
+"#;
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let format = find_enum(&types, "AssistantsApiResponseFormatOption");
+    assert_doc(&format.attrs, "Response format option.");
+    assert_attr_contains(&format.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(
+        variant_names(format),
+        [
+            "Auto",
+            "ResponseFormatText",
+            "ResponseFormatJsonObject",
+            "ResponseFormatJsonSchema"
+        ]
+    );
+    assert_eq!(
+        variant_payload_types(format),
+        [
+            norm_str("AssistantsApiResponseFormatOptionAuto"),
+            norm_str("ResponseFormatText"),
+            norm_str("ResponseFormatJsonObject"),
+            norm_str("ResponseFormatJsonSchema"),
+        ]
     );
 
-    let format = component(&api, "AssistantsApiResponseFormatOption");
-    match &format.kind {
-        ComponentKind::Union(union) => {
-            assert!(union.tag.is_none());
-            assert_eq!(union.variants.len(), 4);
-            assert_eq!(union.variants[0].rust_name, "Auto");
-            assert_eq!(
-                union.variants[0].ty,
-                TypeRef::Named("AssistantsApiResponseFormatOptionAuto".to_owned())
-            );
-            assert_eq!(union.variants[1].rust_name, "ResponseFormatText");
-            assert_eq!(
-                union.variants[1].ty,
-                TypeRef::Named("ResponseFormatText".to_owned())
-            );
-        }
-        other => panic!("expected AssistantsApiResponseFormatOption union, got {other:?}"),
-    }
-
-    let auto = component(&api, "AssistantsApiResponseFormatOptionAuto");
-    match &auto.kind {
-        ComponentKind::Enum(enum_) => {
-            assert_eq!(enum_.variants.len(), 1);
-            assert_eq!(enum_.variants[0].wire_name, "auto");
-            assert_eq!(enum_.variants[0].rust_name, "Auto");
-            assert_eq!(enum_.fallback, EnumFallback::None);
-        }
-        other => panic!("expected AssistantsApiResponseFormatOptionAuto enum, got {other:?}"),
-    }
+    let auto = find_enum(&types, "AssistantsApiResponseFormatOptionAuto");
+    assert_doc(&auto.attrs, "`auto` is the default value");
+    assert_eq!(variant_names(auto), ["Auto"]);
+    assert_eq!(
+        enum_wire_names(&types, "AssistantsApiResponseFormatOptionAuto"),
+        ["auto"]
+    );
+    assert_closed_enum(&types, "AssistantsApiResponseFormatOptionAuto");
 }
 
 #[test]
 fn parses_one_of_with_inline_multi_value_string_enum_branch() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -353,48 +438,35 @@ components:
             - auto
             - required
         - $ref: '#/components/schemas/AssistantsNamedToolChoice'
-"#,
+"#;
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let option = find_enum(&types, "AssistantsApiToolChoiceOption");
+    assert_doc(&option.attrs, "Tool choice option.");
+    assert_attr_contains(&option.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(variant_names(option), ["Enum", "AssistantsNamedToolChoice"]);
+    assert_eq!(
+        variant_payload_types(option),
+        [
+            norm_str("AssistantsApiToolChoiceOptionEnum"),
+            norm_str("AssistantsNamedToolChoice"),
+        ]
     );
 
-    let option = component(&api, "AssistantsApiToolChoiceOption");
-    match &option.kind {
-        ComponentKind::Union(union) => {
-            assert!(union.tag.is_none());
-            assert_eq!(union.variants.len(), 2);
-            assert_eq!(union.variants[0].rust_name, "Enum");
-            assert_eq!(
-                union.variants[0].ty,
-                TypeRef::Named("AssistantsApiToolChoiceOptionEnum".to_owned())
-            );
-            assert_eq!(union.variants[1].rust_name, "AssistantsNamedToolChoice");
-            assert_eq!(
-                union.variants[1].ty,
-                TypeRef::Named("AssistantsNamedToolChoice".to_owned())
-            );
-        }
-        other => panic!("expected AssistantsApiToolChoiceOption union, got {other:?}"),
-    }
-
-    let enum_branch = component(&api, "AssistantsApiToolChoiceOptionEnum");
-    match &enum_branch.kind {
-        ComponentKind::Enum(enum_) => {
-            assert_eq!(enum_.variants.len(), 3);
-            assert_eq!(enum_.variants[0].wire_name, "none");
-            assert_eq!(enum_.variants[0].rust_name, "None");
-            assert_eq!(enum_.variants[1].wire_name, "auto");
-            assert_eq!(enum_.variants[1].rust_name, "Auto");
-            assert_eq!(enum_.variants[2].wire_name, "required");
-            assert_eq!(enum_.variants[2].rust_name, "Required");
-            assert_eq!(enum_.fallback, EnumFallback::None);
-        }
-        other => panic!("expected AssistantsApiToolChoiceOptionEnum enum, got {other:?}"),
-    }
+    let enum_branch = find_enum(&types, "AssistantsApiToolChoiceOptionEnum");
+    assert_eq!(variant_names(enum_branch), ["None", "Auto", "Required"]);
+    assert_eq!(
+        enum_wire_names(&types, "AssistantsApiToolChoiceOptionEnum"),
+        ["none", "auto", "required"]
+    );
+    assert_closed_enum(&types, "AssistantsApiToolChoiceOptionEnum");
 }
 
 #[test]
 fn parses_one_of_with_nullable_inline_primitive_branches() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -434,37 +506,22 @@ components:
               items:
                 $ref: '#/components/schemas/ContentPart'
             - type: "null"
-"#,
+"#;
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let message = find_struct(&types, "Message");
+    // The null branch drops out as an optional field.
+    assert_field(message, "content", "Option<MessageContent<S>>");
+
+    let content = find_enum(&types, "MessageContent");
+    assert_attr_contains(&content.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(variant_names(content), ["String", "Array"]);
+    assert_eq!(
+        variant_payload_types(content),
+        [norm_str("S"), norm_str("Vec<ContentPart<S>>")]
     );
-
-    let message = component(&api, "Message");
-    match &message.kind {
-        ComponentKind::Struct(fields) => {
-            let content = field(fields, "content");
-            assert_eq!(
-                content.ty,
-                TypeRef::Option(Box::new(TypeRef::Named("MessageContent".to_owned())))
-            );
-            assert!(!content.required);
-        }
-        other => panic!("expected Message struct, got {other:?}"),
-    }
-
-    let content = component(&api, "MessageContent");
-    match &content.kind {
-        ComponentKind::Union(union) => {
-            assert!(union.tag.is_none());
-            assert_eq!(union.variants.len(), 2);
-            assert_eq!(union.variants[0].rust_name, "String");
-            assert_eq!(union.variants[0].ty, TypeRef::String);
-            assert_eq!(union.variants[1].rust_name, "Array");
-            assert_eq!(
-                union.variants[1].ty,
-                TypeRef::Array(Box::new(TypeRef::Named("ContentPart".to_owned())))
-            );
-        }
-        other => panic!("expected MessageContent union, got {other:?}"),
-    }
 }
 
 #[test]
@@ -531,8 +588,7 @@ components:
 
 #[test]
 fn parses_any_of_with_inline_primitive_branches() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -559,30 +615,27 @@ components:
         - type: array
           items:
             type: string
-"#,
-    );
+"#;
 
-    let value = component(&api, "PrimitiveValue");
-    match &value.kind {
-        ComponentKind::Union(union) => {
-            assert!(union.tag.is_none());
-            assert_eq!(union.variants.len(), 5);
-            assert_eq!(union.variants[0].rust_name, "String");
-            assert_eq!(union.variants[0].ty, TypeRef::String);
-            assert_eq!(union.variants[1].rust_name, "Integer");
-            assert_eq!(union.variants[1].ty, TypeRef::Integer(IntegerType::I64));
-            assert_eq!(union.variants[2].rust_name, "Number");
-            assert_eq!(union.variants[2].ty, TypeRef::F64);
-            assert_eq!(union.variants[3].rust_name, "Boolean");
-            assert_eq!(union.variants[3].ty, TypeRef::Bool);
-            assert_eq!(union.variants[4].rust_name, "Array");
-            assert_eq!(
-                union.variants[4].ty,
-                TypeRef::Array(Box::new(TypeRef::String))
-            );
-        }
-        other => panic!("expected PrimitiveValue union, got {other:?}"),
-    }
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let value = find_enum(&types, "PrimitiveValue");
+    assert_attr_contains(&value.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(
+        variant_names(value),
+        ["String", "Integer", "Number", "Boolean", "Array"]
+    );
+    assert_eq!(
+        variant_payload_types(value),
+        [
+            norm_str("S"),
+            norm_str("i64"),
+            norm_str("f64"),
+            norm_str("bool"),
+            norm_str("Vec<S>"),
+        ]
+    );
 }
 
 #[test]
@@ -619,12 +672,9 @@ components:
                 - gpt-4o-transcribe
 "#;
 
-    let api = parse_valid(spec);
-    let semantic = normalize_spec(spec, "open-enum.yaml").unwrap();
-    let (_, transcription_ir) = semantic
-        .definitions()
-        .find(|(_, d)| d.source_name == "AudioTranscription")
-        .unwrap();
+    let files = generate_valid(spec);
+    let semantic = normalize_spec(spec);
+    let transcription_ir = definition(&semantic, "AudioTranscription");
 
     let TypeExpr::Object(transcription_ir) = &transcription_ir.schema.ty else {
         panic!("transcription object")
@@ -649,42 +699,32 @@ components:
         &["whisper-1", "gpt-4o-mini-transcribe", "gpt-4o-transcribe"]
     );
 
-    let transcription = component(&api, "AudioTranscription");
+    let types = parse_rust(file(&files, "types.rs"));
 
-    match &transcription.kind {
-        ComponentKind::Struct(fields) => {
-            let model = field(fields, "model");
-            assert_eq!(
-                model.ty,
-                TypeRef::Named("AudioTranscriptionModel".to_owned())
-            );
-            assert!(!model.required);
-        }
-        other => panic!("expected AudioTranscription struct, got {other:?}"),
-    }
+    let transcription = find_struct(&types, "AudioTranscription");
+    assert_field(transcription, "model", "Option<AudioTranscriptionModel<S>>");
 
-    let model = component(&api, "AudioTranscriptionModel");
-
-    match &model.kind {
-        ComponentKind::Enum(enum_) => {
-            let variants = &enum_.variants;
-            assert_eq!(variants.len(), 3);
-            assert_eq!(variants[0].wire_name, "whisper-1");
-            assert_eq!(variants[0].rust_name, "Whisper1");
-            assert_eq!(variants[1].wire_name, "gpt-4o-mini-transcribe");
-            assert_eq!(variants[1].rust_name, "Gpt4oMiniTranscribe");
-            assert_eq!(variants[2].wire_name, "gpt-4o-transcribe");
-            assert_eq!(variants[2].rust_name, "Gpt4oTranscribe");
-            assert_eq!(enum_.fallback, EnumFallback::OtherString);
-        }
-        other => panic!("expected AudioTranscriptionModel enum, got {other:?}"),
-    }
+    let model = find_enum(&types, "AudioTranscriptionModel");
+    assert_doc(&model.attrs, "The model to use for transcription.");
+    assert_eq!(
+        variant_names(model),
+        [
+            "Whisper1",
+            "Gpt4oMiniTranscribe",
+            "Gpt4oTranscribe",
+            "Other"
+        ]
+    );
+    assert_eq!(
+        enum_wire_names(&types, "AudioTranscriptionModel"),
+        ["whisper-1", "gpt-4o-mini-transcribe", "gpt-4o-transcribe"]
+    );
+    assert_open_string_enum(&types, "AudioTranscriptionModel");
 }
 
 #[test]
 fn parses_any_of_open_string_enum_with_annotation_only_string_branch() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -713,28 +753,21 @@ components:
           description: Known model identifiers.
           enum:
             - known-model
-"#,
-    );
+"#;
 
-    let model = component(&api, "Model");
-    assert_eq!(
-        model.description.as_deref(),
-        Some("Known model identifiers.")
-    );
-    match &model.kind {
-        ComponentKind::Enum(enum_) => {
-            assert_eq!(enum_.variants.len(), 1);
-            assert_eq!(enum_.variants[0].wire_name, "known-model");
-            assert_eq!(enum_.fallback, EnumFallback::OtherString);
-        }
-        other => panic!("expected Model enum, got {other:?}"),
-    }
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let model = find_enum(&types, "Model");
+    assert_doc(&model.attrs, "Known model identifiers.");
+    assert_eq!(variant_names(model), ["KnownModel", "Other"]);
+    assert_eq!(enum_wire_names(&types, "Model"), ["known-model"]);
+    assert_open_string_enum(&types, "Model");
 }
 
 #[test]
 fn parses_any_of_open_string_enum_prefers_outer_description() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -760,24 +793,21 @@ components:
           description: Known model identifiers.
           enum:
             - known-model
-"#,
-    );
+"#;
 
-    let model = component(&api, "Model");
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
 
-    assert_eq!(
-        model.description.as_deref(),
-        Some("Preferred model identifier.")
-    );
-    assert!(
-        matches!(&model.kind, ComponentKind::Enum(enum_) if enum_.fallback == EnumFallback::OtherString)
-    );
+    let model = find_enum(&types, "Model");
+    assert_doc(&model.attrs, "Preferred model identifier.");
+    assert_eq!(variant_names(model), ["KnownModel", "Other"]);
+    assert_eq!(enum_wire_names(&types, "Model"), ["known-model"]);
+    assert_open_string_enum(&types, "Model");
 }
 
 #[test]
 fn parses_any_of_open_string_enum_with_bare_const_branches() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -804,32 +834,27 @@ components:
           x-stainless-nominal: false
         - const: claude-opus-4-1
           deprecated: true
-"#,
-    );
+"#;
 
-    let model = component(&api, "Model");
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let model = find_enum(&types, "Model");
+    assert_doc(&model.attrs, "The model that will complete your prompt.");
     assert_eq!(
-        model.description.as_deref(),
-        Some("The model that will complete your prompt.")
+        variant_names(model),
+        ["ClaudeSonnet5", "ClaudeOpus41", "Other"]
     );
-    match &model.kind {
-        ComponentKind::Enum(enum_) => {
-            let variants = &enum_.variants;
-            assert_eq!(variants.len(), 2);
-            assert_eq!(variants[0].wire_name, "claude-sonnet-5");
-            assert_eq!(variants[0].rust_name, "ClaudeSonnet5");
-            assert_eq!(variants[1].wire_name, "claude-opus-4-1");
-            assert_eq!(variants[1].rust_name, "ClaudeOpus41");
-            assert_eq!(enum_.fallback, EnumFallback::OtherString);
-        }
-        other => panic!("expected Model enum, got {other:?}"),
-    }
+    assert_eq!(
+        enum_wire_names(&types, "Model"),
+        ["claude-sonnet-5", "claude-opus-4-1"]
+    );
+    assert_open_string_enum(&types, "Model");
 }
 
 #[test]
 fn parses_any_of_open_string_enum_mixing_enum_and_const_branches() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -856,24 +881,15 @@ components:
             - b
         - type: string
           const: c
-"#,
-    );
+"#;
 
-    let model = component(&api, "Model");
-    match &model.kind {
-        ComponentKind::Enum(enum_) => {
-            let variants = &enum_.variants;
-            assert_eq!(variants.len(), 3);
-            assert_eq!(variants[0].wire_name, "a");
-            assert_eq!(variants[0].rust_name, "A");
-            assert_eq!(variants[1].wire_name, "b");
-            assert_eq!(variants[1].rust_name, "B");
-            assert_eq!(variants[2].wire_name, "c");
-            assert_eq!(variants[2].rust_name, "C");
-            assert_eq!(enum_.fallback, EnumFallback::OtherString);
-        }
-        other => panic!("expected Model enum, got {other:?}"),
-    }
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let model = find_enum(&types, "Model");
+    assert_eq!(variant_names(model), ["A", "B", "C", "Other"]);
+    assert_eq!(enum_wire_names(&types, "Model"), ["a", "b", "c"]);
+    assert_open_string_enum(&types, "Model");
 }
 
 #[test]
@@ -914,8 +930,7 @@ components:
 
 #[test]
 fn parses_plain_union_with_overlapping_inline_enum_branches() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -943,50 +958,28 @@ components:
           enum:
             - b
             - c
-"#,
+"#;
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let choice = find_enum(&types, "Choice");
+    assert_attr_contains(&choice.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(variant_names(choice), ["Enum", "Enum_2"]);
+    assert_eq!(
+        variant_payload_types(choice),
+        [norm_str("ChoiceEnum"), norm_str("ChoiceEnum2")]
     );
 
-    let choice = component(&api, "Choice");
+    let first = find_enum(&types, "ChoiceEnum");
+    assert_eq!(enum_wire_names(&types, "ChoiceEnum"), ["a", "b"]);
+    assert_eq!(variant_names(first), ["A", "B"]);
+    assert_closed_enum(&types, "ChoiceEnum");
 
-    match &choice.kind {
-        ComponentKind::Union(union) => {
-            assert!(union.tag.is_none());
-            assert_eq!(union.variants.len(), 2);
-            assert_eq!(union.variants[0].rust_name, "Enum");
-            assert_eq!(union.variants[1].rust_name, "Enum_2");
-        }
-        other => panic!("expected Choice union, got {other:?}"),
-    }
-
-    let first = component(&api, "ChoiceEnum");
-
-    match &first.kind {
-        ComponentKind::Enum(enum_) => {
-            let wire = enum_
-                .variants
-                .iter()
-                .map(|variant| variant.wire_name.as_str())
-                .collect::<Vec<_>>();
-            assert_eq!(wire, ["a", "b"]);
-            assert_eq!(enum_.fallback, EnumFallback::None);
-        }
-        other => panic!("expected ChoiceEnum enum, got {other:?}"),
-    }
-
-    let second = component(&api, "ChoiceEnum2");
-
-    match &second.kind {
-        ComponentKind::Enum(enum_) => {
-            let wire = enum_
-                .variants
-                .iter()
-                .map(|variant| variant.wire_name.as_str())
-                .collect::<Vec<_>>();
-            assert_eq!(wire, ["b", "c"]);
-            assert_eq!(enum_.fallback, EnumFallback::None);
-        }
-        other => panic!("expected ChoiceEnum2 enum, got {other:?}"),
-    }
+    let second = find_enum(&types, "ChoiceEnum2");
+    assert_eq!(enum_wire_names(&types, "ChoiceEnum2"), ["b", "c"]);
+    assert_eq!(variant_names(second), ["B", "C"]);
+    assert_closed_enum(&types, "ChoiceEnum2");
 }
 
 #[test]
@@ -1066,8 +1059,7 @@ components:
 
 #[test]
 fn parses_plain_union_with_const_string_branch() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -1100,50 +1092,31 @@ components:
             - $ref: '#/components/schemas/Widget'
             - type: string
               const: all
-"#,
+"#;
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let wrapper = find_struct(&types, "Wrapper");
+    assert_field(wrapper, "keep", "Option<WrapperKeep<S>>");
+
+    let keep = find_enum(&types, "WrapperKeep");
+    assert_attr_contains(&keep.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(variant_names(keep), ["Widget", "All"]);
+    assert_eq!(
+        variant_payload_types(keep),
+        [norm_str("Widget<S>"), norm_str("WrapperKeepAll")]
     );
 
-    let wrapper = component(&api, "Wrapper");
-    match &wrapper.kind {
-        ComponentKind::Struct(fields) => {
-            let keep = field(fields, "keep");
-            assert_eq!(keep.ty, TypeRef::Named("WrapperKeep".to_owned()));
-        }
-        other => panic!("expected Wrapper struct, got {other:?}"),
-    }
-
-    let keep = component(&api, "WrapperKeep");
-    match &keep.kind {
-        ComponentKind::Union(union) => {
-            assert!(union.tag.is_none());
-            assert_eq!(union.variants.len(), 2);
-            assert_eq!(union.variants[0].rust_name, "Widget");
-            assert_eq!(union.variants[0].ty, TypeRef::Named("Widget".to_owned()));
-            assert_eq!(union.variants[1].rust_name, "All");
-            assert_eq!(
-                union.variants[1].ty,
-                TypeRef::Named("WrapperKeepAll".to_owned())
-            );
-        }
-        other => panic!("expected WrapperKeep union, got {other:?}"),
-    }
-
-    let all = component(&api, "WrapperKeepAll");
-    match &all.kind {
-        ComponentKind::Enum(enum_) => {
-            assert_eq!(enum_.variants.len(), 1);
-            assert_eq!(enum_.variants[0].wire_name, "all");
-            assert_eq!(enum_.variants[0].rust_name, "All");
-            assert_eq!(enum_.fallback, EnumFallback::None);
-        }
-        other => panic!("expected WrapperKeepAll enum, got {other:?}"),
-    }
+    let all = find_enum(&types, "WrapperKeepAll");
+    assert_eq!(variant_names(all), ["All"]);
+    assert_eq!(enum_wire_names(&types, "WrapperKeepAll"), ["all"]);
+    assert_closed_enum(&types, "WrapperKeepAll");
 }
 
 #[test]
 fn parses_plain_union_with_bare_const_branch() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -1175,40 +1148,28 @@ components:
           anyOf:
             - $ref: '#/components/schemas/Widget'
             - const: all
-"#,
+"#;
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let keep = find_enum(&types, "WrapperKeep");
+    assert_attr_contains(&keep.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(variant_names(keep), ["Widget", "All"]);
+    assert_eq!(
+        variant_payload_types(keep),
+        [norm_str("Widget<S>"), norm_str("WrapperKeepAll")]
     );
 
-    let keep = component(&api, "WrapperKeep");
-    match &keep.kind {
-        ComponentKind::Union(union) => {
-            assert!(union.tag.is_none());
-            assert_eq!(union.variants.len(), 2);
-            assert_eq!(union.variants[0].rust_name, "Widget");
-            assert_eq!(union.variants[1].rust_name, "All");
-            assert_eq!(
-                union.variants[1].ty,
-                TypeRef::Named("WrapperKeepAll".to_owned())
-            );
-        }
-        other => panic!("expected WrapperKeep union, got {other:?}"),
-    }
-
-    let all = component(&api, "WrapperKeepAll");
-    match &all.kind {
-        ComponentKind::Enum(enum_) => {
-            assert_eq!(enum_.variants.len(), 1);
-            assert_eq!(enum_.variants[0].wire_name, "all");
-            assert_eq!(enum_.variants[0].rust_name, "All");
-            assert_eq!(enum_.fallback, EnumFallback::None);
-        }
-        other => panic!("expected WrapperKeepAll enum, got {other:?}"),
-    }
+    let all = find_enum(&types, "WrapperKeepAll");
+    assert_eq!(variant_names(all), ["All"]);
+    assert_eq!(enum_wire_names(&types, "WrapperKeepAll"), ["all"]);
+    assert_closed_enum(&types, "WrapperKeepAll");
 }
 
 #[test]
 fn parses_constrained_string_branch_as_plain_union_not_open_enum() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -1233,44 +1194,34 @@ components:
         - type: string
           enum:
             - known-model
-"#,
+"#;
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let model = find_enum(&types, "Model");
+    assert_attr_contains(&model.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(variant_names(model), ["String", "KnownModel"]);
+    assert_eq!(
+        variant_payload_types(model),
+        [norm_str("ModelString"), norm_str("ModelKnownModel")]
     );
 
-    let model = component(&api, "Model");
-    match &model.kind {
-        ComponentKind::Union(union) => {
-            assert!(union.tag.is_none());
-            let variants = &union.variants;
-            assert_eq!(variants.len(), 2);
-            assert_eq!(variants[0].rust_name, "String");
-            match &variants[0].ty {
-                TypeRef::Constrained { rust_name, inner } => {
-                    assert_eq!(rust_name, "ModelString");
-                    assert_eq!(inner.as_ref(), &TypeRef::String);
-                }
-                other => panic!("expected constrained string variant, got {other:?}"),
-            }
-            assert_eq!(variants[1].rust_name, "KnownModel");
-            assert_eq!(variants[1].ty, TypeRef::Named("ModelKnownModel".to_owned()));
-        }
-        other => panic!("expected Model union, got {other:?}"),
-    }
+    // The constrained branch lowers to its own nutype tuple struct, not to an
+    // open string enum.
+    assert_tuple_struct(&types, "ModelString", "String");
+    let constrained = find_struct(&types, "ModelString");
+    assert_attr_contains(&constrained.attrs, "nutype::nutype", "len_char_min = 12");
 
-    let known_model = component(&api, "ModelKnownModel");
-    match &known_model.kind {
-        ComponentKind::Enum(enum_) => {
-            assert_eq!(enum_.variants.len(), 1);
-            assert_eq!(enum_.variants[0].wire_name, "known-model");
-            assert_eq!(enum_.fallback, EnumFallback::None);
-        }
-        other => panic!("expected ModelKnownModel enum, got {other:?}"),
-    }
+    let known_model = find_enum(&types, "ModelKnownModel");
+    assert_eq!(variant_names(known_model), ["KnownModel"]);
+    assert_eq!(enum_wire_names(&types, "ModelKnownModel"), ["known-model"]);
+    assert_closed_enum(&types, "ModelKnownModel");
 }
 
 #[test]
 fn parses_union_schemas_with_vendor_metadata_extensions() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -1320,37 +1271,58 @@ components:
         propertyName: event
       x-oaiMeta:
         name: Tagged stream events
-"#,
+"#;
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let assistant_stream_event = find_enum(&types, "AssistantStreamEvent");
+    assert_doc(&assistant_stream_event.attrs, "Assistant stream events.");
+    assert_attr_contains(&assistant_stream_event.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(
+        variant_names(assistant_stream_event),
+        ["ThreadStreamEvent", "RunStreamEvent"]
     );
 
-    let assistant_stream_event = component(&api, "AssistantStreamEvent");
-    match &assistant_stream_event.kind {
-        ComponentKind::Union(union) => {
-            assert!(union.tag.is_none());
-            assert_eq!(union.variants.len(), 2);
-        }
-        other => panic!("expected AssistantStreamEvent union, got {other:?}"),
-    }
+    let search_result = find_enum(&types, "SearchResult");
+    assert_attr_contains(&search_result.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(
+        variant_names(search_result),
+        ["ThreadStreamEvent", "RunStreamEvent"]
+    );
 
-    let search_result = component(&api, "SearchResult");
-    assert!(matches!(&search_result.kind, ComponentKind::Union(union) if union.tag.is_none()));
+    // NOTE: the private model's tag metadata is now asserted through the
+    // semantic IR; the generated enum carries `serde(tag = "event")` plus
+    // per-variant renames for the branch wire values.
+    let semantic = normalize_spec(spec);
+    let tagged_ir = composition(&semantic, "TaggedEvent");
+    let discriminator = tagged_ir
+        .discriminator
+        .as_ref()
+        .expect("declared discriminator");
+    assert_eq!(discriminator.property_name, "event");
 
-    let tagged_event = component(&api, "TaggedEvent");
-    match &tagged_event.kind {
-        ComponentKind::Union(union) => {
-            assert_eq!(
-                union.tag.as_ref().map(|tag| tag.property_name.as_str()),
-                Some("event")
-            );
-        }
-        other => panic!("expected TaggedEvent union, got {other:?}"),
-    }
+    let tagged_event = find_enum(&types, "TaggedEvent");
+    assert_attr_contains(&tagged_event.attrs, "cfg_attr", r#"serde(tag = "event")"#);
+    assert_eq!(
+        variant_names(tagged_event),
+        ["ThreadStreamEvent", "RunStreamEvent"]
+    );
+    assert_attr_contains(
+        &variant(tagged_event, "ThreadStreamEvent").attrs,
+        "cfg_attr",
+        r#"serde(rename = "ThreadStreamEvent")"#,
+    );
+    assert_attr_contains(
+        &variant(tagged_event, "RunStreamEvent").attrs,
+        "cfg_attr",
+        r#"serde(rename = "RunStreamEvent")"#,
+    );
 }
 
 #[test]
 fn parses_discriminator_with_embedded_singleton_type_fields_into_ir() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Tool API
@@ -1407,39 +1379,63 @@ components:
         mapping:
           function: '#/components/schemas/FunctionToolCall'
           custom: CustomToolCall
-"#,
+"#;
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let function_tool_call = find_struct(&types, "FunctionToolCall");
+    assert_eq!(
+        field_names(function_tool_call),
+        ["id", "r#type", "function"]
     );
 
-    let function_tool_call = component(&api, "FunctionToolCall");
-    match &function_tool_call.kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(field(fields, "type").rust_name, "r#type");
-        }
-        other => panic!("expected FunctionToolCall struct, got {other:?}"),
-    }
+    let tool_call = find_enum(&types, "ToolCall");
+    // Embedded discriminator: branches carry the tag property as a singleton
+    // field, so the generated enum is untagged without per-variant renames.
+    assert_attr_contains(&tool_call.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(
+        variant_names(tool_call),
+        ["FunctionToolCall", "CustomToolCall"]
+    );
+    assert_eq!(
+        variant_payload_types(tool_call),
+        [
+            norm_str("FunctionToolCall<S>"),
+            norm_str("CustomToolCall<S>")
+        ]
+    );
 
-    let tool_call = component(&api, "ToolCall");
-    match &tool_call.kind {
-        ComponentKind::Union(union) => {
-            let tag = union.tag.as_ref().expect("embedded discriminator tag");
-            assert_eq!(tag.property_name, "type");
-            assert_eq!(tag.style, UnionTagStyle::EmbeddedField);
-            assert_eq!(union.variants.len(), 2);
-            assert!(
-                union
-                    .variants
-                    .iter()
-                    .all(|variant| variant.tag_value.is_none())
-            );
-        }
-        other => panic!("expected ToolCall union, got {other:?}"),
-    }
+    // NOTE: the tag metadata (property name and explicit mappings) is asserted
+    // through the semantic IR.
+    let semantic = normalize_spec(spec);
+    let tool_call_ir = composition(&semantic, "ToolCall");
+    let discriminator = tool_call_ir
+        .discriminator
+        .as_ref()
+        .expect("embedded discriminator tag");
+    assert_eq!(discriminator.property_name, "type");
+    assert_eq!(
+        discriminator
+            .mappings
+            .iter()
+            .map(|mapping| mapping.wire_value.as_str())
+            .collect::<Vec<_>>(),
+        ["function", "custom"]
+    );
+    assert_eq!(
+        ref_branch_source_name(&semantic, &tool_call_ir.branches[0]),
+        "FunctionToolCall"
+    );
+    assert_eq!(
+        ref_branch_source_name(&semantic, &tool_call_ir.branches[1]),
+        "CustomToolCall"
+    );
 }
 
 #[test]
 fn parses_discriminator_with_const_embedded_type_fields_into_ir() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Tool API
@@ -1495,43 +1491,56 @@ components:
         mapping:
           function: '#/components/schemas/FunctionToolCall'
           custom: CustomToolCall
-"#,
+"#;
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let function_tool_call = find_struct(&types, "FunctionToolCall");
+    assert_eq!(
+        field_names(function_tool_call),
+        ["id", "r#type", "function"]
+    );
+    assert_field(function_tool_call, "r#type", "FunctionToolCallType");
+
+    let tool_call = find_enum(&types, "ToolCall");
+    // Embedded discriminator: branches carry the tag property as a singleton
+    // const field, so the generated enum is untagged without renames.
+    assert_attr_contains(&tool_call.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(
+        variant_names(tool_call),
+        ["FunctionToolCall", "CustomToolCall"]
+    );
+    assert_eq!(
+        variant_payload_types(tool_call),
+        [
+            norm_str("FunctionToolCall<S>"),
+            norm_str("CustomToolCall<S>")
+        ]
     );
 
-    let function_tool_call = component(&api, "FunctionToolCall");
-    match &function_tool_call.kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(field(fields, "type").rust_name, "r#type");
-            assert_eq!(
-                field(fields, "type").ty,
-                TypeRef::Named("FunctionToolCallType".to_owned())
-            );
-        }
-        other => panic!("expected FunctionToolCall struct, got {other:?}"),
-    }
-
-    let tool_call = component(&api, "ToolCall");
-    match &tool_call.kind {
-        ComponentKind::Union(union) => {
-            let tag = union.tag.as_ref().expect("embedded discriminator tag");
-            assert_eq!(tag.property_name, "type");
-            assert_eq!(tag.style, UnionTagStyle::EmbeddedField);
-            assert_eq!(union.variants.len(), 2);
-            assert!(
-                union
-                    .variants
-                    .iter()
-                    .all(|variant| variant.tag_value.is_none())
-            );
-        }
-        other => panic!("expected ToolCall union, got {other:?}"),
-    }
+    // NOTE: the tag metadata (property name and explicit mappings) is asserted
+    // through the semantic IR.
+    let semantic = normalize_spec(spec);
+    let tool_call_ir = composition(&semantic, "ToolCall");
+    let discriminator = tool_call_ir
+        .discriminator
+        .as_ref()
+        .expect("embedded discriminator tag");
+    assert_eq!(discriminator.property_name, "type");
+    assert_eq!(
+        discriminator
+            .mappings
+            .iter()
+            .map(|mapping| mapping.wire_value.as_str())
+            .collect::<Vec<_>>(),
+        ["function", "custom"]
+    );
 }
 
 #[test]
 fn parses_discriminator_with_mixed_const_and_enum_embedded_tags() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -1574,25 +1583,46 @@ components:
         mapping:
           dog: Dog
           cat: Cat
-"#,
+"#;
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let pet = find_enum(&types, "Pet");
+    assert_attr_contains(&pet.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(variant_names(pet), ["Dog", "Cat"]);
+    assert_eq!(
+        variant_payload_types(pet),
+        [norm_str("Dog<S>"), norm_str("Cat<S>")]
     );
 
-    let pet = component(&api, "Pet");
-    match &pet.kind {
-        ComponentKind::Union(union) => {
-            let tag = union.tag.as_ref().expect("embedded discriminator tag");
-            assert_eq!(tag.property_name, "kind");
-            assert_eq!(tag.style, UnionTagStyle::EmbeddedField);
-            assert_eq!(union.variants.len(), 2);
-        }
-        other => panic!("expected Pet union, got {other:?}"),
-    }
+    // Branches embed the `kind` tag property as singleton fields.
+    let dog = find_struct(&types, "Dog");
+    let cat = find_struct(&types, "Cat");
+    assert_field(dog, "kind", "DogKind");
+    assert_field(cat, "kind", "CatKind");
+
+    // NOTE: the tag metadata is asserted through the semantic IR.
+    let semantic = normalize_spec(spec);
+    let pet_ir = composition(&semantic, "Pet");
+    let discriminator = pet_ir
+        .discriminator
+        .as_ref()
+        .expect("embedded discriminator tag");
+    assert_eq!(discriminator.property_name, "kind");
+    assert_eq!(
+        discriminator
+            .mappings
+            .iter()
+            .map(|mapping| mapping.wire_value.as_str())
+            .collect::<Vec<_>>(),
+        ["dog", "cat"]
+    );
 }
 
 #[test]
 fn parses_discriminator_with_const_matching_singleton_enum_tag() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -1623,24 +1653,36 @@ components:
         propertyName: command
         mapping:
           view: ViewCommand
-"#,
-    );
+"#;
 
-    let command = component(&api, "Command");
-    match &command.kind {
-        ComponentKind::Union(union) => {
-            let tag = union.tag.as_ref().expect("embedded discriminator tag");
-            assert_eq!(tag.property_name, "command");
-            assert_eq!(tag.style, UnionTagStyle::EmbeddedField);
-        }
-        other => panic!("expected Command union, got {other:?}"),
-    }
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let command = find_enum(&types, "Command");
+    assert_attr_contains(&command.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(variant_names(command), ["ViewCommand"]);
+    assert_eq!(variant_payload_types(command), [norm_str("ViewCommand")]);
+
+    let view_command = find_struct(&types, "ViewCommand");
+    assert_field(view_command, "command", "ViewCommandCommand");
+
+    // NOTE: the tag metadata is asserted through the semantic IR.
+    let semantic = normalize_spec(spec);
+    let command_ir = composition(&semantic, "Command");
+    let discriminator = command_ir
+        .discriminator
+        .as_ref()
+        .expect("embedded discriminator tag");
+    assert_eq!(discriminator.property_name, "command");
+    assert_eq!(
+        ref_branch_source_name(&semantic, &command_ir.branches[0]),
+        "ViewCommand"
+    );
 }
 
 #[test]
 fn parses_empty_any_of_as_json_value() {
-    let api = parse_valid(
-        r##"
+    let spec = r##"
 openapi: 3.1.0
 info:
   title: Test API
@@ -1656,12 +1698,13 @@ components:
   schemas:
     Broken:
       anyOf: []
-"##,
-    );
-    match &component(&api, "Broken").kind {
-        ComponentKind::Alias(alias) => assert_eq!(*alias, TypeRef::JsonValue),
-        other => panic!("expected Broken alias, got {other:?}"),
-    }
+"##;
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let broken = find_type_alias(&types, "Broken");
+    assert_eq!(norm(&broken.ty), norm_str("satay_runtime::JsonValue"));
 }
 
 #[test]
@@ -3293,8 +3336,7 @@ components:
 
 #[test]
 fn accepts_repeated_discriminator_branch_across_unions() {
-    let api = parse_valid(
-        r##"
+    let spec = r##"
 openapi: 3.1.0
 info:
   title: Test API
@@ -3331,23 +3373,20 @@ components:
             - $ref: '#/components/schemas/Leaf'
           discriminator:
             propertyName: kind
-"##,
-    );
+"##;
 
-    let holder = component(&api, "Holder");
-    match &holder.kind {
-        ComponentKind::Struct(fields) => {
-            assert!(fields.iter().any(|field| field.wire_name == "first"));
-            assert!(fields.iter().any(|field| field.wire_name == "second"));
-        }
-        other => panic!("expected Holder struct, got {other:?}"),
-    }
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let holder = find_struct(&types, "Holder");
+    assert_eq!(field_names(holder), ["first", "second"]);
+    assert_field(holder, "first", "HolderFirst<S>");
+    assert_field(holder, "second", "HolderSecond<S>");
 }
 
 #[test]
 fn parses_nullable_nested_discriminated_one_of_single_branch() {
-    let api = parse_valid(
-        r##"
+    let spec = r##"
 openapi: 3.1.0
 info:
   title: Test API
@@ -3385,34 +3424,49 @@ components:
         type:
           type: string
           const: ephemeral
-"##,
-    );
+"##;
 
-    let tool = component(&api, "Tool");
-    match &tool.kind {
-        ComponentKind::Struct(fields) => {
-            let cache_control = field(fields, "cache_control");
-            assert_eq!(
-                cache_control.ty,
-                TypeRef::Option(Box::new(TypeRef::Named("CacheControlEphemeral".to_owned())))
-            );
-            assert!(!cache_control.required);
-        }
-        other => panic!("expected Tool struct, got {other:?}"),
-    }
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let tool = find_struct(&types, "Tool");
+    assert_field(tool, "cache_control", "Option<CacheControlEphemeral>");
 
     assert!(
-        !api.components
-            .iter()
-            .any(|component| component.rust_name == "ToolCacheControl"),
+        !has_item_named(&types, "ToolCacheControl"),
         "single-reference nested union must not synthesize a wrapper component"
+    );
+
+    // NOTE: the nested union's discriminator metadata is asserted through the
+    // semantic IR.
+    let semantic = normalize_spec(spec);
+    let tool_ir = definition(&semantic, "Tool");
+    let TypeExpr::Object(tool_object) = &tool_ir.schema.ty else {
+        panic!("expected Tool object")
+    };
+    let cache_control_ir = property(tool_object, "cache_control");
+    let TypeExpr::Composition(nullable_union) = &cache_control_ir.value.ty else {
+        panic!("expected nullable nested union composition")
+    };
+    assert_eq!(nullable_union.kind, CompositionKind::AnyOf);
+    let TypeExpr::Composition(nested) = &nullable_union.branches[0].ty else {
+        panic!("expected nested discriminated oneOf")
+    };
+    assert_eq!(nested.kind, CompositionKind::OneOf);
+    let discriminator = nested
+        .discriminator
+        .as_ref()
+        .expect("nested union keeps its discriminator");
+    assert_eq!(discriminator.property_name, "type");
+    assert_eq!(
+        ref_branch_source_name(&semantic, &nested.branches[0]),
+        "CacheControlEphemeral"
     );
 }
 
 #[test]
 fn parses_nullable_nested_discriminated_one_of_multi_branch() {
-    let api = parse_valid(
-        r##"
+    let spec = r##"
 openapi: 3.1.0
 info:
   title: Test API
@@ -3453,42 +3507,63 @@ components:
         type:
           type: string
           const: 'off'
-"##,
+"##;
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let widget = find_struct(&types, "Widget");
+    assert_field(widget, "status", "Option<WidgetStatus>");
+
+    let status = find_enum(&types, "WidgetStatus");
+    // Branches embed the `type` tag property as singleton const fields, so the
+    // generated enum is untagged with the branches in declaration order.
+    assert_attr_contains(&status.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(variant_names(status), ["StatusOn", "StatusOff"]);
+    assert_eq!(
+        variant_payload_types(status),
+        [norm_str("StatusOn"), norm_str("StatusOff")]
     );
+    let status_on = find_struct(&types, "StatusOn");
+    let status_off = find_struct(&types, "StatusOff");
+    assert_field(status_on, "r#type", "StatusOnType");
+    assert_field(status_off, "r#type", "StatusOffType");
 
-    let widget = component(&api, "Widget");
-    match &widget.kind {
-        ComponentKind::Struct(fields) => {
-            let status = field(fields, "status");
-            assert_eq!(
-                status.ty,
-                TypeRef::Option(Box::new(TypeRef::Named("WidgetStatus".to_owned())))
-            );
-        }
-        other => panic!("expected Widget struct, got {other:?}"),
-    }
-
-    let status = component(&api, "WidgetStatus");
-    match &status.kind {
-        ComponentKind::Union(union) => {
-            let tag = union.tag.as_ref().expect("nested union keeps its tag");
-            assert_eq!(tag.property_name, "type");
-            assert_eq!(tag.style, UnionTagStyle::EmbeddedField);
-            assert_eq!(union.variants.len(), 2);
-            assert_eq!(union.variants[0].rust_name, "StatusOn");
-            assert_eq!(union.variants[0].ty, TypeRef::Named("StatusOn".to_owned()));
-            assert!(union.variants[0].tag_value.is_none());
-            assert_eq!(union.variants[1].rust_name, "StatusOff");
-            assert!(union.variants[1].tag_value.is_none());
-        }
-        other => panic!("expected WidgetStatus union, got {other:?}"),
-    }
+    // NOTE: the nested union's tag metadata is asserted through the semantic
+    // IR; the null sibling branch is retained as a `Null` branch.
+    let semantic = normalize_spec(spec);
+    let widget_ir = definition(&semantic, "Widget");
+    let TypeExpr::Object(widget_object) = &widget_ir.schema.ty else {
+        panic!("expected Widget object")
+    };
+    let status_ir = property(widget_object, "status");
+    let TypeExpr::Composition(nullable_union) = &status_ir.value.ty else {
+        panic!("expected nullable nested union composition")
+    };
+    assert_eq!(nullable_union.kind, CompositionKind::AnyOf);
+    assert!(matches!(nullable_union.branches[1].ty, TypeExpr::Null));
+    let TypeExpr::Composition(nested) = &nullable_union.branches[0].ty else {
+        panic!("expected nested discriminated oneOf")
+    };
+    assert_eq!(nested.kind, CompositionKind::OneOf);
+    let discriminator = nested
+        .discriminator
+        .as_ref()
+        .expect("nested union keeps its tag");
+    assert_eq!(discriminator.property_name, "type");
+    assert_eq!(
+        ref_branch_source_name(&semantic, &nested.branches[0]),
+        "StatusOn"
+    );
+    assert_eq!(
+        ref_branch_source_name(&semantic, &nested.branches[1]),
+        "StatusOff"
+    );
 }
 
 #[test]
 fn parses_nested_union_beside_string_branch() {
-    let api = parse_valid(
-        r##"
+    let spec = r##"
 openapi: 3.1.0
 info:
   title: Test API
@@ -3526,40 +3601,44 @@ components:
         type:
           type: string
           const: b
-"##,
+"##;
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let entry = find_enum(&types, "Entry");
+    assert_attr_contains(&entry.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(variant_names(entry), ["Union", "String"]);
+    assert_eq!(
+        variant_payload_types(entry),
+        [norm_str("EntryUnion"), norm_str("S")]
     );
 
-    let entry = component(&api, "Entry");
-    match &entry.kind {
-        ComponentKind::Union(union) => {
-            assert!(union.tag.is_none());
-            assert_eq!(union.variants.len(), 2);
-            assert_eq!(union.variants[0].rust_name, "Union");
-            assert_eq!(
-                union.variants[0].ty,
-                TypeRef::Named("EntryUnion".to_owned())
-            );
-            assert_eq!(union.variants[1].rust_name, "String");
-            assert_eq!(union.variants[1].ty, TypeRef::String);
-        }
-        other => panic!("expected Entry union, got {other:?}"),
-    }
+    let nested = find_enum(&types, "EntryUnion");
+    assert_attr_contains(&nested.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(variant_names(nested), ["AgentA", "AgentB"]);
+    assert_eq!(
+        variant_payload_types(nested),
+        [norm_str("AgentA"), norm_str("AgentB")]
+    );
 
-    let nested = component(&api, "EntryUnion");
-    match &nested.kind {
-        ComponentKind::Union(union) => {
-            let tag = union.tag.as_ref().expect("nested union keeps its tag");
-            assert_eq!(tag.style, UnionTagStyle::EmbeddedField);
-            assert_eq!(union.variants.len(), 2);
-        }
-        other => panic!("expected EntryUnion union, got {other:?}"),
-    }
+    // NOTE: the nested union's tag metadata is asserted through the semantic
+    // IR.
+    let semantic = normalize_spec(spec);
+    let entry_ir = composition(&semantic, "Entry");
+    let TypeExpr::Composition(nested_ir) = &entry_ir.branches[0].ty else {
+        panic!("expected nested union branch")
+    };
+    let discriminator = nested_ir
+        .discriminator
+        .as_ref()
+        .expect("nested union keeps its tag");
+    assert_eq!(discriminator.property_name, "type");
 }
 
 #[test]
 fn does_not_collapse_internally_tagged_single_branch_nested_union() {
-    let api = parse_valid(
-        r##"
+    let spec = r##"
 openapi: 3.1.0
 info:
   title: Test API
@@ -3590,40 +3669,24 @@ components:
       properties:
         id:
           type: string
-"##,
+"##;
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let holder = find_struct(&types, "Holder");
+    assert_field(holder, "item", "Option<HolderItem<S>>");
+
+    // NOTE: the private model's tag_value fact is now covered by the generated
+    // serde rename on the variant.
+    let item = find_enum(&types, "HolderItem");
+    assert_attr_contains(&item.attrs, "cfg_attr", r#"serde(tag = "type")"#);
+    assert_eq!(variant_names(item), ["Plain"]);
+    assert_attr_contains(
+        &variant(item, "Plain").attrs,
+        "cfg_attr",
+        r#"serde(rename = "Plain")"#,
     );
-
-    let holder = component(&api, "Holder");
-    match &holder.kind {
-        ComponentKind::Struct(fields) => {
-            let item = field(fields, "item");
-            assert_eq!(
-                item.ty,
-                TypeRef::Option(Box::new(TypeRef::Named("HolderItem".to_owned())))
-            );
-        }
-        other => panic!("expected Holder struct, got {other:?}"),
-    }
-
-    let item = component(&api, "HolderItem");
-    match &item.kind {
-        ComponentKind::Union(union) => {
-            let tag = union
-                .tag
-                .as_ref()
-                .expect("internally tagged union keeps its tag");
-            assert_eq!(tag.property_name, "type");
-            assert_eq!(tag.style, UnionTagStyle::InternallyTagged);
-            assert_eq!(union.variants.len(), 1);
-            assert_eq!(union.variants[0].rust_name, "Plain");
-            assert_eq!(
-                union.variants[0].tag_value.as_deref(),
-                Some("Plain"),
-                "internally tagged single-branch union keeps its wire tag"
-            );
-        }
-        other => panic!("expected HolderItem union, got {other:?}"),
-    }
 }
 
 #[test]
@@ -3826,8 +3889,7 @@ components:
 
 #[test]
 fn unwraps_annotation_only_all_of_ref_wrapper_union_branch() {
-    let api = parse_valid(
-        r##"
+    let spec = r##"
 openapi: 3.1.0
 info:
   title: Test API
@@ -3865,26 +3927,18 @@ components:
       properties:
         level:
           type: string
-"##,
-    );
+"##;
 
-    match &component(&api, "Params").kind {
-        ComponentKind::Union(union) => {
-            assert!(union.tag.is_none());
-            assert_eq!(union.variants.len(), 2);
-            assert_eq!(union.variants[0].rust_name, "AutoParams");
-            assert_eq!(
-                union.variants[0].ty,
-                TypeRef::Named("AutoParams".to_owned())
-            );
-            assert_eq!(union.variants[1].rust_name, "ManualParams");
-            assert_eq!(
-                union.variants[1].ty,
-                TypeRef::Named("ManualParams".to_owned())
-            );
-        }
-        other => panic!("expected Params union, got {other:?}"),
-    }
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let params = find_enum(&types, "Params");
+    assert_attr_contains(&params.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(variant_names(params), ["AutoParams", "ManualParams"]);
+    assert_eq!(
+        variant_payload_types(params),
+        [norm_str("AutoParams"), norm_str("ManualParams<S>")]
+    );
 }
 
 #[test]
@@ -4130,8 +4184,7 @@ components:
 
 #[test]
 fn ignores_discriminator_on_plain_object_schema() {
-    let api = parse_valid(
-        r##"
+    let spec = r##"
 openapi: 3.1.0
 info:
   title: Test API
@@ -4154,22 +4207,24 @@ components:
           type: string
       discriminator:
         propertyName: role
-"##,
-    );
+"##;
 
-    match &component(&api, "Message").kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(fields.len(), 1);
-            assert!(field(fields, "role").required);
-        }
-        other => panic!("expected Message struct, got {other:?}"),
-    }
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let message = find_struct(&types, "Message");
+    assert_eq!(field_names(message), ["role"]);
+    assert_field(message, "role", "S");
+    // The field stays required: no optional-default serde attrs were rendered.
+    assert!(!contains_tokens(
+        message,
+        "serde(default, skip_serializing_if = \"Option::is_none\")"
+    ));
 }
 
 #[test]
 fn parses_discriminator_union_with_object_type_sibling() {
-    let api = parse_valid(
-        r##"
+    let spec = r##"
 openapi: 3.1.0
 info:
   title: Test API
@@ -4208,17 +4263,33 @@ components:
         - $ref: '#/components/schemas/Cat'
       discriminator:
         propertyName: kind
-"##,
+"##;
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let pet = find_enum(&types, "Pet");
+    assert_attr_contains(&pet.attrs, "cfg_attr", "serde(untagged)");
+    assert_eq!(variant_names(pet), ["Dog", "Cat"]);
+    assert_eq!(
+        variant_payload_types(pet),
+        [norm_str("Dog"), norm_str("Cat")]
     );
 
-    match &component(&api, "Pet").kind {
-        ComponentKind::Union(union) => {
-            let tag = union.tag.as_ref().expect("embedded discriminator tag");
-            assert_eq!(tag.property_name, "kind");
-            assert_eq!(union.variants.len(), 2);
-        }
-        other => panic!("expected Pet union, got {other:?}"),
-    }
+    // Branches embed the `kind` tag property as singleton fields.
+    let dog = find_struct(&types, "Dog");
+    let cat = find_struct(&types, "Cat");
+    assert_field(dog, "kind", "DogKind");
+    assert_field(cat, "kind", "CatKind");
+
+    // NOTE: the tag metadata is asserted through the semantic IR.
+    let semantic = normalize_spec(spec);
+    let pet_ir = composition(&semantic, "Pet");
+    let discriminator = pet_ir
+        .discriminator
+        .as_ref()
+        .expect("embedded discriminator tag");
+    assert_eq!(discriminator.property_name, "kind");
 }
 
 #[test]

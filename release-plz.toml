@@ -17,6 +17,9 @@ name = "satay-runtime"
 name = "satay-ir"
 
 [[package]]
+name = "satay-codegen-rust"
+
+[[package]]
 name = "satay-storage"
 
 [[package]]

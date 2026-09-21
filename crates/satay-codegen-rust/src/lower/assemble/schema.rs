@@ -1,14 +1,14 @@
 use crate::ident::{field_ident, type_ident, unique_ident, variant_ident};
-use crate::model::{
-    Component, ComponentKind, ConstrainedType, CoordinateCodec, Enum, Field, RangeType,
-    RangeTypeRef, TypeRef, Union, UnionTag, UnionTagStyle, UnionVariant,
-};
-use crate::parse::rust::checked::{
+use crate::lower::checked::{
     CheckedComponent, CheckedComponentKind, CheckedField, CheckedFieldValue, CheckedType,
     CheckedTypeKind, CheckedUnion, CheckedUnionTagStyle, CheckedUnionVariant,
     CheckedUnionVariantKind,
 };
-use crate::parse::rust::registry::TypeRegistry;
+use crate::lower::registry::TypeRegistry;
+use crate::model::{
+    Component, ComponentKind, ConstrainedType, CoordinateCodec, Enum, Field, RangeType,
+    RangeTypeRef, TypeRef, Union, UnionTag, UnionTagStyle, UnionVariant,
+};
 
 use std::collections::{BTreeMap, BTreeSet};
 

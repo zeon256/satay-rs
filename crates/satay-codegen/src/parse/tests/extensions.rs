@@ -1,8 +1,92 @@
+use super::ast::*;
 use super::*;
+use satay_ir::{PropertyPolicy, StringInterpretation, StringScalar, TypeExpr};
+use syn::{Fields, ImplItem, Item};
+
+/// Extracts the method names of the untagged `Api` view, in declaration order.
+fn untagged_methods(file: &syn::File) -> Vec<String> {
+    file.items
+        .iter()
+        .find_map(|item| {
+            let Item::Impl(item_impl) = item else {
+                return None;
+            };
+            (norm(&item_impl.self_ty).contains("Api")).then(|| {
+                item_impl
+                    .items
+                    .iter()
+                    .filter_map(|impl_item| match impl_item {
+                        ImplItem::Fn(method) if is_pub(&method.vis) => {
+                            Some(method.sig.ident.to_string())
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            })
+        })
+        .unwrap_or_default()
+}
+
+/// Extracts the payload type of the `Ok` response variant.
+fn ok_payload(file: &syn::File, response_name: &str) -> String {
+    let response = find_enum(file, response_name);
+    let ok = variant(response, "Ok");
+    let Fields::Unnamed(fields) = &ok.fields else {
+        panic!("`{response_name}::Ok` must be a tuple variant");
+    };
+    norm(&fields.unnamed[0].ty)
+}
+
+/// Looks up one object property's inclusion policy in the semantic IR.
+fn property_policy<'a>(
+    api: &'a satay_ir::Api,
+    definition_name: &str,
+    wire_name: &str,
+) -> &'a PropertyPolicy {
+    let definition = api
+        .definitions()
+        .find_map(|(_, definition)| {
+            (definition.source_name == definition_name).then_some(definition)
+        })
+        .unwrap_or_else(|| panic!("missing definition `{definition_name}`"));
+    let TypeExpr::Object(object) = &definition.schema.ty else {
+        panic!("definition `{definition_name}` must be an object schema");
+    };
+    let property = object
+        .properties
+        .iter()
+        .find(|property| property.wire_name == wire_name)
+        .unwrap_or_else(|| panic!("missing property `{definition_name}.{wire_name}`"));
+    &property.policy
+}
+
+/// Looks up one parameter's string interpretation in the semantic IR.
+fn parameter_interpretation<'a>(
+    api: &'a satay_ir::Api,
+    operation_id: &str,
+    wire_name: &str,
+) -> &'a StringInterpretation {
+    let operation = api
+        .http()
+        .paths
+        .iter()
+        .flat_map(|path| &path.operations)
+        .find(|operation| operation.source_id.as_deref() == Some(operation_id))
+        .unwrap_or_else(|| panic!("missing operation `{operation_id}`"));
+    let parameter = operation
+        .parameters
+        .iter()
+        .find(|parameter| parameter.wire_name == wire_name)
+        .unwrap_or_else(|| panic!("missing parameter `{wire_name}`"));
+    let TypeExpr::String(string) = &parameter.schema.ty else {
+        panic!("parameter `{wire_name}` must be a string schema");
+    };
+    &string.interpretation
+}
 
 #[test]
 fn parses_x_satay_parse_as_for_string_schemas() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -72,56 +156,69 @@ components:
 "#,
     );
 
-    let arrival = component(&api, "Arrival");
-    match &arrival.kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(
-                field(fields, "stop").ty,
-                TypeRef::ParsedString(StringCodec::Standard(ParseAs::U32))
-            );
-            assert_eq!(
-                field(fields, "latitude").ty,
-                TypeRef::ParsedString(StringCodec::Standard(ParseAs::F64))
-            );
-            assert_eq!(
-                field(fields, "visit").ty,
-                TypeRef::ParsedString(StringCodec::Standard(ParseAs::U8))
-            );
-            assert_eq!(
-                field(fields, "monitored").ty,
-                TypeRef::ParsedString(StringCodec::Standard(ParseAs::Bool))
-            );
-            assert_eq!(
-                field(fields, "numericMonitored").ty,
-                TypeRef::ParsedInteger(ParseAs::Bool)
-            );
-            assert_eq!(
-                field(fields, "estimatedArrival").ty,
-                TypeRef::ParsedString(StringCodec::Standard(ParseAs::OffsetDateTime))
-            );
-            assert_eq!(
-                field(fields, "frequency").ty,
-                TypeRef::Range(RangeTypeRef {
-                    rust_name: "ArrivalFrequency".to_owned(),
-                    scalar: RangeScalar::Integer(IntegerType::U8),
-                })
-            );
-            assert_eq!(
-                field(fields, "ratio").ty,
-                TypeRef::Range(RangeTypeRef {
-                    rust_name: "ArrivalRatio".to_owned(),
-                    scalar: RangeScalar::F32,
-                })
-            );
-        }
-        other => panic!("expected Arrival struct, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
+    let arrival = find_struct(&types, "Arrival");
+
+    // String wire schemas lower to parsed scalars; the serde codec names the
+    // requested parse-as.
+    assert_field(arrival, "stop", "u32");
+    assert_attr_contains(
+        &field(arrival, "stop").attrs,
+        "cfg_attr",
+        r#"with = "serde_string::as_u32""#,
+    );
+    assert_field(arrival, "latitude", "f64");
+    assert_attr_contains(
+        &field(arrival, "latitude").attrs,
+        "cfg_attr",
+        r#"with = "serde_string::as_f64""#,
+    );
+    assert_field(arrival, "visit", "u8");
+    assert_attr_contains(
+        &field(arrival, "visit").attrs,
+        "cfg_attr",
+        r#"with = "serde_string::as_u8""#,
+    );
+    assert_field(arrival, "monitored", "bool");
+    assert_attr_contains(
+        &field(arrival, "monitored").attrs,
+        "cfg_attr",
+        r#"with = "serde_string::as_bool""#,
+    );
+    // Integer wire schemas parse as bool through the integer codec.
+    assert_field(arrival, "numeric_monitored", "bool");
+    assert_attr_contains(
+        &field(arrival, "numeric_monitored").attrs,
+        "cfg_attr",
+        r#"with = "serde_integer::as_bool""#,
+    );
+    assert_field(
+        arrival,
+        "estimated_arrival",
+        "satay_runtime::OffsetDateTime",
+    );
+    assert_attr_contains(
+        &field(arrival, "estimated_arrival").attrs,
+        "cfg_attr",
+        r#"with = "serde_string::as_offset_datetime""#,
+    );
+
+    // Constrained strings lower to range components over the declared scalar.
+    assert_field(arrival, "frequency", "ArrivalFrequency");
+    let frequency = find_struct(&types, "ArrivalFrequency");
+    assert_field(frequency, "min", "Option<u8>");
+    assert_field(frequency, "max", "Option<u8>");
+    assert!(contains_tokens(&types, "satay_runtime::parse_range::<u8>"));
+    assert_field(arrival, "ratio", "ArrivalRatio");
+    let ratio = find_struct(&types, "ArrivalRatio");
+    assert_field(ratio, "min", "Option<f32>");
+    assert_field(ratio, "max", "Option<f32>");
+    assert!(contains_tokens(&types, "satay_runtime::parse_range::<f32>"));
 }
 
 #[test]
 fn lowers_date_parse_as_on_query_parameters() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -140,21 +237,30 @@ paths:
       responses:
         '204':
           description: No content
-"#,
+"#;
+
+    let api = normalize_spec(spec);
+    assert_eq!(
+        parameter_interpretation(&api, "psi", "date"),
+        &StringInterpretation::Scalar(StringScalar::Date),
     );
 
-    let date = parameter(&api.operations[0], "date");
-    assert_eq!(
-        date.ty,
-        TypeRef::ParsedString(StringCodec::Standard(ParseAs::Date))
-    );
-    assert!(!date.required);
+    let files = generate_valid(spec);
+    let parts = parse_rust(file(&files, "psi/parts.rs"));
+    let input = find_struct(&parts, "PsiInput");
+    // The optional query parameter wraps the parsed date in `Option`.
+    assert_field(input, "date", "Option<satay_runtime::Date>");
+    assert!(has_method(&parts, "PsiInput", "date"));
+    let parts_fn = find_fn(&parts, "psi_parts");
+    assert!(contains_tokens(
+        parts_fn,
+        "satay_runtime::format_date(value)"
+    ));
 }
 
 #[test]
 fn lowers_naive_datetime_parse_as_on_query_parameters() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -173,20 +279,30 @@ paths:
       responses:
         '204':
           description: No content
-"#,
+"#;
+
+    let api = normalize_spec(spec);
+    assert_eq!(
+        parameter_interpretation(&api, "psi", "date"),
+        &StringInterpretation::Scalar(StringScalar::NaiveDatetime),
     );
 
-    let date = parameter(&api.operations[0], "date");
-    assert_eq!(
-        date.ty,
-        TypeRef::ParsedString(StringCodec::Standard(ParseAs::NaiveDateTime))
-    );
-    assert!(!date.required);
+    let files = generate_valid(spec);
+    let parts = parse_rust(file(&files, "psi/parts.rs"));
+    let input = find_struct(&parts, "PsiInput");
+    // The optional query parameter wraps the parsed datetime in `Option`.
+    assert_field(input, "date", "Option<satay_runtime::PrimitiveDateTime>");
+    assert!(has_method(&parts, "PsiInput", "date"));
+    let parts_fn = find_fn(&parts, "psi_parts");
+    assert!(contains_tokens(
+        parts_fn,
+        "satay_runtime::format_naive_datetime(value)"
+    ));
 }
 
 #[test]
 fn parses_x_satay_enum_variants() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -239,42 +355,59 @@ components:
 "#,
     );
 
-    let vehicle_type = component(&api, "VehicleType");
-    match &vehicle_type.kind {
-        ComponentKind::Enum(enum_) => {
-            let variants = &enum_.variants;
-            assert_eq!(variants.len(), 4);
-            assert_eq!(variants[0].wire_name, "SD");
-            assert_eq!(variants[0].rust_name, "SingleDecker");
-            assert_eq!(variants[1].wire_name, "DD");
-            assert_eq!(variants[1].rust_name, "DoubleDecker");
-            assert_eq!(variants[2].wire_name, "BD");
-            assert_eq!(variants[2].rust_name, "Bendy");
-            assert_eq!(variants[3].wire_name, "");
-            assert_eq!(variants[3].rust_name, "Unknown");
-            assert_eq!(enum_.fallback, EnumFallback::None);
-        }
-        other => panic!("expected VehicleType enum, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
 
-    let arrival_type = component(&api, "ArrivalType");
-    match &arrival_type.kind {
-        ComponentKind::Enum(enum_) => {
-            let variants = &enum_.variants;
-            assert_eq!(variants.len(), 4);
-            assert_eq!(variants[0].rust_name, "SingleDecker");
-            assert_eq!(variants[1].rust_name, "DoubleDecker");
-            assert_eq!(variants[2].rust_name, "Bendy");
-            assert_eq!(variants[3].rust_name, "Unknown");
-            assert_eq!(enum_.fallback, EnumFallback::None);
-        }
-        other => panic!("expected ArrivalType enum, got {other:?}"),
-    }
+    // NOTE: `EnumFallback::None` is pinned by the exact variant list — no
+    // extra fallback variant is appended beyond the four declared names.
+    let vehicle_type = find_enum(&types, "VehicleType");
+    assert_eq!(
+        variant_names(vehicle_type),
+        ["SingleDecker", "DoubleDecker", "Bendy", "Unknown"]
+    );
+    // Wire names survive as serde renames.
+    assert_attr_contains(
+        &variant(vehicle_type, "SingleDecker").attrs,
+        "cfg_attr",
+        r#"serde(rename = "SD")"#,
+    );
+    assert_attr_contains(
+        &variant(vehicle_type, "DoubleDecker").attrs,
+        "cfg_attr",
+        r#"serde(rename = "DD")"#,
+    );
+    assert_attr_contains(
+        &variant(vehicle_type, "Bendy").attrs,
+        "cfg_attr",
+        r#"serde(rename = "BD")"#,
+    );
+    assert_attr_contains(
+        &variant(vehicle_type, "Unknown").attrs,
+        "cfg_attr",
+        r#"serde(rename = "")"#,
+    );
+
+    let arrival = find_struct(&types, "Arrival");
+    assert_field(arrival, "r#type", "ArrivalType");
+    let arrival_type = find_enum(&types, "ArrivalType");
+    assert_eq!(
+        variant_names(arrival_type),
+        ["SingleDecker", "DoubleDecker", "Bendy", "Unknown"]
+    );
+    assert_attr_contains(
+        &variant(arrival_type, "SingleDecker").attrs,
+        "cfg_attr",
+        r#"serde(rename = "SD")"#,
+    );
+    assert_attr_contains(
+        &variant(arrival_type, "Unknown").attrs,
+        "cfg_attr",
+        r#"serde(rename = "")"#,
+    );
 }
 
 #[test]
 fn parses_x_satay_enum_variants_using_other_for_closed_enum() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -303,16 +436,14 @@ components:
 "#,
     );
 
-    let vehicle_type = component(&api, "VehicleType");
-    match &vehicle_type.kind {
-        ComponentKind::Enum(enum_) => {
-            assert_eq!(enum_.variants.len(), 1);
-            assert_eq!(enum_.variants[0].wire_name, "SD");
-            assert_eq!(enum_.variants[0].rust_name, "Other");
-            assert_eq!(enum_.fallback, EnumFallback::None);
-        }
-        other => panic!("expected VehicleType enum, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
+    let vehicle_type = find_enum(&types, "VehicleType");
+    assert_eq!(variant_names(vehicle_type), ["Other"]);
+    assert_attr_contains(
+        &variant(vehicle_type, "Other").attrs,
+        "cfg_attr",
+        r#"serde(rename = "SD")"#,
+    );
 }
 
 #[test]
@@ -693,7 +824,7 @@ components:
 
 #[test]
 fn parses_x_satay_treat_error_as_none() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -726,21 +857,46 @@ components:
 "#,
     );
 
-    let arrival = component(&api, "Arrival");
-    match &arrival.kind {
-        ComponentKind::Struct(fields) => {
-            let timing = field(fields, "timing");
-            assert!(timing.treat_error_as_none);
-            let optional_timing = field(fields, "optionalTiming");
-            assert!(!optional_timing.treat_error_as_none);
-        }
-        other => panic!("expected Arrival struct, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
+    let arrival = find_struct(&types, "Arrival");
+
+    // NOTE: `treat_error_as_none` is expressed by `Option` wrapping plus the
+    // runtime serde helpers on the generated field.
+    let timing = field(arrival, "timing");
+    assert_eq!(norm(&timing.ty), norm_str("Option<S>"));
+    assert_attr_contains(
+        &timing.attrs,
+        "cfg_attr",
+        r#""treat_error_as_none::deserialize""#,
+    );
+    assert_attr_contains(
+        &timing.attrs,
+        "cfg_attr",
+        r#""treat_error_as_none::serialize""#,
+    );
+    let optional_timing = field(arrival, "optional_timing");
+    assert_eq!(norm(&optional_timing.ty), norm_str("Option<S>"));
+    assert!(
+        optional_timing
+            .attrs
+            .iter()
+            .all(|attr| !norm(attr).contains(&norm_str("treat_error_as_none")))
+    );
+
+    // The operation decode body keeps decoding the whole struct.
+    let json = parse_rust(file(&files, "get_arrival/json.rs"));
+    let decode = find_fn(&json, "decode_get_arrival_response");
+    assert!(contains_tokens(decode, "satay_runtime::from_json_slice"));
+    let parts = parse_rust(file(&files, "get_arrival/parts.rs"));
+    assert_eq!(
+        ok_payload(&parts, "GetArrivalResponse"),
+        norm_str("Arrival<S>")
+    );
 }
 
 #[test]
 fn parses_x_satay_treat_error_as_none_on_required_reference_property() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -770,20 +926,26 @@ components:
 "#,
     );
 
-    let arrival = component(&api, "BusServiceArrival");
-    let ComponentKind::Struct(fields) = &arrival.kind else {
-        panic!("expected BusServiceArrival struct");
-    };
-    let next_bus = field(fields, "nextBus");
-    assert!(next_bus.required);
-    assert!(next_bus.treat_error_as_none);
-    assert_eq!(next_bus.ty, TypeRef::Named("BusArrivalTiming".to_owned()));
-    let strict_next_bus = field(fields, "strictNextBus");
-    assert!(strict_next_bus.required);
-    assert!(!strict_next_bus.treat_error_as_none);
-    assert_eq!(
-        strict_next_bus.ty,
-        TypeRef::Named("BusArrivalTiming".to_owned())
+    let types = parse_rust(file(&files, "types.rs"));
+    let arrival = find_struct(&types, "BusServiceArrival");
+
+    // NOTE: `required` plus `treat-error-as-none` lowers to `Option` with the
+    // runtime serde helpers; without the extension the required reference
+    // stays a direct value.
+    let next_bus = field(arrival, "next_bus");
+    assert_eq!(norm(&next_bus.ty), norm_str("Option<BusArrivalTiming<S>>"));
+    assert_attr_contains(
+        &next_bus.attrs,
+        "cfg_attr",
+        r#""treat_error_as_none::deserialize""#,
+    );
+    let strict_next_bus = field(arrival, "strict_next_bus");
+    assert_eq!(norm(&strict_next_bus.ty), norm_str("BusArrivalTiming<S>"));
+    assert!(
+        strict_next_bus
+            .attrs
+            .iter()
+            .all(|attr| !norm(attr).contains(&norm_str("treat_error_as_none")))
     );
 }
 
@@ -1036,7 +1198,7 @@ components:
 
 #[test]
 fn omits_x_satay_ignored_object_properties() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -1077,14 +1239,32 @@ components:
 "#,
     );
 
-    let response = component(&api, "BusArrivalResponse");
-    let ComponentKind::Struct(fields) = &response.kind else {
-        panic!("expected BusArrivalResponse struct");
-    };
-    assert_eq!(fields.len(), 2);
-    assert_eq!(field(fields, "retainedMetadata").ty, TypeRef::String);
-    assert_eq!(field(fields, "retainedMetadata").rust_name, "kept");
-    assert_eq!(field(fields, "BusStopCode").ty, TypeRef::String);
+    let types = parse_rust(file(&files, "types.rs"));
+    let response = find_struct(&types, "BusArrivalResponse");
+
+    // Ignored properties disappear entirely; only the retained ones remain.
+    assert_eq!(field_names(response), ["kept", "bus_stop_code"]);
+    // NOTE: `identifier: kept` renames the retained field; plain semantics
+    // (no treat-error-as-none) keep it a bare optional value.
+    let retained = field(response, "kept");
+    assert_eq!(norm(&retained.ty), norm_str("Option<S>"));
+    assert_attr_contains(
+        &retained.attrs,
+        "cfg_attr",
+        r#"rename = "retainedMetadata""#,
+    );
+    assert!(
+        retained
+            .attrs
+            .iter()
+            .all(|attr| !norm(attr).contains(&norm_str("treat_error_as_none")))
+    );
+    assert_field(response, "bus_stop_code", "S");
+    assert_attr_contains(
+        &field(response, "bus_stop_code").attrs,
+        "cfg_attr",
+        r#"serde(rename = "BusStopCode")"#,
+    );
 }
 
 #[test]
@@ -1171,7 +1351,7 @@ components:
 
 #[test]
 fn ignored_properties_do_not_participate_in_identifier_collisions() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -1194,18 +1374,20 @@ components:
 "#,
     );
 
-    let record = component(&api, "Record");
-    let ComponentKind::Struct(fields) = &record.kind else {
-        panic!("expected Record struct");
-    };
-    assert_eq!(fields.len(), 1);
-    assert_eq!(field(fields, "display").rust_name, "value");
+    let types = parse_rust(file(&files, "types.rs"));
+    let record = find_struct(&types, "Record");
+    // Only the identified property remains, claiming the ignored wire name.
+    assert_eq!(field_names(record), ["value"]);
+    assert_attr_contains(
+        &field(record, "value").attrs,
+        "cfg_attr",
+        r#"rename = "display""#,
+    );
 }
 
 #[test]
 fn parses_target_neutral_property_identifiers_into_ir() {
-    let api = parse_valid(
-        r#"
+    let spec = r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -1236,33 +1418,39 @@ components:
           type: string
           x-satay:
             identifier: type
-"#,
-    );
+"#;
 
-    let bus_stop = component(&api, "BusStop");
-    let ComponentKind::Struct(fields) = &bus_stop.kind else {
-        panic!("expected BusStop struct");
+    // NOTE: the target-neutral identifier words stay in the IR; the private
+    // model's `rust_name` facts lower to the generated field names below.
+    let api = normalize_spec(spec);
+    let PropertyPolicy::Included { identifier, .. } =
+        property_policy(&api, "BusStop", "Description")
+    else {
+        panic!("Description must participate in decoding");
     };
-
-    assert_eq!(field(fields, "Description").rust_name, "desc");
+    assert_eq!(identifier.as_deref(), Some(["desc".to_owned()].as_slice()));
+    let PropertyPolicy::Included { identifier, .. } =
+        property_policy(&api, "BusStop", "RequestIdentifier")
+    else {
+        panic!("RequestIdentifier must participate in decoding");
+    };
     assert_eq!(
-        field(fields, "Description").identifier_words.as_deref(),
-        Some(["desc".to_owned()].as_slice())
-    );
-    assert_eq!(field(fields, "RequestIdentifier").rust_name, "request_id");
-    assert_eq!(
-        field(fields, "RequestIdentifier")
-            .identifier_words
-            .as_deref(),
+        identifier.as_deref(),
         Some(["request".to_owned(), "id".to_owned()].as_slice())
     );
+    let PropertyPolicy::Included { identifier, .. } = property_policy(&api, "BusStop", "RoadName")
+    else {
+        panic!("RoadName must participate in decoding");
+    };
+    assert!(identifier.is_none());
+
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
+    let bus_stop = find_struct(&types, "BusStop");
     assert_eq!(
-        field(fields, "ReferencedIdentifier").rust_name,
-        "reference_id"
+        field_names(bus_stop),
+        ["desc", "request_id", "reference_id", "road_name", "r#type"]
     );
-    assert_eq!(field(fields, "WireKeyword").rust_name, "r#type");
-    assert_eq!(field(fields, "RoadName").rust_name, "road_name");
-    assert!(field(fields, "RoadName").identifier_words.is_none());
 }
 
 #[test]
@@ -1421,7 +1609,7 @@ components:
 
 #[test]
 fn preserves_legacy_field_deduplication_without_identifier_overrides() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -1440,12 +1628,9 @@ components:
 "#,
     );
 
-    let record = component(&api, "Record");
-    let ComponentKind::Struct(fields) = &record.kind else {
-        panic!("expected Record struct");
-    };
-    assert_eq!(field(fields, "request-id").rust_name, "request_id");
-    assert_eq!(field(fields, "request_id").rust_name, "request_id_2");
+    let types = parse_rust(file(&files, "types.rs"));
+    let record = find_struct(&types, "Record");
+    assert_eq!(field_names(record), ["request_id", "request_id_2"]);
 }
 
 #[test]
@@ -1482,7 +1667,7 @@ components:
 
 #[test]
 fn parses_x_satay_none_if_for_parsed_string_fields() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -1508,17 +1693,32 @@ components:
 "#,
     );
 
-    let reading = component(&api, "Reading");
-    let ComponentKind::Struct(fields) = &reading.kind else {
-        panic!("expected Reading struct");
-    };
-    assert_eq!(field(fields, "wbgt").none_if, ["NA", "-"]);
-    assert_eq!(field(fields, "optionalWbgt").none_if, ["NA"]);
+    let types = parse_rust(file(&files, "types.rs"));
+    let reading = find_struct(&types, "Reading");
+
+    // NOTE: `none_if` sentinel lists lower to codec-aware `Option` wrapping
+    // plus the generated serde helpers on the field.
+    assert_field(reading, "wbgt", "Option<f64>");
+    let deserialize = find_method(&types, "Reading", "__satay_deserialize_wbgt_none_if");
+    assert!(contains_tokens(
+        deserialize,
+        r#"as_f64::deserialize_none_if(deserializer, &["NA", "-"])"#
+    ));
+    assert_field(reading, "optional_wbgt", "Option<f64>");
+    let deserialize_optional = find_method(
+        &types,
+        "Reading",
+        "__satay_deserialize_optional_wbgt_none_if",
+    );
+    assert!(contains_tokens(
+        deserialize_optional,
+        r#"as_f64_option::deserialize_none_if(deserializer, &["NA"])"#
+    ));
 }
 
 #[test]
 fn parses_configured_boolean_string_mappings() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -1541,16 +1741,17 @@ components:
 "#,
     );
 
-    let taxi_stand = component(&api, "TaxiStand");
-    let ComponentKind::Struct(fields) = &taxi_stand.kind else {
-        panic!("expected TaxiStand struct");
-    };
-    let TypeRef::ParsedString(StringCodec::MappedBool(mapping)) = &field(fields, "Bfa").ty else {
-        panic!("expected mapped boolean string codec");
-    };
-    assert_eq!(mapping.true_values(), ["Y", "Yes", "1", "true"]);
-    assert_eq!(mapping.false_values(), ["N", "No", "0", "false", ""]);
-    assert_eq!(mapping.unknown_as(), Some(false));
+    let types = parse_rust(file(&files, "types.rs"));
+    let taxi_stand = find_struct(&types, "TaxiStand");
+    assert_field(taxi_stand, "bfa", "bool");
+    // NOTE: the mapped bool codec lowers to the generated serde helper
+    // carrying the true/false wire lists and the unknown-as fallback.
+    let deserialize = find_method(&types, "TaxiStand", "__satay_deserialize_bfa_bool_mapping");
+    assert!(contains_tokens(deserialize, "as_bool::deserialize_mapped"));
+    assert!(contains_tokens(
+        deserialize,
+        r#"deserializer, &["Y", "Yes", "1", "true"], &["N", "No", "0", "false", ""], Some(false)"#
+    ));
 }
 
 #[test]
@@ -1947,7 +2148,7 @@ components:
 
 #[test]
 fn skips_x_satay_validation_for_unreachable_component_parameters() {
-    parse_valid(
+    generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -2004,16 +2205,18 @@ paths:
         '204':
           description: No content
 "#;
-    let api = parse_valid(spec);
+    let files = generate_valid(spec);
     ir::assert_selection(spec, &[], &["listFiles"]);
 
-    assert_eq!(api.operations.len(), 1);
-    assert_eq!(api.operations[0].fn_name, "list_files");
+    // NOTE: the private model's `fn_name` facts surface as the untagged view
+    // methods of the generated API.
+    let untagged = parse_rust(file(&files, "untagged.rs"));
+    assert_eq!(untagged_methods(&untagged), ["list_files"]);
 }
 
 #[test]
 fn validates_operations_with_x_satay_skip_false() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -2031,8 +2234,8 @@ paths:
 "#,
     );
 
-    assert_eq!(api.operations.len(), 1);
-    assert_eq!(api.operations[0].fn_name, "ping");
+    let untagged = parse_rust(file(&files, "untagged.rs"));
+    assert_eq!(untagged_methods(&untagged), ["ping"]);
 }
 
 #[test]
@@ -2135,7 +2338,7 @@ paths:
 
 #[test]
 fn projects_operation_response_payload_types() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -2204,35 +2407,36 @@ components:
 "#,
     );
 
-    let services = api
-        .operations
-        .iter()
-        .find(|operation| operation.fn_name == "get_services")
-        .expect("services operation");
-    let response = &services.responses[0];
+    // NOTE: the private model's `response.body` and `projection` facts surface
+    // as the projected decode body and the `Ok` payload type of the generated
+    // response enum.
+    // getServices: the envelope unwraps `value` into `Vec<Service<S>>`.
+    let services_parts = parse_rust(file(&files, "get_services/parts.rs"));
     assert_eq!(
-        response.body,
-        Some(TypeRef::Array(Box::new(TypeRef::Named(
-            "Service".to_owned()
-        ))))
+        ok_payload(&services_parts, "GetServicesResponse"),
+        norm_str("Vec<Service<S>>")
     );
-    let projection = response.projection.as_ref().expect("projection");
-    assert_eq!(projection.unwrap_field, "value");
-    assert_eq!(projection.map_field, None);
+    let services_json = parse_rust(file(&files, "get_services/json.rs"));
+    let decode = find_fn(&services_json, "decode_get_services_response");
+    assert!(contains_tokens(
+        decode,
+        "satay_runtime::from_projected_json_slice"
+    ));
+    assert!(contains_tokens(decode, r#"(body, "value", None)"#));
 
-    let links = api
-        .operations
-        .iter()
-        .find(|operation| operation.fn_name == "get_links")
-        .expect("links operation");
-    let response = &links.responses[0];
+    // getLinks: mapping `Link` further projects the payload to `Vec<S>`.
+    let links_parts = parse_rust(file(&files, "get_links/parts.rs"));
     assert_eq!(
-        response.body,
-        Some(TypeRef::Array(Box::new(TypeRef::String)))
+        ok_payload(&links_parts, "GetLinksResponse"),
+        norm_str("Vec<S>")
     );
-    let projection = response.projection.as_ref().expect("projection");
-    assert_eq!(projection.unwrap_field, "value");
-    assert_eq!(projection.map_field.as_deref(), Some("Link"));
+    let links_json = parse_rust(file(&files, "get_links/json.rs"));
+    let decode = find_fn(&links_json, "decode_get_links_response");
+    assert!(contains_tokens(
+        decode,
+        "satay_runtime::from_projected_json_slice"
+    ));
+    assert!(contains_tokens(decode, r#"(body, "value", Some("Link"))"#));
 }
 
 #[test]
@@ -2379,15 +2583,17 @@ components:
           x-satay:
             parse-as: u8
 "#;
-    let api = parse_valid(spec);
+    let files = generate_valid(spec);
     ir::assert_selection(spec, &[], &["listFiles"]);
 
-    assert_eq!(api.operations.len(), 1);
-    assert_eq!(api.operations[0].fn_name, "list_files");
+    // NOTE: no component survives, so no `types.rs` is emitted at all; the
+    // exclusion is asserted across every generated file.
+    let untagged = parse_rust(file(&files, "untagged.rs"));
+    assert_eq!(untagged_methods(&untagged), ["list_files"]);
     assert!(
-        api.components
+        files
             .iter()
-            .all(|component| component.rust_name != "UploadRequest"),
+            .all(|generated| !generated.contents.contains("UploadRequest")),
         "skipped-only component must be excluded from generation"
     );
 }
@@ -2428,15 +2634,17 @@ components:
       x-satay:
         parse-as: u8
 "#;
-    let api = parse_valid(spec);
+    let files = generate_valid(spec);
     ir::assert_selection(spec, &[], &["health"]);
 
-    assert_eq!(api.operations.len(), 1);
-    assert_eq!(api.operations[0].fn_name, "health");
+    // NOTE: no component survives, so no `types.rs` is emitted at all; the
+    // exclusion is asserted across every generated file.
+    let untagged = parse_rust(file(&files, "untagged.rs"));
+    assert_eq!(untagged_methods(&untagged), ["health"]);
     assert!(
-        api.components
+        files
             .iter()
-            .all(|component| component.rust_name != "BrokenFilter"),
+            .all(|generated| !generated.contents.contains("BrokenFilter")),
         "component used only by a skipped content parameter must be excluded"
     );
 }
@@ -2479,14 +2687,17 @@ components:
       x-satay:
         parse-as: u8
 "#;
-    let api = parse_valid(spec);
+    let files = generate_valid(spec);
     ir::assert_selection(spec, &[], &["health"]);
 
-    assert_eq!(api.operations.len(), 1);
-    assert_eq!(api.operations[0].fn_name, "health");
+    // NOTE: no component survives, so no `types.rs` is emitted at all; the
+    // exclusion is asserted across every generated file.
+    let untagged = parse_rust(file(&files, "untagged.rs"));
+    assert_eq!(untagged_methods(&untagged), ["health"]);
     assert!(
-        api.components.iter().all(|component| {
-            !matches!(component.rust_name.as_str(), "UploadTuple" | "BrokenItem")
+        files.iter().all(|generated| {
+            !generated.contents.contains("UploadTuple")
+                && !generated.contents.contains("BrokenItem")
         }),
         "the complete skipped-only prefixItems graph must be excluded"
     );
@@ -2533,11 +2744,13 @@ components:
         id:
           type: string
 "#;
-    let api = parse_valid(spec);
+    let files = generate_valid(spec);
     ir::assert_selection(spec, &["Shared"], &["getShared"]);
 
-    assert_eq!(api.operations.len(), 1);
-    component(&api, "Shared");
+    let untagged = parse_rust(file(&files, "untagged.rs"));
+    assert_eq!(untagged_methods(&untagged), ["get_shared"]);
+    let types = parse_rust(file(&files, "types.rs"));
+    find_struct(&types, "Shared");
 }
 
 #[test]
@@ -2586,15 +2799,15 @@ components:
         value:
           type: string
 "#;
-    let api = parse_valid(spec);
+    let files = generate_valid(spec);
     ir::assert_selection(spec, &["Orphan"], &["listFiles"]);
 
-    assert_eq!(api.operations.len(), 1);
-    component(&api, "Orphan");
+    let untagged = parse_rust(file(&files, "untagged.rs"));
+    assert_eq!(untagged_methods(&untagged), ["list_files"]);
+    let types = parse_rust(file(&files, "types.rs"));
+    find_struct(&types, "Orphan");
     assert!(
-        api.components
-            .iter()
-            .all(|component| component.rust_name != "A"),
+        !contains_ident(&types, "A"),
         "skipped-only rejectable component must be excluded"
     );
 }
@@ -2643,12 +2856,14 @@ components:
         x:
           $ref: '#/components/schemas/Shared'
 "#;
-    let api = parse_valid(spec);
+    let files = generate_valid(spec);
     ir::assert_selection(spec, &["Shared", "Holder"], &["listFiles"]);
 
-    assert_eq!(api.operations.len(), 1);
-    component(&api, "Shared");
-    component(&api, "Holder");
+    let untagged = parse_rust(file(&files, "untagged.rs"));
+    assert_eq!(untagged_methods(&untagged), ["list_files"]);
+    let types = parse_rust(file(&files, "types.rs"));
+    find_struct(&types, "Shared");
+    find_struct(&types, "Holder");
 }
 
 #[test]
@@ -2683,16 +2898,16 @@ paths:
           description: No content
 "#;
 
-    let api = parse_valid(spec);
+    let files = generate_valid(spec);
     ir::assert_selection(spec, &[], &["health"]);
 
-    assert_eq!(api.operations.len(), 1);
-    assert_eq!(api.operations[0].fn_name, "health");
+    let untagged = parse_rust(file(&files, "untagged.rs"));
+    assert_eq!(untagged_methods(&untagged), ["health"]);
 }
 
 #[test]
 fn unchanged_component_validation_without_skip() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -2717,13 +2932,15 @@ components:
 "#,
     );
 
-    assert_eq!(api.operations.len(), 1);
-    component(&api, "Unused");
+    let untagged = parse_rust(file(&files, "untagged.rs"));
+    assert_eq!(untagged_methods(&untagged), ["ping"]);
+    let types = parse_rust(file(&files, "types.rs"));
+    find_struct(&types, "Unused");
 }
 
 #[test]
 fn uri_format_parses_strings_and_preserves_explicit_overrides() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -2753,20 +2970,34 @@ components:
           format: uri
 "#,
     );
-    let ComponentKind::Struct(fields) = &component(&api, "Record").kind else {
-        panic!("expected Record struct");
-    };
-    assert_eq!(
-        field(fields, "url").ty,
-        TypeRef::ParsedString(StringCodec::Standard(ParseAs::Url))
+
+    let types = parse_rust(file(&files, "types.rs"));
+    let record = find_struct(&types, "Record");
+    // `format: uri` parses the string into the runtime URL type.
+    assert_field(record, "url", "Option<satay_runtime::Url>");
+    assert_attr_contains(
+        &field(record, "url").attrs,
+        "cfg_attr",
+        r#"with = "serde_string::as_url::option""#,
     );
-    assert_eq!(field(fields, "reference").ty, TypeRef::String);
-    assert_eq!(field(fields, "plain").ty, TypeRef::String);
-    assert_eq!(
-        field(fields, "override").ty,
-        TypeRef::ParsedString(StringCodec::Standard(ParseAs::U32))
+    // Other string formats stay plain; `uri-reference` is not a URL parse.
+    assert_field(record, "reference", "Option<S>");
+    assert!(
+        field(record, "reference")
+            .attrs
+            .iter()
+            .all(|attr| !norm(attr).contains(&norm_str("as_url")))
     );
-    assert_eq!(field(fields, "flag").ty, TypeRef::Bool);
+    assert_field(record, "plain", "Option<S>");
+    // An explicit parse-as overrides the format.
+    assert_field(record, "r#override", "Option<u32>");
+    assert_attr_contains(
+        &field(record, "r#override").attrs,
+        "cfg_attr",
+        r#"with = "serde_string::as_u32::option""#,
+    );
+    // Boolean schemas are untouched by string formats.
+    assert_field(record, "flag", "Option<bool>");
 }
 
 #[test]

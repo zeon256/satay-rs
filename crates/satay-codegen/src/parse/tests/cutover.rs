@@ -1,6 +1,15 @@
+use super::ast::*;
 use super::parse_invalid;
-use crate::model::TypeRef;
 use crate::{Error, ValidationError};
+
+#[test]
+fn backend_rejection_order_is_preserved_through_the_public_route() {
+    let spec = "openapi: 3.1.0\ninfo: {title: Ordering, version: '1'}\npaths: {}\ncomponents:\n  schemas:\n    First: {type: integer, format: custom}\n    Second: {type: string, minLength: 5, maxLength: 2}\n";
+    assert_eq!(
+        crate::generate(spec).unwrap_err().to_string(),
+        "schema `First` uses unsupported integer format `custom`"
+    );
+}
 
 #[test]
 fn deferred_extension_errors_retain_their_payloads() {
@@ -146,10 +155,14 @@ paths:
 "#
         );
         crate::generate(&spec).unwrap();
-        let api = super::parse_valid(&spec);
-        assert!(matches!(
-            &api.operations[0].responses[0].body,
-            Some(TypeRef::Option(inner)) if matches!(**inner, TypeRef::String)
-        ));
+        let files = super::generate_valid(&spec);
+        let json = parse_rust(super::file(&files, "value/json.rs"));
+        let decode = find_fn(&json, "decode_value_response");
+        // The unwrapped wire field stays an optional projected value even
+        // when the wrapper schema carries unselected constraints.
+        let tokens = norm(decode);
+        assert!(tokens.contains("from_projected_json_slice"));
+        assert!(tokens.contains("Option < S >"));
+        assert!(tokens.contains("\"value\""));
     }
 }

@@ -3,6 +3,7 @@ resolver = "3"
 members = [
   "crates/satay-cli",
   "crates/satay-codegen",
+  "crates/satay-codegen-rust",
   "crates/satay-oas3/crates/oas3",
   "crates/satay-oas3/crates/roast",
   "crates/satay-oas3/integration-tests",
@@ -20,6 +21,7 @@ members = [
 default-members = [
   "crates/satay-cli",
   "crates/satay-codegen",
+  "crates/satay-codegen-rust",
   "crates/satay-reqwest",
   "crates/satay-runtime",
   "crates/satay-ir",
@@ -66,6 +68,7 @@ quote = "1"
 regex = "1.12.3"
 reqwest = { version = "0.13", default-features = false }
 satay-codegen = { version = "0.17.4", path = "crates/satay-codegen" }
+satay-codegen-rust = { version = "0.17.4", path = "crates/satay-codegen-rust" }
 satay-ir = { version = "0.17.4", path = "crates/satay-ir" }
 satay-reqwest = { version = "0.17.4", path = "crates/satay-reqwest" }
 satay-runtime = { version = "0.17.4", path = "crates/satay-runtime" }

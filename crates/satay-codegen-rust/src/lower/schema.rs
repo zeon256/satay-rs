@@ -1,21 +1,21 @@
 //! Rust schema choices derived solely from the semantic graph.
-use super::LowerError;
+use super::error::ValidationError;
+use super::helpers;
 use super::{
     constraint::{self, ConstraintInput},
     policy,
 };
-use crate::ValidationError;
+use crate::error::Error;
 use crate::ident::{type_ident, unique_ident};
+use crate::lower::checked::{
+    CheckedComponent, CheckedComponentKind, CheckedCoordinates, CheckedField, CheckedFieldValue,
+    CheckedParsedString, CheckedType, CheckedTypeKind, CheckedUnion, CheckedUnionTag,
+    CheckedUnionTagStyle, CheckedUnionVariant, CheckedUnionVariantKind, NonEmptySentinels,
+};
 use crate::model;
 use crate::model::{
     BoolStringMapping, CoordinateDelimiter, EnumFallback, IntegerType, ParseAs, RangeScalar,
     StringCodec, TypeRef,
-};
-use crate::parse::helpers;
-use crate::parse::rust::checked::{
-    CheckedComponent, CheckedComponentKind, CheckedCoordinates, CheckedField, CheckedFieldValue,
-    CheckedParsedString, CheckedType, CheckedTypeKind, CheckedUnion, CheckedUnionTag,
-    CheckedUnionTagStyle, CheckedUnionVariant, CheckedUnionVariantKind, NonEmptySentinels,
 };
 use satay_ir::{
     self as ir, AdditionalProperties, CompositionKind, DecodePolicy, DiagnosticKind,
@@ -35,7 +35,7 @@ impl<'a> Schemas<'a> {
         Self { api, stack: vec![] }
     }
 
-    pub(super) fn components(&mut self) -> Result<Vec<CheckedComponent>, LowerError> {
+    pub(super) fn components(&mut self) -> Result<Vec<CheckedComponent>, Error> {
         self.api
             .definitions()
             .map(|(_, definition)| self.component(definition))
@@ -46,7 +46,7 @@ impl<'a> Schemas<'a> {
         self.api.definition(id).expect("finalized graph reference")
     }
 
-    fn component(&mut self, definition: &ir::Definition) -> Result<CheckedComponent, LowerError> {
+    fn component(&mut self, definition: &ir::Definition) -> Result<CheckedComponent, Error> {
         let context = format!("schema `{}`", definition.source_name);
         let kind = match &definition.schema.ty {
             TypeExpr::Ref(id) => {
@@ -84,12 +84,15 @@ impl<'a> Schemas<'a> {
         &mut self,
         projection: &ir::ResponseProjection,
         context: &str,
-    ) -> Result<CheckedType, LowerError> {
+    ) -> Result<CheckedType, Error> {
         let mut output = self.value(&projection.output, context)?;
         output.nullable |= !projection.unwrap_required;
         if let Some(required) = projection.map_required {
             let CheckedTypeKind::Array(item) = &mut output.kind else {
-                unreachable!("projected output lowers to an array")
+                return Err(ValidationError::MappedResponseProjectionRequiresArray {
+                    context: context.to_owned(),
+                }
+                .into());
             };
             item.nullable |= !required;
         }
@@ -101,7 +104,7 @@ impl<'a> Schemas<'a> {
         &mut self,
         value: &ir::SchemaUse,
         context: &str,
-    ) -> Result<CheckedType, LowerError> {
+    ) -> Result<CheckedType, Error> {
         let input = constraints(value);
         let mut nullable = value.nullable;
         let mut description = value.annotations.description.clone();
@@ -320,7 +323,7 @@ impl<'a> Schemas<'a> {
         values: Vec<String>,
         fallback: EnumFallback,
         context: &str,
-    ) -> Result<model::Enum, LowerError> {
+    ) -> Result<model::Enum, Error> {
         let explicit = string
             .enum_variants
             .iter()
@@ -338,7 +341,7 @@ impl<'a> Schemas<'a> {
         &mut self,
         properties: &[ir::Property],
         context: &str,
-    ) -> Result<Vec<CheckedField>, LowerError> {
+    ) -> Result<Vec<CheckedField>, Error> {
         let fields = self.field_results(properties, context)?;
         policy::validate_rust_field_identifier_collisions(context, &fields)?;
         Ok(fields)
@@ -348,7 +351,7 @@ impl<'a> Schemas<'a> {
         &mut self,
         properties: &[ir::Property],
         context: &str,
-    ) -> Result<Vec<CheckedField>, LowerError> {
+    ) -> Result<Vec<CheckedField>, Error> {
         let mut fields = vec![];
         for property in properties {
             let field_context = helpers::property_context(context, &property.wire_name);
@@ -393,7 +396,7 @@ impl<'a> Schemas<'a> {
         value: &ir::SchemaUse,
         context: &str,
         name: Option<&str>,
-    ) -> Result<Vec<CheckedField>, LowerError> {
+    ) -> Result<Vec<CheckedField>, Error> {
         if let Some(name) = name {
             self.push_all_of(name)?;
         }
@@ -407,7 +410,7 @@ impl<'a> Schemas<'a> {
         Ok(fields)
     }
 
-    fn push_all_of(&mut self, name: &str) -> Result<(), LowerError> {
+    fn push_all_of(&mut self, name: &str) -> Result<(), Error> {
         if let Some(index) = self.stack.iter().position(|entry| entry == name) {
             return Err(ValidationError::RecursiveAllOf {
                 context: format!("schema `{}`", self.stack[index]),
@@ -425,7 +428,7 @@ impl<'a> Schemas<'a> {
         context: &str,
         used: &mut BTreeSet<String>,
         fields: &mut Vec<CheckedField>,
-    ) -> Result<(), LowerError> {
+    ) -> Result<(), Error> {
         let TypeExpr::Composition(composition) = &value.ty else {
             unreachable!("allOf dispatch")
         };
@@ -443,7 +446,7 @@ impl<'a> Schemas<'a> {
         index: usize,
         used: &mut BTreeSet<String>,
         fields: &mut Vec<CheckedField>,
-    ) -> Result<(), LowerError> {
+    ) -> Result<(), Error> {
         match &value.ty {
             TypeExpr::Ref(id) => {
                 let definition = self.definition(*id);
@@ -491,7 +494,7 @@ impl<'a> Schemas<'a> {
         &mut self,
         selector: &ir::CoordinatesInterpretation,
         context: &str,
-    ) -> Result<CheckedCoordinates, LowerError> {
+    ) -> Result<CheckedCoordinates, Error> {
         let definition = self.coordinate_target(selector.target(), context)?;
         let name = &definition.source_name;
         let marker = format!("coordinates:{name}");
@@ -528,7 +531,7 @@ impl<'a> Schemas<'a> {
         &self,
         target: ir::DefinitionId,
         context: &str,
-    ) -> Result<&'a ir::Definition, LowerError> {
+    ) -> Result<&'a ir::Definition, Error> {
         let mut definition = self.definition(target);
         let mut seen = vec![];
         while let TypeExpr::Ref(id) = definition.schema.ty {
@@ -568,7 +571,7 @@ impl<'a> Schemas<'a> {
         selector: &ir::CoordinatesInterpretation,
         context: &str,
         name: &str,
-    ) -> Result<[usize; 2], LowerError> {
+    ) -> Result<[usize; 2], Error> {
         let mut indices = [0; 2];
         for (output_index, wire_name) in selector.fields().iter().enumerate() {
             let (index, field) = fields
@@ -630,7 +633,7 @@ impl<'a> Schemas<'a> {
         &mut self,
         composition: &ir::CompositionSchema,
         context: &str,
-    ) -> Result<(CheckedTypeKind, bool), LowerError> {
+    ) -> Result<(CheckedTypeKind, bool), Error> {
         if let Some(discriminator) = &composition.discriminator {
             return self
                 .discriminator(composition, discriminator, context)
@@ -866,7 +869,7 @@ impl<'a> Schemas<'a> {
         composition: &ir::CompositionSchema,
         discriminator: &ir::Discriminator,
         context: &str,
-    ) -> Result<CheckedUnion, LowerError> {
+    ) -> Result<CheckedUnion, Error> {
         let keyword = if composition.kind == CompositionKind::OneOf {
             "oneOf"
         } else {
@@ -913,7 +916,7 @@ impl<'a> Schemas<'a> {
                 self.stack.pop();
             }
             let component = component.map_err(|error| match &error {
-                LowerError::Frontend(diagnostic)
+                Error::Frontend(diagnostic)
                     if matches!(diagnostic.kind, DiagnosticKind::NonStringEnumValue { .. }) =>
                 {
                     ValidationError::InvalidDiscriminatorProperty {
@@ -1030,7 +1033,7 @@ fn is_struct(value: &ir::SchemaUse) -> bool {
         || matches!(&value.ty, TypeExpr::Composition(composition) if composition.kind == CompositionKind::AllOf)
 }
 
-fn invalid_coordinates(context: &str, reason: impl Into<String>) -> LowerError {
+fn invalid_coordinates(context: &str, reason: impl Into<String>) -> Error {
     ValidationError::InvalidSatayCoordinates {
         context: context.to_owned(),
         reason: reason.into(),

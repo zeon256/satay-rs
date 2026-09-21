@@ -1,20 +1,20 @@
 use std::collections::BTreeSet;
 
+use super::super::error::ValidationError;
 use super::schema::SchemaLowerer;
-use crate::error::ValidationError;
 use crate::ident::{
     field_ident, function_ident, group_ident, response_range_variant_ident, response_variant_ident,
     type_ident, unique_ident,
 };
+use crate::lower::checked::{
+    CheckedOperation, CheckedParameter, CheckedRequestBody, CheckedResponse,
+};
+use crate::lower::registry::TypeRegistry;
 use crate::model::{
     ApiGroup, ApiKeySecurityScheme, GroupOperation, Operation as SatayOperation, Parameter,
     ParameterDefault, ParameterLocation, RequestBody, ResponseCase, ResponseProjection,
     ResponseStatus, TypeRef, is_array_type,
 };
-use crate::parse::rust::checked::{
-    CheckedOperation, CheckedParameter, CheckedRequestBody, CheckedResponse,
-};
-use crate::parse::rust::registry::TypeRegistry;
 
 pub(super) fn parse_operations(
     operations: &[CheckedOperation],

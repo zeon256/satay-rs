@@ -1821,11 +1821,9 @@ name = "satay-codegen"
 version = "0.17.4"
 dependencies = [
  "compact_str",
- "heck",
- "prettyplease",
  "proc-macro2",
  "quote",
- "regex",
+ "satay-codegen-rust",
  "satay-ir",
  "satay-oas3",
  "serde",
@@ -1833,6 +1831,22 @@ dependencies = [
  "serde_json",
  "syn 2.0.119",
  "tempfile",
+ "thiserror 2.0.19",
+ "tracing",
+]
+
+[[package]]
+name = "satay-codegen-rust"
+version = "0.17.4"
+dependencies = [
+ "heck",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "regex",
+ "satay-ir",
+ "serde_json",
+ "syn 2.0.119",
  "thiserror 2.0.19",
  "tracing",
 ]

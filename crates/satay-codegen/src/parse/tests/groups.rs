@@ -1,10 +1,54 @@
-use crate::model::ApiGroup;
-
+use super::ast::*;
 use super::*;
+use syn::{ImplItem, Item};
+
+/// Extracts the names of public modules declared at the file's top level.
+fn pub_mod_names(file: &syn::File) -> Vec<String> {
+    file.items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Mod(item_mod) if is_pub(&item_mod.vis) => Some(item_mod.ident.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Extracts the method names of the group `Api` view, in declaration order.
+fn group_methods(file: &syn::File) -> Vec<String> {
+    file.items
+        .iter()
+        .find_map(|item| {
+            let Item::Impl(item_impl) = item else {
+                return None;
+            };
+            (norm(&item_impl.self_ty).contains("Api")).then(|| {
+                item_impl
+                    .items
+                    .iter()
+                    .filter_map(|impl_item| match impl_item {
+                        ImplItem::Fn(method) => Some(method.sig.ident.to_string()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            })
+        })
+        .unwrap_or_default()
+}
+
+/// Extracts the doc-comment lines of a top-level module declaration.
+fn mod_doc_lines(file: &syn::File, name: &str) -> Vec<String> {
+    file.items
+        .iter()
+        .find_map(|item| match item {
+            Item::Mod(item_mod) if item_mod.ident == name => Some(doc_lines(&item_mod.attrs)),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
 
 #[test]
 fn lowers_tags_to_ordered_api_groups_and_shortens_local_method_names() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -46,38 +90,33 @@ paths:
 "#,
     );
 
-    assert_eq!(api.operations[0].tags, ["bus", "realtime"]);
-    assert_eq!(api.operations[1].tags, ["bus"]);
-    assert!(api.operations[3].tags.is_empty());
-
+    let root = parse_rust(file(&files, "mod.rs"));
     assert_eq!(
-        api.groups
-            .iter()
-            .map(|group| group.rust_name.as_str())
+        pub_mod_names(&root)
+            .into_iter()
+            .filter(|name| ["realtime", "bus", "untagged"].contains(&name.as_str()))
             .collect::<Vec<_>>(),
         ["realtime", "bus", "untagged"]
     );
 
-    let realtime = group(&api, "realtime");
-    assert_eq!(realtime.wire_name.as_deref(), Some("realtime"));
-    assert_eq!(realtime.description.as_deref(), Some("Realtime views."));
-    assert_eq!(group_methods(realtime), ["get_bus_arrival"]);
+    let realtime = parse_rust(file(&files, "realtime.rs"));
+    assert_eq!(mod_doc_lines(&root, "realtime"), ["Realtime views."]);
+    assert_eq!(group_methods(&realtime), ["get_bus_arrival"]);
 
-    let bus = group(&api, "bus");
-    assert_eq!(bus.description.as_deref(), Some("Bus operations."));
+    let bus = parse_rust(file(&files, "bus.rs"));
+    assert_eq!(mod_doc_lines(&root, "bus"), ["Bus operations."]);
     assert_eq!(
-        group_methods(bus),
+        group_methods(&bus),
         ["get_arrival", "list_stops", "get_arrival_2"]
     );
 
-    let untagged = group(&api, "untagged");
-    assert_eq!(untagged.wire_name, None);
-    assert_eq!(group_methods(untagged), ["health"]);
+    let untagged = parse_rust(file(&files, "untagged.rs"));
+    assert_eq!(group_methods(&untagged), ["health"]);
 }
 
 #[test]
 fn group_names_avoid_root_module_and_api_method_collisions() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -107,10 +146,11 @@ paths:
 "#,
     );
 
+    let root = parse_rust(file(&files, "mod.rs"));
     assert_eq!(
-        api.groups
-            .iter()
-            .map(|group| group.rust_name.as_str())
+        pub_mod_names(&root)
+            .into_iter()
+            .filter(|name| name != "operations")
             .collect::<Vec<_>>(),
         [
             "api_2",
@@ -126,7 +166,7 @@ paths:
 
 #[test]
 fn resanitizes_operation_names_after_removing_the_group_name() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -143,20 +183,6 @@ paths:
 "#,
     );
 
-    assert_eq!(group_methods(group(&api, "get")), ["type_"]);
-}
-
-fn group<'a>(api: &'a Api, rust_name: &str) -> &'a ApiGroup {
-    api.groups
-        .iter()
-        .find(|group| group.rust_name == rust_name)
-        .unwrap_or_else(|| panic!("missing API group {rust_name}"))
-}
-
-fn group_methods(group: &ApiGroup) -> Vec<&str> {
-    group
-        .operations
-        .iter()
-        .map(|operation| operation.method_name.as_str())
-        .collect()
+    let get = parse_rust(file(&files, "get.rs"));
+    assert_eq!(group_methods(&get), ["type_"]);
 }
