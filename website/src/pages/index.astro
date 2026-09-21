@@ -31,7 +31,7 @@ import {
 const GITHUB_URL = "https://github.com/zeon256/satay-rs"
 const CRATES_URL = "https://crates.io/crates/satay-cli"
 const DOCS_URL = "https://docs.rs/satay-codegen"
-const REQWEST_EXAMPLE_TEST_URL = `${GITHUB_URL}/blob/main/examples/reqwest/src/main.rs#L35-L74`
+const REQWEST_EXAMPLE_TEST_URL = `${GITHUB_URL}/blob/main/examples/reqwest/src/tests.rs#L4-L43`
 const EXTENSIONS_DOCS_URL = `${GITHUB_URL}/blob/main/docs/extensions.md`
 const NEA_CARGO_TOML_URL = "https://github.com/InfiniteUnion/nea-rs/blob/main/Cargo.toml"
 const INSTALL_CMD = "cargo install satay-cli"
@@ -50,7 +50,8 @@ use std::{env, error::Error};
 async fn main() -> Result<(), Box<dyn Error>> {
     let api = Api::new().account_key(env::var("LTA_ACCOUNT_KEY")?);
     let action = api
-        .get_bus_arrival(83139)
+        .bus()
+        .get_arrival(83139)
         .service_no(BusServiceNumber::try_new("15")?);
 
     let client = reqwest::Client::new();
@@ -59,7 +60,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }`,
-    variantLines: [1, 11, 13],
+    variantLines: [1, 12, 14],
   },
   {
     id: "reqwest-blocking",
@@ -72,7 +73,8 @@ use std::{env, error::Error};
 fn main() -> Result<(), Box<dyn Error>> {
     let api = Api::new().account_key(env::var("LTA_ACCOUNT_KEY")?);
     let action = api
-        .get_bus_arrival(83139)
+        .bus()
+        .get_arrival(83139)
         .service_no(BusServiceNumber::try_new("15")?);
 
     let client = reqwest::blocking::Client::new();
@@ -80,7 +82,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }`,
-    variantLines: [1, 4, 10],
+    variantLines: [1, 4, 11],
   },
   {
     id: "ureq",
@@ -93,7 +95,8 @@ use std::{env, error::Error};
 fn main() -> Result<(), Box<dyn Error>> {
     let api = Api::new().account_key(env::var("LTA_ACCOUNT_KEY")?);
     let action = api
-        .get_bus_arrival(83139)
+        .bus()
+        .get_arrival(83139)
         .service_no(BusServiceNumber::try_new("15")?);
 
     let client: ureq::Agent = ureq::Agent::config_builder()
@@ -105,7 +108,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }`,
-    variantLines: [1, 4, 10, 11, 12, 13],
+    variantLines: [1, 4, 11, 12, 13, 14],
   },
   {
     id: "diy",
@@ -119,21 +122,24 @@ use std::{env, error::Error, mem};
 async fn main() -> Result<(), Box<dyn Error>> {
     let api = Api::new().account_key(env::var("LTA_ACCOUNT_KEY")?);
     let action = api
-        .get_bus_arrival(83139)
+        .bus()
+        .get_arrival(83139)
         .service_no(BusServiceNumber::try_new("15")?);
 
     let request: reqwest::Request = action.request()?.try_into()?;
     let mut response = reqwest::Client::new().execute(request).await?;
 
-    let _decoded = GetBusArrivalAction::decode(ResponseParts {
+    let parts = satay_runtime::ResponseParts {
         status: response.status(),
         headers: mem::take(response.headers_mut()),
         body: response.bytes().await?,
-    })?;
+    };
+
+    let _decoded = GetBusArrivalAction::<String>::decode(parts.as_bytes())?;
 
     Ok(())
 }`,
-    variantLines: [0, 1, 2, 11, 12, 14, 15, 16, 17, 18],
+    variantLines: [0, 1, 2, 12, 13, 15, 16, 17, 18, 21],
   },
 ] as const
 
@@ -147,7 +153,8 @@ use std::error::Error;
 fn tests_the_api_without_http() -> Result<(), Box<dyn Error>> {
     let api = Api::new().base_url("").account_key("test-key");
     let action = api
-        .get_bus_arrival(83139)
+        .bus()
+        .get_arrival(83139)
         .service_no(BusServiceNumber::try_new("15")?);
 
     let request = action.request()?;
@@ -159,7 +166,7 @@ fn tests_the_api_without_http() -> Result<(), Box<dyn Error>> {
     assert!(query.contains("BusStopCode=83139"));
     assert!(query.contains("ServiceNo=15"));
 
-    let response = GetBusArrivalAction::decode(
+    let response = GetBusArrivalAction::<String>::decode(
         satay_runtime::ResponseParts {
             status: http::StatusCode::OK,
             headers: http::HeaderMap::new(),
@@ -174,6 +181,10 @@ fn tests_the_api_without_http() -> Result<(), Box<dyn Error>> {
     let GetBusArrivalResponse::Ok(arrival) = response else {
         panic!("expected 200 OK bus arrival response");
     };
+    assert_eq!(
+        arrival.odata_metadata.host_str(),
+        Some("datamall2.mytransport.sg")
+    );
     assert_eq!(arrival.bus_stop_code, 83139);
     assert!(arrival.services.is_empty());
     Ok(())
@@ -181,7 +192,7 @@ fn tests_the_api_without_http() -> Result<(), Box<dyn Error>> {
 
 const neaCargoTomlCode = `# library API: no reqwest, ureq, hyper, or TLS backend
 [dependencies]
-satay-runtime = { version = "0.1.2", default-features = false }
+satay-runtime = { version = "0.17.0", default-features = false }
 nutype = { version = "0.7", features = ["serde", "regex"] }
 regex = "1"
 serde = { version = "1", features = ["derive"], optional = true }
@@ -203,11 +214,14 @@ const extensions = [
 StartedAtString:
   type: string
   format: unixtime`,
-    rustCode: `pub struct Event {
-    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_integer::as_unix_time"))]
+    rustCode: `#[cfg(feature = "serde")]
+use satay_runtime::{serde_integer, serde_string};
+
+pub struct Event {
+    #[cfg_attr(feature = "serde", serde(rename = "StartedAt", with = "serde_integer::as_unix_time"))]
     pub started_at: satay_runtime::OffsetDateTime,
 
-    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_unix_time"))]
+    #[cfg_attr(feature = "serde", serde(rename = "StartedAtString", with = "serde_string::as_unix_time"))]
     pub started_at_string: satay_runtime::OffsetDateTime,
 }`,
   },
@@ -248,15 +262,166 @@ Monitored:
   type: integer
   x-satay:
     parse-as: bool`,
-    rustCode: `pub struct Bus {
-    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_u32"))]
+    rustCode: `#[cfg(feature = "serde")]
+use satay_runtime::serde_string;
+
+pub struct Bus {
+    #[cfg_attr(feature = "serde", serde(rename = "BusStopCode", with = "serde_string::as_u32"))]
     pub bus_stop_code: u32,
 
-    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_offset_datetime"))]
+    #[cfg_attr(feature = "serde", serde(rename = "EstimatedArrival", with = "serde_string::as_offset_datetime"))]
     pub estimated_arrival: satay_runtime::OffsetDateTime,
 
-    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_integer::as_bool"))]
+    #[cfg_attr(feature = "serde", serde(rename = "Monitored", with = "serde_integer::as_bool"))]
     pub monitored: bool,
+}`,
+  },
+  {
+    id: "none-if",
+    label: "none-if",
+    meta: "sentinel",
+    title: "Sentinel strings decode as None",
+    body: `Use on a string-backed <code class="code-inline">parse-as</code> field when the API uses sentinel strings for unavailable values. The field becomes <code class="code-inline">Option&lt;T&gt;</code>; unconfigured values still fail deserialization.`,
+    types: null,
+    yamlCode: `Wbgt:
+  type: string
+  x-satay:
+    parse-as: f64
+    none-if: [NA, "-"]`,
+    rustCode: `pub struct Bus {
+    #[cfg_attr(feature = "serde", serde(
+        rename = "Wbgt",
+        deserialize_with = "Bus::__satay_deserialize_wbgt_none_if",
+        serialize_with = "Bus::__satay_serialize_wbgt_none_if"
+    ))]
+    pub wbgt: Option<f64>,
+}
+
+impl Bus {
+    fn __satay_deserialize_wbgt_none_if<'de, D>(
+        deserializer: D,
+    ) -> Result<Option<f64>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        as_f64::deserialize_none_if(deserializer, &["NA", "-"])
+    }
+
+    fn __satay_serialize_wbgt_none_if<Ser>(
+        value: &Option<f64>,
+        serializer: Ser,
+    ) -> Result<Ser::Ok, Ser::Error>
+    where
+        Ser: serde::Serializer,
+    {
+        as_f64::serialize_none_if(value, "NA", serializer)
+    }
+}`,
+  },
+  {
+    id: "true-values",
+    label: "true-values",
+    meta: "mapping",
+    title: "Custom boolean string mappings",
+    body: `Use <code class="code-inline">true-values</code> and <code class="code-inline">false-values</code> together on a string field with <code class="code-inline">parse-as: bool</code> when the API uses custom boolean strings. Optional <code class="code-inline">unknown-as</code> maps every unmatched string to a fixed boolean.`,
+    types: null,
+    yamlCode: `Bfa:
+  type: string
+  x-satay:
+    parse-as: bool
+    true-values: ["Y", "Yes", "1", "true"]
+    false-values: ["N", "No", "0", "false", ""]
+    unknown-as: false`,
+    rustCode: `pub struct Bus {
+    #[cfg_attr(feature = "serde", serde(
+        rename = "Bfa",
+        deserialize_with = "Bus::__satay_deserialize_bfa_bool_mapping",
+        serialize_with = "Bus::__satay_serialize_bfa_bool_mapping"
+    ))]
+    pub bfa: bool,
+}
+
+impl Bus {
+    fn __satay_deserialize_bfa_bool_mapping<'de, D>(
+        deserializer: D,
+    ) -> Result<bool, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        as_bool::deserialize_mapped(
+            deserializer,
+            &["Y", "Yes", "1", "true"],
+            &["N", "No", "0", "false", ""],
+            Some(false),
+        )
+    }
+
+    fn __satay_serialize_bfa_bool_mapping<Ser>(
+        value: &bool,
+        serializer: Ser,
+    ) -> Result<Ser::Ok, Ser::Error>
+    where
+        Ser: serde::Serializer,
+    {
+        as_bool::serialize_mapped(value, "Y", "N", serializer)
+    }
+}`,
+  },
+  {
+    id: "coordinates",
+    label: "coordinates",
+    meta: "string codec",
+    title: "Delimited strings as validated objects",
+    body: `Use <code class="code-inline">parse-as: coordinates</code> on a string field to reuse an existing generated object type: the wire string is split with a configurable delimiter and decoded into the target's two validated numeric fields.`,
+    types: null,
+    yamlCode: `Coordinates:
+  type: object
+  required: [Latitude, Longitude]
+  properties:
+    Latitude:
+      type: number
+      format: double
+      minimum: -90
+      maximum: 90
+      x-satay:
+        identifier: lat
+    Longitude:
+      type: number
+      format: double
+      minimum: -180
+      maximum: 180
+      x-satay:
+        identifier: long
+
+CarPark:
+  type: object
+  required: [Location]
+  properties:
+    Location:
+      type: string
+      x-satay:
+        parse-as: coordinates
+        target:
+          $ref: "#/components/schemas/Coordinates"
+        fields: [Latitude, Longitude]
+        delimiter: " "
+        treat-error-as-none: true`,
+    rustCode: `pub struct Coordinates {
+    #[cfg_attr(feature = "serde", serde(rename = "Latitude"))]
+    pub lat: CoordinatesLatitude,
+    #[cfg_attr(feature = "serde", serde(rename = "Longitude"))]
+    pub long: CoordinatesLongitude,
+}
+
+pub struct CarPark {
+    #[cfg_attr(feature = "serde", serde(
+        rename = "Location",
+        deserialize_with = "CarPark::__satay_deserialize_coords_coordinates",
+        serialize_with = "CarPark::__satay_serialize_coords_coordinates",
+        default,
+        skip_serializing_if = "Option::is_none"
+    ))]
+    pub coords: Option<Coordinates>,
 }`,
   },
   {
@@ -264,17 +429,18 @@ Monitored:
     label: "integer-type",
     meta: "integers",
     title: "Override inferred integer primitives",
-    body: `Satay infers the smallest Rust integer from <code class="code-inline">minimum</code> and <code class="code-inline">maximum</code> bounds. Use <code class="code-inline">integer-type</code> to opt out or pick a specific primitive. <code class="code-inline">auto</code> is the default.`,
+    body: `Satay infers the smallest Rust integer from <code class="code-inline">minimum</code> and <code class="code-inline">maximum</code> bounds on unformatted integers. An explicit format like <code class="code-inline">int32</code> fixes the primitive, and bounds become validation newtypes. Use <code class="code-inline">integer-type</code> to opt out of inference or pick a specific primitive. <code class="code-inline">auto</code> is the default.`,
     types: ["auto", "u8", "u16", "u32", "u64", "i8", "i16", "i32", "i64"],
     yamlCode: `Direction:
   type: integer
-  format: int32
   description: >
     The direction in which the bus travels. Valid values are 1 or 2;
     loop services only have 1 direction.
   example: 1
   minimum: 1
-  maximum: 2`,
+  maximum: 2
+  x-satay:
+    integer-type: i32`,
     rustCode: `/// The direction in which the bus travels. Valid values are 1 or 2; loop services only have 1 direction.
 #[nutype::nutype(
     validate(greater_or_equal = 1, less_or_equal = 2),
@@ -283,14 +449,14 @@ Monitored:
     ),
     cfg_attr(feature = "serde", derive(Serialize, Deserialize))
 )]
-pub struct BusRouteDirection(u8);`,
+pub struct Direction(i32);`,
   },
   {
     id: "enum-variants",
     label: "enum-variants",
     meta: "rename",
     title: "Descriptive enum variant names",
-    body: `Map terse wire values to readable Rust variants. Mapping a value to <code class="code-inline">Unknown</code> folds it into Satay's generated fallback variant.`,
+    body: `Map terse wire values to readable Rust variants. Mapping a value to <code class="code-inline">Unknown</code> is an ordinary declared variant for that wire value, not the generated open-enum fallback.`,
     types: null,
     yamlCode: `Type:
   type: string
@@ -305,7 +471,7 @@ pub struct BusRouteDirection(u8);`,
       BD: Bendy
       "": Unknown`,
     rustCode: `/// Vehicle type of the bus.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum BusArrivalTimingType {
     #[cfg_attr(feature = "serde", serde(rename = "SD"))]
@@ -314,8 +480,7 @@ pub enum BusArrivalTimingType {
     DoubleDecker,
     #[cfg_attr(feature = "serde", serde(rename = "BD"))]
     Bendy,
-    #[default]
-    #[cfg_attr(feature = "serde", serde(other))]
+    #[cfg_attr(feature = "serde", serde(rename = ""))]
     Unknown,
 }`,
   },
@@ -336,12 +501,14 @@ pub enum BusArrivalTimingType {
       $ref: "#/components/schemas/BusArrivalTiming"
       x-satay:
         treat-error-as-none: true`,
-    rustCode: `pub struct BusServiceArrival {
+    rustCode: `use satay_runtime::treat_error_as_none;
+
+pub struct BusServiceArrival {
     pub service_no: String,
     #[cfg_attr(feature = "serde", serde(
         rename = "NextBus",
-        deserialize_with = "satay_runtime::treat_error_as_none::deserialize",
-        serialize_with = "satay_runtime::treat_error_as_none::serialize",
+        deserialize_with = "treat_error_as_none::deserialize",
+        serialize_with = "treat_error_as_none::serialize",
         default,
         skip_serializing_if = "Option::is_none"
     ))]
@@ -523,7 +690,7 @@ const features = [
             <span class="meta-sep" aria-hidden="true">·</span>
             <span>Rust 2024</span>
             <span class="meta-sep" aria-hidden="true">·</span>
-            <span>MSRV 1.88</span>
+            <span>MSRV 1.95</span>
           </p>
 
           {(crateDownloads !== null || githubStars !== null) && (
@@ -912,15 +1079,19 @@ const features = [
                 style={`animation-delay: ${700 + index * 75}ms`}
               >
                 <div class="card-art" aria-hidden="true">
-                  <div class:list={["card-art-well", !user.logo && "card-art-well--mark"]}>
+                  <div
+                    class:list={["card-art-well", !user.logo && "card-art-well--mark"]}
+                    style={user.logo && user.logoScale ? `width: ${user.logoScale}` : undefined}
+                  >
                     {
                       user.logo ? (
                         <img
                           src={user.logo}
-                          alt=""
+                          alt={user.logoAlt ?? ""}
                           class="card-art-image"
                           loading="lazy"
                           decoding="async"
+                          style={user.logoPosition ? `object-position: ${user.logoPosition}` : undefined}
                         />
                       ) : (
                         <span class="card-art-mark">{user.name.slice(0, 2)}</span>
