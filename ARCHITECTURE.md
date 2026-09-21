@@ -1,8 +1,29 @@
 # Satay Codegen Architecture
 
-This document describes the current architecture of `crates/satay-codegen`, the crate that turns an OpenAPI document into generated Rust source files.
+This document describes the current architecture of the Satay code-generation crates, which turn an OpenAPI document into generated Rust source files.
 
-`satay-codegen` is intentionally IO-free. Its public API accepts a spec string and returns in-memory `GeneratedFile` values. The CLI and examples decide where those files are written and whether they are formatted by external tools.
+Code generation is split across two crates:
+
+- `crates/satay-codegen` is the OpenAPI-facing facade. It parses a spec string, normalizes it into the owned `satay-ir` semantic graph, and hands that graph to the Rust backend. It also owns the public error surface and translates backend errors into it.
+- `crates/satay-codegen-rust` is the parser-independent Rust backend. It validates, lowers, and renders a finalized `satay_ir::Api` without ever seeing an OpenAPI document, and it works on hand-built graphs too.
+
+Both crates are intentionally IO-free. The public API accepts a spec string and returns in-memory `GeneratedFile` values. The CLI and examples decide where those files are written and whether they are formatted by external tools.
+
+## Crate Dependency Structure
+
+Arrows below mean "depends on."
+
+```mermaid
+flowchart TD
+    Consumers["CLI and build scripts"] --> facade["satay-codegen"]
+    facade --> oas3["satay-oas3"]
+    facade --> ir["satay-ir"]
+    facade --> backend["satay-codegen-rust"]
+    backend --> ir
+    backend --> rendering["syn / quote / prettyplease"]
+```
+
+The backend has no dependency on the facade or the OpenAPI parser; `satay-ir` is independent of both crates. The facade brings in Rust rendering transitively through `satay-codegen-rust`.
 
 ## Top-Level Pipeline
 
@@ -10,137 +31,134 @@ The public entry point is `satay_codegen::generate` in `crates/satay-codegen/src
 
 ```mermaid
 flowchart TD
-    spec["OpenAPI spec string"] --> generate["generate(spec)"]
-    generate --> parseDocument["parse::parse_document"]
-    parseDocument --> document["Document<br/>oas3::Spec wrapper"]
-    document --> parseApi["parse::parse_api"]
-    parseApi --> resolve["resolve::resolve_document"]
-    resolve --> resolved["ResolvedDocument<'a><br/>borrowed oas3::Spec"]
-    resolved --> validate["validate::validate_document"]
-    validate --> validated["ValidatedDocument<'a><br/>ResolvedDocument + validated components/operations"]
-    validated --> lower["lower::lower_document"]
-    lower --> model["model::Api<br/>codegen IR"]
-    model --> render["render::render_api"]
+    spec["OpenAPI spec string"] --> generate["generate(spec)<br/>satay-codegen facade"]
+    generate --> parseDocument["parse::parse_document<br/>oas3::from_yaml"]
+    parseDocument --> resolve["resolve::resolve_document<br/>borrowed oas3::Spec"]
+    resolve --> presence["source::PresenceIndex::read<br/>source-presence records"]
+    presence --> normalize["normalize::normalize_for_rust<br/>interpretation + selection,<br/>recoverable diagnostics retained in IR"]
+    normalize --> api["satay_ir::Api<br/>owned semantic graph"]
+    api --> backend["satay_codegen_rust::generate<br/>satay-codegen-rust backend"]
+    backend --> lower["lower::lower_model<br/>Rust validation + lowering"]
+    lower --> render["render::render_api<br/>syn + prettyplease"]
     render --> files["Vec<GeneratedFile>"]
 ```
 
 Main boundaries:
 
-- `parse` owns OpenAPI parsing, reference checking, supported-subset validation, and lowering into the internal IR.
-- `ident` centralizes Rust identifier generation and de-duplication.
-- `model` defines the internal IR consumed by rendering.
-- `render` converts the IR to `syn` syntax trees, pretty-prints them with `prettyplease`, and returns generated file contents.
-- `error` defines the public parse and validation errors returned by `generate`.
+- `parse` owns OpenAPI document parsing into the `oas3::spec::Spec` tree.
+- `resolve` validates supported local references and component-object reference chains early, without rewriting the document.
+- `normalize` converts the resolved document into the owned `satay_ir::Api` semantic graph, interpreting `x-satay` extensions along the way.
+- `satay-ir` defines the parser- and target-independent semantic graph; it knows nothing about OpenAPI text or Rust.
+- `satay-codegen-rust` consumes a finalized `satay_ir::Api` and performs Rust validation (`lower/error.rs`), lowering (`lower`), and rendering (`render`). It has no `oas3` or facade dependency.
+- `error` in the facade defines the public `ParseError` and `ValidationError`, the exhaustive backend-error conversion in `error/backend.rs`, and the deferred-diagnostic compatibility translation in `parse/diagnostic.rs` (`try_restore`).
 
 ## Module Map
 
 ```mermaid
 flowchart LR
-    lib["lib.rs<br/>generate"] --> parse
-    lib --> render
-    lib --> error
-    parse --> model
-    parse --> ident
-    render --> model
-    render --> ident
+    lib["lib.rs<br/>generate"] --> parseMod
+    lib --> facadeError
 
-    subgraph parse["parse/"]
-        parseMod["mod.rs<br/>parse_document, parse_api"] --> resolve
-        parseMod --> validate
-        parseMod --> lower
-        parseMod --> reference
-        parseMod --> registry
-        parseMod --> satay
-        parseMod --> helpers
-
-        resolve["resolve/<br/>local ref validation"] --> refs
-        refs["resolve/refs.rs<br/>local JSON pointer parsing"]
+    subgraph facade["satay-codegen/src/"]
+        parseMod["parse/mod.rs<br/>normalize_api, generate_api"] --> parseDoc["parse_document<br/>oas3::from_yaml"]
+        parseMod --> resolve
+        parseMod --> normalize
+        parseMod --> diagnostic
+        resolve["resolve/<br/>local ref validation"] --> reference["reference.rs<br/>schema ref parsing"]
+        normalize["normalize/<br/>owned satay-ir graph"] --> checks["checks.rs<br/>OpenAPI syntax rules"]
+        normalize --> interpretation["interpretation.rs<br/>single-read x-satay options"]
+        normalize --> http["http.rs<br/>operations, parameters,<br/>responses, projections"]
+        normalize --> schema["schema.rs<br/>definitions + type schemas"]
+        normalize --> source["source.rs<br/>presence index + SourceRef"]
+        normalize --> reachability["reachability.rs<br/>excluded component schemas"]
+        diagnostic["diagnostic.rs<br/>retain + try_restore"]
+        satay["satay.rs<br/>typed x-satay wire contracts"]
         helpers["helpers.rs<br/>descriptions, JSON media types"]
-        reference["reference.rs<br/>on-demand ref helpers"]
-        validate["validate/<br/>supported subset -> ValidatedDocument"]
-        lower["lower/<br/>ValidatedDocument -> model::Api"]
-        registry["registry.rs<br/>generated type names"]
-        satay["satay.rs<br/>typed x-satay wire contracts + accessors"]
+        facadeError["error/<br/>ParseError, ValidationError,<br/>backend mapping"]
     end
 
-    subgraph render["render/"]
-        renderMod["mod.rs<br/>file orchestration + shared helpers"] --> renderTypes
-        renderMod --> renderEndpoint
-        renderMod --> renderApi
-        renderTypes["types/<br/>components, enums, ranges, nutypes"]
-        renderEndpoint["endpoint/<br/>input, response, parts, json"]
-        renderApi["api.rs<br/>Api builder + Action impls"]
+    subgraph backend["satay-codegen-rust/src/"]
+        lib2["lib.rs<br/>generate"] --> lowerMod
+        lib2 --> renderMod
+        lowerMod["lower/<br/>lower_model"] --> checked["checked.rs<br/>Rust-owned checked types"]
+        lowerMod --> policy["policy.rs<br/>Rust-policy validation"]
+        lowerMod --> constraint["constraint.rs<br/>integer widths + bounds"]
+        lowerMod --> registry["registry.rs<br/>generated type names"]
+        lowerMod --> assemble["assemble/<br/>model assembly"]
+        lowerMod --> model["model.rs<br/>Api IR"]
+        renderMod["render/<br/>file orchestration"] --> renderTypes["types/<br/>structs, enums, unions,<br/>ranges, constrained"]
+        renderMod --> renderEndpoint["endpoint/<br/>input, response, parts, json"]
+        renderMod --> renderApi["api.rs<br/>Api builder + Action impls"]
+        renderMod --> group["group.rs<br/>tag group files"]
+        renderMod --> storage["storage.rs<br/>storage generics"]
+        ident["ident.rs<br/>Rust names"]
+        backendError["error.rs<br/>Error::{Rust, Frontend}"]
     end
 
-    model["model.rs<br/>Api IR"]
-    ident["ident.rs<br/>Rust names"]
-    error["error/<br/>ParseError, ValidationError"]
+    satay --- normalize
+    helpers --- normalize
 ```
+
+The two subgraphs communicate only through the `satay_ir::Api` value and the backend's public `generate`, `GenerateOptions`, `GeneratedFile`, and `Error` types.
 
 ## Parse Stage
 
 `parse::parse_document` parses the incoming string with `oas3::from_yaml` and stores the parsed `oas3::spec::Spec` in a small `Document` wrapper. The `oas3` Rust library is provided by the in-tree `satay-oas3` package, a source fork that preserves Schema Object `$ref` siblings and uses `serde-saphyr` for YAML.
 
-`parse::parse_api` runs three phases:
+`normalize::normalize_for_rust` runs the production frontend pipeline in four steps:
 
-- `resolve::resolve_document` checks that supported local references point at existing component entries and that component-object reference chains are not circular.
-- `validate::validate_document` checks the supported OpenAPI subset and produces validated component and operation values.
-- `lower::lower_document` converts those validated values into the `model::Api` IR.
+- `resolve::resolve_document` wraps the borrowed spec in a `ResolvedDocument` and checks that supported local references point at existing component entries and that component-object reference chains are not circular.
+- `source::PresenceIndex::read` records which server, security, and default declarations were explicitly present in the source, so absent-versus-empty distinctions erased by the typed parser can be recovered later.
+- `normalize_document` checks the supported OpenAPI version, selects reachable component schemas with `reachability.rs`, and reserves one `DefinitionId` per non-excluded schema, keyed by the decoded original component name.
+- The conversion context drives `schema.rs` (definitions and type schemas), `interpretation.rs` (single-read `x-satay` option normalization), and `http.rs` (servers, security schemes, operations, parameters, request bodies, responses, and projections) into a `satay_ir::ApiBuilder`, whose finished graph is the only value that escapes.
 
 Reference resolution is deliberately split between validation and use:
 
 - `resolve` validates references early but does not rewrite the OpenAPI tree.
-- `reference.rs` contains on-demand helpers such as `resolve_parameter`, `resolve_request_body`, `resolve_response`, and `resolve_path_item` for validation and lowering.
-- Schema `$ref`s are represented as named validated types and then named IR references to generated component types rather than expanded inline.
+- `reference.rs` contains on-demand schema helpers such as `schema_component_ref` and `schema_type_and_nullable` for normalization.
+- Schema `$ref`s become named IR references (`satay_ir::TypeExpr::Ref`) to their component definitions rather than expanded inline.
 
 Only local component references are supported today, for example `#/components/schemas/User`. The supported component reference sections are `schemas`, `securitySchemes`, `parameters`, `requestBodies`, `responses`, and `pathItems`.
 
 ## Validation Stage
 
-Validation is centered on `parse/validate/mod.rs` and produces a `ValidatedDocument`:
+Validation is split between semantic normalization in `satay-codegen` and Rust-policy validation in `satay-codegen-rust`:
 
 ```mermaid
 flowchart TD
     resolved["ResolvedDocument"] --> version["OpenAPI version check<br/>3.1.x only"]
-    version --> components["schema::validate_components<br/>Vec<ValidatedComponent>"]
-    version --> operations["operation::validate_operations<br/>Vec<ValidatedOperation>"]
-    components --> validated["ValidatedDocument"]
-    operations --> validated
+    version --> reachability["reachability::excluded_component_schemas"]
+    reachability --> reserve["reserve_definitions<br/>DefinitionId per schema"]
+    reserve --> frontend["normalize: schema, interpretation, http<br/>typed ValidationError at SourceRef"]
+    frontend --> retained["recoverable failures retained<br/>as satay_ir::Diagnostic"]
+    retained --> api["satay_ir::Api"]
+    api --> backend["satay-codegen-rust lower:<br/>constraint, schema, operation, policy"]
+    backend --> model["model::Api or<br/>lower::error::ValidationError"]
 ```
 
-Production validation still walks the resolved `oas3` document directly and builds validated data structures that lowering can consume without revisiting unsupported OpenAPI shapes. The private, test-gated semantic pipeline instead uses `parse/normalize` to build an owned `satay-ir::Api`, then `parse/rust` to validate and lower that graph. Neither `generate` nor `generate_with` has switched to this staged route.
+The frontend owns OpenAPI syntax and selection. `normalize_document` rejects unsupported OpenAPI versions; `checks.rs` rejects unsupported sibling keywords around `$ref`, `allOf`, `anyOf`, `oneOf`, and discriminator unions; and `interpretation.rs` reads every `x-satay` extension exactly once through the typed wire contracts in `parse/satay.rs`, rejecting unknown or misplaced keys before anything enters the graph. Failures carry their `SourceRef` position and the legacy `ValidationError` payloads.
 
-The Rust pass consumes only the semantic graph and generation options: no OpenAPI document, source-text lookup, or frontend query is available. It chooses integer widths, parses parameter defaults, applies codec and Serde policy, and preserves encounter order while producing the existing validated Rust types and model. Both routes share constraint and policy helpers in `parse/rust`, and reuse the existing naming, helper registry, model lowering, and renderer.
+The backend owns Rust representability. It consumes only the semantic graph and generation options: no OpenAPI document, source-text lookup, or frontend query is available. During `lower::lower_model`, `constraint.rs` parses string, integer, number, and array constraints for `nutype` rendering and infers integer types from bounds when no explicit `x-satay.integer-type` is provided; `policy.rs` validates union shadows, identifier collisions, coordinate target uses, and parameter defaults; and `schema.rs`/`operation.rs` make the Rust type choices, choosing integer widths, applying codec and Serde policy, and preserving encounter order.
 
-The strict frontend entry still reports normalization failures immediately. Its recovering entry retains failures at their schema or HTTP position, plus original numeric declarations when canonicalization would fail. The Rust traversal can therefore report an earlier Rust-policy failure before a later frontend failure, with the legacy message and context. Graph finalization checks reference integrity even for recovering graphs; it does not imply that every schema is valid for generation. Deferred diagnostics are target-neutral owned code/message records, not borrowed OpenAPI state.
+The production frontend entry `normalize_for_rust` retains recoverable failures at their schema or HTTP position, plus original numeric declarations when canonicalization would fail, instead of reporting them immediately. The Rust traversal can therefore report an earlier Rust-policy failure before a later frontend failure, with the legacy message and context preserved through diagnostic restoration. The strict `normalize_spec` entry reports normalization failures immediately and is test-gated. Graph finalization checks reference integrity even for recovering graphs; retention does not imply that every schema is valid for generation. Deferred diagnostics are target-neutral owned code/message records, not borrowed OpenAPI state.
 
-Parity gates compare generated paths and bytes under both root-module options across the accepted fixture corpus and concrete generation-test specifications. Parser tests also compare the staged result against the existing route, including invalid-input diagnostics. Dedicated regressions cover cross-stage first-error selection, nested `allOf` aliases and ignored wire-name duplicates, and lowering a hand-built graph without source input.
+Parity gates compare generated paths and bytes under both root-module options across the accepted fixture corpus and concrete generation-test specifications. Dedicated regressions cover cross-stage first-error selection, nested `allOf` aliases and ignored wire-name duplicates, and lowering a hand-built graph without source input.
 
-`ValidatedDocument` stores:
+Backend validation responsibilities are split by file:
 
-- `resolved`: the borrowed `ResolvedDocument` used for data that still comes from the original spec, such as servers and security schemes.
-- `components`: validated schema components as `ValidatedComponent` values.
-- `operations`: validated path operations as `ValidatedOperation` values.
+- `lower/constraint.rs` adapts IR-declared constraints to Rust representations: string, integer, number, and array constraints for `nutype` rendering, integer-type inference from bounds, and overflow rejection for exclusive integer bounds.
+- `lower/schema.rs` walks the graph and produces `CheckedComponent` values, rejecting unsupported Rust shapes (inline object schemas, map objects, unsupported compositions, duplicate union branches, and recursive compositions) with structured `lower/error.rs` payloads.
+- `lower/policy.rs` is pure validation over checked values: union branch shadowing, `x-satay.enum-variants` name rules, identifier collision checks, coordinate target proofs, and parameter default constraints.
+- `lower/operation.rs` checks parameter locations and defaults, request bodies, responses, status codes, path placeholders, and JSON media-type requirements.
 
-Schema decisions are carried by `ValidatedType`:
+Frontend validation responsibilities are split by file:
 
-- `kind`: the validated shape, such as a named component, primitive, parsed string/integer, array, enum, or range.
-- `nullable`: whether the OpenAPI schema allows `null`.
-- `validation`: normalized string, integer, number, or array constraints that will render as `nutype` newtypes.
-- `description`: the OpenAPI description, filtered to `None` when blank.
+- `normalize/checks.rs` rejects unsupported sibling keywords around `$ref`, `allOf`, plain and discriminator-tagged unions, and annotation-only composition wrappers.
+- `normalize/interpretation.rs` applies schema-interpretation rules such as `parse-as`, `none-if`, `integer-type`, `enum-variants`, `treat-error-as-none`, `ignore`, and `identifier`, including coordinate interpretation for object fields. Value and property contexts reject property-only keys on values, and the same context split controls which `x-satay` keys are legal beside `$ref`.
+- `normalize/http.rs` validates paths, parameters, request bodies, responses, status codes, projections, and JSON media-type requirements while building the IR's HTTP graph.
+- `parse/satay.rs` is the authoritative home for typed schema and operation `x-satay` wire contracts and their `schema_options` and `operation_options` accessors. The wire types use owned strings so normalization does not need to carry extension-value lifetimes.
 
-Property-only decisions are represented at the property boundary. A transient `ValidatedProperty` distinguishes included fields from ignored wire properties. Included `ValidatedField` values retain the validated `SatayIdentifier` newtype and encode decoding as exactly one of strict, lossy, or parsed-string sentinel handling. Ignored properties remain in this transient form through `allOf` wire-name duplicate validation, then are removed before identifier-collision checks and lowering.
-
-Validation responsibilities are split by file:
-
-- `validate/schema.rs` validates component schemas and inline type schemas, rejects unsupported schema shapes, validates enum shape, validates references, and records constraints on `ValidatedType`. Ordinary schemas enter through `validate_value_schema`; object properties enter through the property-specific stack validator and become included or ignored property results. Array items and `additionalProperties` values always return to value context rather than inheriting property capabilities.
-- `validate/operation.rs` validates paths, operation parameters, request bodies, responses, status codes, path placeholders, and JSON media-type requirements.
-- `validate/constraint.rs` adapts OpenAPI constraints to the pure policy in `rust/constraint.rs`, which parses string, integer, number, and array constraints for `nutype` rendering and infers integer types from bounds when no explicit `x-satay.integer-type` is provided.
-- `parse/satay.rs` is the authoritative home for typed schema and operation `x-satay` wire contracts, their `schema_options` and `operation_options` accessors, and lower-level parsing helpers shared by validation. The wire types use owned strings so validation does not need to carry extension-value lifetimes.
-- `validate/satay.rs` applies schema-extension compatibility rules such as `parse-as`, `none-if`, `integer-type`, `enum-variants`, `treat-error-as-none`, `ignore`, and `identifier`. Separate value and property entry points reject property-only keys on values by wire-key presence, including explicit `false`; the same context split controls which `x-satay` keys are legal beside `$ref`. Ordinary-type, enum, and `$ref` routes exhaustively destructure the raw schema options so each present key is either retained in validated state or rejected before lowering.
-- `validate/operation.rs` applies operation semantics and resolves names from operation extensions against validated operation data.
-
-The wire layer uses `#[serde(deny_unknown_fields)]` and validated newtypes for values with local invariants. It is intentionally separate from the vendor-neutral `satay-oas3::SpecificationExtensions::extension_as<T>()` API: `satay-oas3` provides typed extension deserialization and nested error paths, while `satay-codegen` owns Satay-specific contracts and policy. Validation and lowering must use the centralized accessors rather than traversing raw extension JSON.
+The wire layer uses `#[serde(deny_unknown_fields)]` and validated newtypes for values with local invariants. It is intentionally separate from the vendor-neutral `satay-oas3::SpecificationExtensions::extension_as<T>()` API: `satay-oas3` provides typed extension deserialization and nested error paths, while `satay-codegen` owns Satay-specific contracts and policy. Only the frontend reads extension JSON; the backend consumes only the interpreted IR, and neither stage traverses raw extension JSON after interpretation.
 
 A future parameter-group extension, for example:
 
@@ -163,27 +181,34 @@ pub(crate) struct SatayParameterGroup {
 }
 ```
 
-`validate/operation.rs` would resolve those wire names to validated parameter indices. Lowering and rendering would consume only those resolved values and would not parse extension JSON directly. This documents the intended extension path; parameter-group behavior is not implemented yet.
+`normalize/http.rs` would resolve those wire names to validated parameter indices and record them in the IR. Backend lowering and rendering would consume only those resolved values and would not parse extension JSON directly. This documents the intended extension path; parameter-group behavior is not implemented yet.
 
-Operation response projection follows the same boundary. `validate/operation.rs` resolves `x-satay.output` selectors against response schemas and records the projected `ValidatedType`; lowering carries only validated selector names and the projected payload type into `ResponseCase`. Generated JSON decoders call `satay_runtime::from_projected_json_slice` to select the wire payload before normal serde deserialization. Rendering never revisits the OpenAPI extension value.
+Operation response projection follows the same boundary. `normalize/http.rs` resolves `x-satay.output` selectors and records `unwrap_required` and `map_required` in the IR's response projection; backend lowering carries the projection and the projected payload type into `ResponseCase`. Generated JSON decoders call `satay_runtime::from_projected_json_slice` to select the wire payload before normal serde deserialization. Rendering never revisits the OpenAPI extension value.
 
-Unsupported OpenAPI features are rejected with `ValidationError` instead of being ignored. Lowering and rendering rely on those validation guarantees and use `unreachable!` or `expect` for states that validation should have made impossible.
+Unsupported OpenAPI features are rejected with `ValidationError` instead of being ignored. Backend lowering and rendering rely on those validation guarantees and use `unreachable!` or `expect` for states that validation should have made impossible.
 
 ## Lowering Stage
 
-Lowering converts `ValidatedDocument` values into the codegen IR in `model.rs`.
+Lowering converts the owned `satay_ir::Api` into the codegen IR in `satay-codegen-rust`'s `model.rs`. `lower::lower_model` validates while it lowers and returns structured `lower::error::ValidationError` payloads for constructs the generated Rust types cannot represent.
 
 ```mermaid
 flowchart TD
-    validated["ValidatedDocument"] --> lowerDocument["lower::lower_document"]
-    lowerDocument --> server["first server URL"]
-    lowerDocument --> security["API-key security schemes"]
-    lowerDocument --> reserve["reserve component type names"]
-    reserve --> components["schema::parse_components"]
-    components --> operations["operation::parse_operations"]
-    operations --> finish["TypeRegistry::finish"]
-    finish --> api["Api IR"]
+    api["satay_ir::Api"] --> schemas["lower::schema::Schemas<br/>CheckedComponent values"]
+    schemas --> cycles["policy::reject_any_of_cycles"]
+    cycles --> operations["lower::operation::operations<br/>CheckedOperation values"]
+    operations --> coordinates["policy::validate_coordinate_uses"]
+    coordinates --> assemble["lower::assemble::lower_parts"]
+    assemble --> server["first server URL"]
+    assemble --> security["API-key security schemes"]
+    assemble --> reserve["reserve component type names"]
+    reserve --> components["assemble/schema::parse_components"]
+    components --> operationsModel["assemble/operation::parse_operations"]
+    operationsModel --> groupsModel["parse_api_groups<br/>tag groups"]
+    groupsModel --> finish["TypeRegistry::finish"]
+    finish --> apiModel["Api IR"]
 ```
+
+The lowering first walks the graph into Rust-owned checked values (`lower/checked.rs`), validates Rust-policy rules (`policy.rs`), and only then assembles the render model (`assemble/`).
 
 `TypeRegistry` is the shared name allocator for generated helper types:
 
@@ -193,9 +218,9 @@ flowchart TD
 - Inline string enums become extra `ComponentKind::Enum` components and are referenced through `TypeRef::Named`.
 - Inline range schemas from `x-satay.parse-as` become extra `ComponentKind::Range` components and are referenced through `TypeRef::Range`.
 
-`lower/schema.rs` converts component schemas and nested type schemas into:
+`lower/assemble/schema.rs` converts component schemas and nested type schemas into:
 
-- `ComponentKind::Struct` for object schemas with properties, including supported component and generated inline `allOf` object branches flattened during validation.
+- `ComponentKind::Struct` for object schemas with properties, including supported component and generated inline `allOf` object branches flattened during normalization.
 - `ComponentKind::Enum` for non-null string enum components.
 - `ComponentKind::Union` for local-ref `anyOf` enums and supported discriminator-tagged `anyOf`/`oneOf` unions.
 - `ComponentKind::Range` for non-null component-level string range schemas from `x-satay.parse-as`.
@@ -207,15 +232,15 @@ Struct properties retain both `Field.wire_name` and optional canonical `Field.id
 `lower/operation.rs` converts supported path operations into `Operation` values:
 
 - Operation names come from `operationId`, or from an inferred `method + path` name.
-- Validated operations already contain merged path-level and operation-level parameters; lowering assigns Rust field names and de-duplicates input fields.
-- Path strings have already been split into literal and parameter `PathSegment`s during validation.
-- Request bodies preserve the validated JSON media type and become a generated `body` input field, de-duplicated if a parameter already uses that name.
-- Response cases preserve validated status-code ordering and response body types when a JSON schema exists.
+- The IR keeps path-level and operation-local parameter lists separate in declaration order; lowering merges them per operation, assigning Rust field names and upserting duplicates by parameter location and wire name.
+- Path strings are split into literal and parameter `PathSegment`s during lowering, which also rejects unclosed path parameters.
+- Request bodies preserve the JSON media type and become a generated `body` input field, de-duplicated against parameter Rust names through the identifier registry.
+- Response cases preserve IR status-code ordering and response body types when a JSON schema exists.
 - Header and query API-key security schemes are converted to `ApiKeySecurityScheme` values for the generated `Api` builder.
 
 ## Internal IR
 
-The render layer consumes only `model::Api`, not raw `oas3` data.
+The render layer consumes only the backend's `model::Api`, not raw `oas3` data and not `satay-ir` types directly.
 
 ```mermaid
 classDiagram
@@ -224,6 +249,7 @@ classDiagram
         api_key_security_schemes
         components
         constrained_types
+        groups
         operations
     }
     class Component {
@@ -234,6 +260,7 @@ classDiagram
     class ComponentKind {
         Struct(fields)
         Enum(variants)
+        Union(union)
         Range(range_type)
         Alias(type_ref)
         Nutype(constrained_type)
@@ -244,6 +271,7 @@ classDiagram
         response_name
         method
         path
+        path_segments
         parameters
         request_body
         responses
@@ -251,12 +279,15 @@ classDiagram
     class TypeRef {
         String
         ParsedString
+        Coordinates
         ParsedInteger
         Integer
         F32
         F64
         Bool
         Array
+        Map
+        JsonValue
         Range
         Named
         Constrained
@@ -272,6 +303,7 @@ classDiagram
     Api "1" --> "many" Component
     Api "1" --> "many" Operation
     Api "1" --> "many" ConstrainedType
+    Api "1" --> "many" ApiGroup
     Component --> ComponentKind
     Operation --> Parameter
     Operation --> RequestBody
@@ -289,24 +321,27 @@ Important IR conventions:
 - `TypeRef::Named` points at a type in the generated `types.rs` file.
 - `TypeRef::Constrained` points at an inline generated constrained type and keeps the inner type for request parameter serialization.
 - `TypeRef::Option` maps to `Option<T>` during rendering.
+- `TypeRef::Map` maps to `BTreeMap<String, V>` and `TypeRef::JsonValue` to `satay_runtime::JsonValue` during rendering.
 - Optional fields are represented by `Field.required == false`; rendering decides whether to wrap in `Option<T>`.
 - Explicit property names are represented by `Field.identifier_words`; `Field.wire_name` always remains the OpenAPI property key used for wire metadata.
 - `Field.treat_error_as_none` forces `Option<T>` plus custom serde handling even when a property is required in OpenAPI.
 - `Field.none_if` forces `Option<T>` and generated field-specific serde helpers that preserve the configured string parser while recognizing exact sentinel strings.
 
-Ignored properties are removed after validated `allOf` branches have checked duplicate wire names and before the codegen `Field` IR is built. Lowering receives only included `ValidatedField` values, translates their identifier newtypes and decoding modes into the existing `Field` representation, and never revisits `x-satay` extension data.
+Schemas marked with `x-satay.ignore` never enter the semantic graph. Duplicate wire names inside supported `allOf` branches are rejected during backend validation (`DuplicateAllOfProperty`) before the codegen `Field` IR is built. Lowering translates the IR's identifier words and decoding policies into the `Field` representation and never revisits `x-satay` extension data.
 
 ## Rendering Stage
 
-Rendering is orchestrated by `render::render_api` in `render/mod.rs`.
+Rendering is orchestrated by `render::render_api` in `satay-codegen-rust`'s `render/mod.rs`.
 
 ```mermaid
 flowchart TD
-    api["Api IR"] --> topMod["mod.rs"]
-    api --> typesFile["types.rs<br/>if types exist"]
+    api["Api IR"] --> topMod["mod.rs or lib.rs<br/>by RootModule"]
+    api --> typesFile["types.rs<br/>if components or constrained types exist"]
     api --> apiFile["api.rs"]
+    api --> groupFiles["one file per tag group"]
     api --> endpointFiles["one directory per operation"]
 
+    groupFiles --> groupRs["<group>.rs"]
     endpointFiles --> endpointMod["<operation>/mod.rs"]
     endpointFiles --> parts["<operation>/parts.rs"]
     endpointFiles --> json["<operation>/json.rs"]
@@ -314,38 +349,40 @@ flowchart TD
     topMod --> generated["GeneratedFile values"]
     typesFile --> generated
     apiFile --> generated
+    groupRs --> generated
     endpointMod --> generated
     parts --> generated
     json --> generated
 ```
 
-The renderer builds `syn::File` values with `quote` and `parse_quote`, then formats them with `prettyplease`. `format_file` also inserts a generated-file preamble and normalizes blank lines between items, impl methods, and members.
+The renderer builds `syn::File` values with `quote` and `parse_quote`, then formats them with `prettyplease`. `format_file` prepends the generated-file preamble to the pretty-printed output.
 
-Shared rendering helpers in `render/mod.rs` handle:
+Before rendering, `render/storage.rs` applies storage generics to schema-derived types so generated models and actions can pick dynamic string storage. Shared rendering helpers in `render/mod.rs` handle:
 
 - Identifier and string literal construction.
-- Rustdoc attribute generation from OpenAPI descriptions.
-- `TypeRef` to Rust type conversion.
-- Operation input field construction.
-- Optional-field wrapping and input builder argument conversion.
-- Request body conversion mode selection.
+- Rustdoc attribute generation from descriptions.
+- `TypeRef` to Rust type conversion, including optional-field wrapping.
+- Operation input field construction and input builder argument conversion.
+- Request parts expression selection.
 
 Renderer submodules:
 
-- `render/types` emits `types.rs` with structs, string enums, ranges, aliases, and `nutype` constrained types.
+- `render/types` emits `types.rs` with structs, string enums, unions, ranges, aliases, and `nutype` constrained types.
 - `render/endpoint/input.rs` emits operation input structs, required-field constructors, optional-field setters, and `Default` when possible.
 - `render/endpoint/response.rs` emits response enums with known status variants plus `UnexpectedStatus(http::StatusCode, Vec<u8>)`.
 - `render/endpoint/parts.rs` emits `<operation>_parts`, which builds `satay_runtime::RequestParts<B>` without serializing JSON or choosing a transport.
 - `render/endpoint/json.rs` emits `encode_<operation>` and `decode_<operation>_response` helpers behind the generated crate's `json` feature.
-- `render/api.rs` emits the generated `Api` builder, API-key application, per-operation action structs, and `satay_runtime::Action` impls.
+- `render/api.rs` emits the generated `Api` builder, API-key application, per-operation action structs, and `satay_runtime::Action`/`OwnedAction` impls.
+- `render/group.rs` emits one `<group>.rs` file per OpenAPI tag, with a group struct exposing that tag's operations.
 
 ## Generated File Layout
 
 | File | Purpose |
 | --- | --- |
-| `mod.rs` | Exposes `SERVER_URL`, optionally exposes `types`, re-exports endpoint modules, and gates the generated `api` module behind `feature = "json"`. |
-| `types.rs` | Contains component structs, enums, range types, type aliases, and constrained `nutype` wrappers. Omitted when there are no components or constrained inline types. |
+| `mod.rs` (or `lib.rs` by `RootModule`) | Exposes `SERVER_URL`, optionally exposes `types`, re-exports group and endpoint modules, and gates the generated `api` module behind `feature = "json"`. |
+| `types.rs` | Contains component structs, enums, unions, range types, type aliases, and constrained `nutype` wrappers. Omitted when there are no components or constrained inline types. |
 | `api.rs` | Contains the generated `Api` action builder, API-key setters, per-operation action structs, and `satay_runtime::Action` implementations. |
+| `<group>.rs` | Contains one group struct per OpenAPI tag, exposing that tag's operations behind `feature = "json"`. |
 | `<operation>/mod.rs` | Re-exports `parts` and, behind `feature = "json"`, `json`. |
 | `<operation>/parts.rs` | Contains `<Operation>Input`, `<Operation>Response`, and `<operation>_parts`. |
 | `<operation>/json.rs` | Contains `encode_<operation>` and `decode_<operation>_response`. |
@@ -370,9 +407,12 @@ Validation newtypes render through `nutype`. Specs with validation constraints r
 The public error type is `satay_codegen::Error`:
 
 - `ParseError` covers OpenAPI YAML parsing failures.
-- `ValidationError` covers unsupported OpenAPI features, invalid schema shapes, invalid refs, invalid constraints, invalid `x-satay` metadata, and invalid operation definitions.
+- `ValidationError` covers unsupported OpenAPI features, invalid schema shapes, invalid refs, invalid constraints, invalid `x-satay` metadata, Rust-representability rejections, and invalid operation definitions.
+- `Internal` covers compiler-stage failures that no existing parse or validation diagnostic can represent, such as a retained semantic diagnostic without a legacy shape.
 
-Rendering is not fallible in the public API. If rendering or lowering hits an impossible state, that is treated as an internal bug because validation should have rejected the input earlier.
+The backend reports failures through `satay_codegen_rust::Error`: `Rust(ValidationError)` for Rust-policy rejections with structured, parser-independent payloads, and `Frontend(Diagnostic)` for semantic diagnostics retained in the input graph. The facade translates these back into the public error type: `error/backend.rs` maps backend `ValidationError` values field-for-field through an exhaustive macro table, and `parse/diagnostic.rs::try_restore` rebuilds the legacy `ValidationError` from a retained diagnostic. Both mappings are exhaustive matches, so either side gains a variant only by updating the compatibility boundary. A diagnostic kind with no legacy shape becomes `Error::Internal`.
+
+Rendering is not fallible in the public API. If rendering hits an impossible state, that is treated as an internal bug because validation should have rejected the input earlier.
 
 Key invariants enforced before rendering:
 
@@ -387,12 +427,13 @@ Key invariants enforced before rendering:
 
 Most feature additions need changes in this order:
 
-- Add or adjust `ValidationError` variants for the new supported or rejected cases.
+- Add or adjust `ValidationError` variants in the crate that owns the rejection: `crates/satay-codegen` for OpenAPI syntax and selection, or `crates/satay-codegen-rust` for Rust representability. Keep the exhaustive mapping tables in `error/backend.rs` and `parse/diagnostic.rs` in sync with any variant changes.
 - Update `parse/resolve` and `parse/reference` if the feature introduces new reference locations or resolution behavior.
-- Update `parse/validate` so the new shape is either accepted into `Validated*` values or rejected explicitly.
+- Extend `parse/satay.rs` if the feature introduces new `x-satay` wire keys, then teach `parse/normalize` to interpret them into the semantic IR.
+- Extend `satay-ir` only if the existing graph types cannot represent the feature.
+- Update `crates/satay-codegen-rust/src/lower` to validate and lower the feature into the model.
 - Extend `model.rs` only if the existing `TypeRef`, `ComponentKind`, or operation IR cannot represent the feature.
-- Update `parse/lower` to produce the IR from validated data.
 - Update `render` modules to emit Rust for the new IR.
-- Add tests in `crates/satay-codegen/tests/generate.rs` or parser-focused tests under `parse/tests.rs`.
+- Add tests in `crates/satay-codegen/tests/generate/` or parser-focused tests under `crates/satay-codegen/src/parse/tests/`.
 
-This ordering keeps the current contract intact: unsupported OpenAPI input fails during validation, and rendering can remain a straightforward IR-to-Rust transformation.
+This ordering keeps the current contract intact: unsupported OpenAPI input fails during normalization or backend validation, and rendering can remain a straightforward IR-to-Rust transformation.

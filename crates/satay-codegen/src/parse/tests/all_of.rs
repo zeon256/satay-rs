@@ -1,7 +1,6 @@
 use satay_ir::{CompositionKind, TypeExpr};
 
-use crate::parse::normalize::normalize_spec;
-
+use super::ast::*;
 use super::*;
 
 #[test]
@@ -54,8 +53,7 @@ components:
               type: string
 "#;
 
-    let api = parse_valid(spec);
-    let semantic = normalize_spec(spec, "all-of.yaml").unwrap();
+    let semantic = normalize_spec(spec);
     let (_, child_ir) = semantic
         .definitions()
         .find(|(_, d)| d.source_name == "Child")
@@ -98,37 +96,31 @@ components:
         "/components/schemas/Child/allOf/1"
     );
 
-    let child = component(&api, "Child");
-    assert_eq!(child.description.as_deref(), Some("A flattened child."));
+    // NOTE: the private Rust model is gone; the flattening facts are now
+    // asserted on the generated Rust output. Requiredness shows up as the
+    // plain `S` field type, optionality as `Option<S>`.
+    let files = generate_valid(spec);
+    let types = parse_rust(file(&files, "types.rs"));
 
-    match &child.kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(fields.len(), 4);
-            assert_eq!(field(fields, "id").rust_name, "id");
-            assert!(field(fields, "id").required);
-            assert_eq!(field(fields, "tag").rust_name, "tag");
-            assert!(field(fields, "tag").required);
-            assert_eq!(field(fields, "name").rust_name, "name");
-            assert!(field(fields, "name").required);
-            assert_eq!(field(fields, "nickname").rust_name, "nickname");
-            assert!(!field(fields, "nickname").required);
-        }
-        other => panic!("expected Child struct, got {other:?}"),
-    }
+    let child = find_struct(&types, "Child");
+    assert_doc(&child.attrs, "A flattened child.");
+    assert_eq!(field_names(child), ["id", "tag", "name", "nickname"]);
+    assert_field(child, "id", "S");
+    assert_field(child, "tag", "S");
+    assert_field(child, "name", "S");
+    assert_field(child, "nickname", "Option<S>");
 
-    let decorated = component(&api, "Decorated");
-    match &decorated.kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(fields.len(), 2);
-            assert_eq!(field(fields, "id").rust_name, "id");
-            assert_eq!(field(fields, "tag").rust_name, "tag");
-        }
-        other => panic!("expected Decorated struct, got {other:?}"),
-    }
+    let decorated = find_struct(&types, "Decorated");
+    assert_eq!(field_names(decorated), ["id", "tag"]);
 
-    assert_eq!(
-        api.operations[0].responses[0].body,
-        Some(TypeRef::Named("Child".to_owned()))
+    // The operation response body decodes into the flattened `Child` type.
+    let parts = parse_rust(file(&files, "get_child/parts.rs"));
+    let response = find_enum(&parts, "GetChildResponse");
+    let ok = variant(response, "Ok");
+    assert!(
+        contains_tokens(ok, "Child<S>"),
+        "response body must be the flattened `Child` type, got `{}`",
+        norm(ok)
     );
 }
 
@@ -166,8 +158,7 @@ components:
 
 #[test]
 fn parses_inline_all_of_array_items_into_generated_struct_ir() {
-    let api = parse_valid(
-        r##"
+    let spec = r##"
 openapi: 3.1.0
 info:
   title: Test API
@@ -223,39 +214,26 @@ components:
           type: string
         has_more:
           type: boolean
-"##,
-    );
+"##;
+    let files = generate_valid(spec);
 
-    let list = component(&api, "ChatCompletionMessageList");
-    match &list.kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(
-                field(fields, "data").ty,
-                TypeRef::Array(Box::new(TypeRef::Named(
-                    "ChatCompletionMessageListDataItem".to_owned()
-                )))
-            );
-        }
-        other => panic!("expected ChatCompletionMessageList struct, got {other:?}"),
-    }
+    // NOTE: the private model's `TypeRef::Array(Named(...))` fact maps to the
+    // generated `Vec<...DataItem<S>>` field type on the list struct.
+    let types = parse_rust(file(&files, "types.rs"));
+    let list = find_struct(&types, "ChatCompletionMessageList");
+    assert_field(list, "data", "Vec<ChatCompletionMessageListDataItem<S>>");
 
-    let item = component(&api, "ChatCompletionMessageListDataItem");
-    match &item.kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(fields.len(), 3);
-            assert_eq!(field(fields, "role").ty, TypeRef::String);
-            assert_eq!(field(fields, "content").ty, TypeRef::String);
-            assert_eq!(field(fields, "id").ty, TypeRef::String);
-            assert!(field(fields, "id").required);
-        }
-        other => panic!("expected generated inline item struct, got {other:?}"),
-    }
+    let item = find_struct(&types, "ChatCompletionMessageListDataItem");
+    assert_eq!(field_names(item), ["role", "content", "id"]);
+    assert_field(item, "role", "S");
+    assert_field(item, "content", "S");
+    assert_field(item, "id", "S");
 }
 
 #[test]
 fn rejects_all_of_with_sibling_properties_keyword() {
     let err = parse_invalid(
-        r##"
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -280,7 +258,7 @@ components:
       properties:
         extra:
           type: string
-"##,
+"#,
     );
     match err {
         ValidationError::UnsupportedAllOfSiblingKeyword { context, keyword } => {
@@ -294,7 +272,7 @@ components:
 #[test]
 fn rejects_all_of_duplicate_even_when_first_property_is_ignored() {
     let err = parse_invalid(
-        r##"
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -322,7 +300,7 @@ components:
           properties:
             id:
               type: string
-"##,
+"#,
     );
     match err {
         ValidationError::DuplicateAllOfProperty { context, property } => {
@@ -336,7 +314,7 @@ components:
 #[test]
 fn rejects_all_of_with_primitive_branch() {
     let err = parse_invalid(
-        r##"
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -353,7 +331,7 @@ components:
     Broken:
       allOf:
         - type: string
-"##,
+"#,
     );
     match err {
         ValidationError::UnsupportedAllOfBranch { context, index } => {
@@ -367,7 +345,7 @@ components:
 #[test]
 fn rejects_all_of_with_nested_all_of_branch() {
     let err = parse_invalid(
-        r##"
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -389,7 +367,7 @@ components:
               properties:
                 id:
                   type: string
-"##,
+"#,
     );
     match err {
         ValidationError::UnsupportedAllOfBranch { context, index } => {
@@ -403,7 +381,7 @@ components:
 #[test]
 fn rejects_all_of_branch_referencing_any_of_union() {
     let err = parse_invalid(
-        r##"
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -438,7 +416,7 @@ components:
     Broken:
       allOf:
         - $ref: '#/components/schemas/Union'
-"##,
+"#,
     );
     match err {
         ValidationError::UnsupportedAllOfBranch { context, index } => {
@@ -452,7 +430,7 @@ components:
 #[test]
 fn rejects_mutually_recursive_all_of_components() {
     let err = parse_invalid(
-        r##"
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -472,7 +450,7 @@ components:
     B:
       allOf:
         - $ref: '#/components/schemas/A'
-"##,
+"#,
     );
     match err {
         ValidationError::RecursiveAllOf { context, schema } => {
@@ -486,7 +464,7 @@ components:
 #[test]
 fn rejects_self_recursive_inline_all_of_property() {
     let err = parse_invalid(
-        r##"
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -506,7 +484,7 @@ components:
         child:
           allOf:
             - $ref: '#/components/schemas/Node'
-"##,
+"#,
     );
     match err {
         ValidationError::RecursiveAllOf { context, schema } => {
@@ -520,7 +498,7 @@ components:
 #[test]
 fn rejects_mutually_recursive_inline_all_of_properties() {
     let err = parse_invalid(
-        r##"
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -546,7 +524,7 @@ components:
         parent:
           allOf:
             - $ref: '#/components/schemas/A'
-"##,
+"#,
     );
     match err {
         ValidationError::RecursiveAllOf { context, schema } => {
@@ -560,7 +538,7 @@ components:
 #[test]
 fn rejects_inline_all_of_cycle_through_discriminator_branch() {
     let err = parse_invalid(
-        r##"
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -598,7 +576,7 @@ components:
       properties:
         kind:
           type: string
-"##,
+"#,
     );
     match err {
         ValidationError::RecursiveDiscriminatorBranch { context, schema } => {
@@ -612,7 +590,7 @@ components:
 #[test]
 fn rejects_all_of_in_parameter_schemas() {
     let err = parse_invalid(
-        r##"
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -633,7 +611,7 @@ paths:
       responses:
         '204':
           description: No content
-"##,
+"#,
     );
     match err {
         ValidationError::UnsupportedComposition { context, keyword } => {
@@ -646,8 +624,8 @@ paths:
 
 #[test]
 fn parses_all_of_in_inline_property_schemas() {
-    let api = parse_valid(
-        r##"
+    let files = generate_valid(
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -670,34 +648,23 @@ components:
               properties:
                 id:
                   type: string
-"##,
+"#,
     );
 
-    let parent = component(&api, "Parent");
-    match &parent.kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(
-                field(fields, "child").ty,
-                TypeRef::Named("ParentChild".to_owned())
-            );
-        }
-        other => panic!("expected Parent struct, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
 
-    let child = component(&api, "ParentChild");
-    match &child.kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(fields.len(), 1);
-            assert_eq!(field(fields, "id").ty, TypeRef::String);
-        }
-        other => panic!("expected ParentChild struct, got {other:?}"),
-    }
+    let parent = find_struct(&types, "Parent");
+    assert_field(parent, "child", "Option<ParentChild<S>>");
+
+    let child = find_struct(&types, "ParentChild");
+    assert_eq!(field_names(child), ["id"]);
+    assert_field(child, "id", "Option<S>");
 }
 
 #[test]
 fn rejects_inline_all_of_with_duplicate_properties() {
     let err = parse_invalid(
-        r##"
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -724,7 +691,7 @@ components:
               properties:
                 id:
                   type: string
-"##,
+"#,
     );
     match err {
         ValidationError::DuplicateAllOfProperty { context, property } => {
@@ -738,7 +705,7 @@ components:
 #[test]
 fn rejects_inline_all_of_with_primitive_branch() {
     let err = parse_invalid(
-        r##"
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -760,7 +727,7 @@ components:
           items:
             allOf:
               - type: string
-"##,
+"#,
     );
     match err {
         ValidationError::UnsupportedAllOfBranch { context, index } => {
@@ -774,7 +741,7 @@ components:
 #[test]
 fn rejects_inline_all_of_with_sibling_properties_keyword() {
     let err = parse_invalid(
-        r##"
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -800,7 +767,7 @@ components:
           properties:
             extra:
               type: string
-"##,
+"#,
     );
     match err {
         ValidationError::UnsupportedAllOfSiblingKeyword { context, keyword } => {
@@ -813,8 +780,8 @@ components:
 
 #[test]
 fn parses_empty_all_of_as_json_value() {
-    let api = parse_valid(
-        r##"
+    let files = generate_valid(
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -830,18 +797,20 @@ components:
   schemas:
     Empty:
       allOf: []
-"##,
+"#,
     );
-    match &component(&api, "Empty").kind {
-        ComponentKind::Alias(alias) => assert_eq!(*alias, TypeRef::JsonValue),
-        other => panic!("expected Empty alias, got {other:?}"),
-    }
+
+    // NOTE: the private model's `ComponentKind::Alias(JsonValue)` maps to a
+    // generated type alias over the runtime JSON value.
+    let types = parse_rust(file(&files, "types.rs"));
+    let empty = find_type_alias(&types, "Empty");
+    assert_eq!(norm(&empty.ty), norm_str("satay_runtime::JsonValue"));
 }
 
 #[test]
 fn unwraps_annotation_only_all_of_ref_wrapper_property_to_named_type() {
-    let api = parse_valid(
-        r##"
+    let files = generate_valid(
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -867,27 +836,26 @@ components:
           description: How they are related.
           allOf:
             - $ref: '#/components/schemas/Relationship'
-"##,
+"#,
     );
 
-    match &component(&api, "Person").kind {
-        ComponentKind::Struct(fields) => {
-            let relationship = field(fields, "relationship");
-            assert_eq!(relationship.ty, TypeRef::Named("Relationship".to_owned()));
-            assert_eq!(
-                relationship.description.as_deref(),
-                Some("How they are related.")
-            );
-            assert!(!relationship.required);
-        }
-        other => panic!("expected Person struct, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let person = find_struct(&types, "Person");
+    assert_eq!(field_names(person), ["relationship"]);
+    // Unwrapped to the referenced named type; the property annotation (the
+    // description) is carried onto the generated field.
+    assert_field(person, "relationship", "Option<Relationship>");
+    assert_doc(
+        &field(person, "relationship").attrs,
+        "How they are related.",
+    );
 }
 
 #[test]
 fn wrapped_ref_property_without_description_uses_referenced_description() {
-    let api = parse_valid(
-        r##"
+    let files = generate_valid(
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -914,24 +882,22 @@ components:
           title: Relationship
           allOf:
             - $ref: '#/components/schemas/Relationship'
-"##,
+"#,
     );
 
-    match &component(&api, "Person").kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(
-                field(fields, "relationship").description.as_deref(),
-                Some("The relationship kind.")
-            );
-        }
-        other => panic!("expected Person struct, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let person = find_struct(&types, "Person");
+    assert_doc(
+        &field(person, "relationship").attrs,
+        "The relationship kind.",
+    );
 }
 
 #[test]
 fn unwraps_annotation_only_all_of_ref_wrapper_property_targeting_union() {
-    let api = parse_valid(
-        r##"
+    let files = generate_valid(
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -970,24 +936,21 @@ components:
           description: Pick one.
           allOf:
             - $ref: '#/components/schemas/Choice'
-"##,
+"#,
     );
 
-    match &component(&api, "Holder").kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(
-                field(fields, "choice").ty,
-                TypeRef::Named("Choice".to_owned())
-            );
-        }
-        other => panic!("expected Holder struct, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
+
+    let holder = find_struct(&types, "Holder");
+    assert_eq!(field_names(holder), ["choice"]);
+    assert_field(holder, "choice", "Option<Choice<S>>");
+    assert_doc(&field(holder, "choice").attrs, "Pick one.");
 }
 
 #[test]
 fn wrapped_struct_ref_property_still_flattens_to_inline_struct() {
-    let api = parse_valid(
-        r##"
+    let files = generate_valid(
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -1015,34 +978,25 @@ components:
           description: Annotated child.
           allOf:
             - $ref: '#/components/schemas/Base'
-"##,
+"#,
     );
 
-    match &component(&api, "Holder").kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(
-                field(fields, "child").ty,
-                TypeRef::Named("HolderChild".to_owned()),
-                "struct-target wrapper must keep the flattening carve-out"
-            );
-        }
-        other => panic!("expected Holder struct, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
 
-    match &component(&api, "HolderChild").kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(fields.len(), 1);
-            assert_eq!(field(fields, "id").rust_name, "id");
-            assert!(field(fields, "id").required);
-        }
-        other => panic!("expected flattened HolderChild struct, got {other:?}"),
-    }
+    let holder = find_struct(&types, "Holder");
+    assert_field(holder, "child", "Option<HolderChild<S>>");
+
+    // Struct-target wrappers keep the flattening carve-out: the referenced
+    // object's properties land on a dedicated named struct.
+    let child = find_struct(&types, "HolderChild");
+    assert_eq!(field_names(child), ["id"]);
+    assert_field(child, "id", "S");
 }
 
 #[test]
 fn flattens_all_of_branch_with_additional_properties_false_and_properties() {
-    let api = parse_valid(
-        r##"
+    let files = generate_valid(
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -1071,32 +1025,23 @@ components:
           description: Annotated config.
           allOf:
             - $ref: '#/components/schemas/Target'
-"##,
+"#,
     );
 
-    match &component(&api, "Holder").kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(
-                field(fields, "config").ty,
-                TypeRef::Named("HolderConfig".to_owned())
-            );
-        }
-        other => panic!("expected Holder struct, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
 
-    match &component(&api, "HolderConfig").kind {
-        ComponentKind::Struct(fields) => {
-            assert_eq!(fields.len(), 1);
-            assert!(field(fields, "enabled").required);
-        }
-        other => panic!("expected flattened HolderConfig struct, got {other:?}"),
-    }
+    let holder = find_struct(&types, "Holder");
+    assert_field(holder, "config", "Option<HolderConfig>");
+
+    let config = find_struct(&types, "HolderConfig");
+    assert_eq!(field_names(config), ["enabled"]);
+    assert_field(config, "enabled", "bool");
 }
 
 #[test]
 fn rejects_all_of_branch_with_additional_properties_on_propertyless_object() {
     let err = parse_invalid(
-        r##"
+        r#"
 openapi: 3.1.0
 info:
   title: Test API
@@ -1118,7 +1063,7 @@ components:
           allOf:
             - type: object
               additionalProperties: false
-"##,
+"#,
     );
 
     match err {

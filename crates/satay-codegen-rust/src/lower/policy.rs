@@ -1,19 +1,19 @@
 //! Validation over the Rust model, independent of frontend syntax.
-use crate::error::ValidationError;
+use super::error::ValidationError;
 use crate::ident::{field_ident, type_ident, unique_ident, variant_ident};
+use crate::lower::checked::{
+    CheckedComponent, CheckedComponentKind, CheckedField, CheckedOperation, CheckedType,
+    CheckedTypeKind, CheckedUnionVariant, CheckedUnionVariantKind,
+};
 use crate::model::{
     Enum, EnumFallback, EnumVariant, FloatLimit, IntegerLimit, IntegerType, ParameterDefault,
     Validation,
-};
-use crate::parse::rust::checked::{
-    CheckedComponent, CheckedComponentKind, CheckedField, CheckedOperation, CheckedType,
-    CheckedTypeKind, CheckedUnionVariant, CheckedUnionVariantKind,
 };
 use regex::Regex;
 use serde_json::Value as JsonValue;
 use std::collections::{BTreeMap, BTreeSet};
 
-pub(in crate::parse) fn plain_union_branch_shadows(
+pub(crate) fn plain_union_branch_shadows(
     previous: &CheckedUnionVariant,
     current: &CheckedUnionVariant,
 ) -> bool {
@@ -204,7 +204,7 @@ fn is_inline_bool_branch(ty: &CheckedType) -> bool {
     matches!(ty.kind, CheckedTypeKind::Bool)
 }
 
-pub(in crate::parse) fn inline_union_enum_variant_name(ty: &CheckedType) -> Option<String> {
+pub(crate) fn inline_union_enum_variant_name(ty: &CheckedType) -> Option<String> {
     let CheckedTypeKind::Enum(enum_) = &ty.kind else {
         return None;
     };
@@ -218,9 +218,7 @@ pub(in crate::parse) fn inline_union_enum_variant_name(ty: &CheckedType) -> Opti
     }
 }
 
-pub(in crate::parse) fn reject_any_of_cycles(
-    components: &[CheckedComponent],
-) -> Result<(), ValidationError> {
+pub(crate) fn reject_any_of_cycles(components: &[CheckedComponent]) -> Result<(), ValidationError> {
     let components = components
         .iter()
         .map(|component| (component.schema_name.clone(), component))
@@ -369,7 +367,7 @@ fn visit_any_of_cycle(
     Ok(())
 }
 
-pub(in crate::parse) fn validate_coordinate_uses(
+pub(crate) fn validate_coordinate_uses(
     components: &[CheckedComponent],
     operations: &[CheckedOperation],
 ) -> Result<(), ValidationError> {
@@ -514,7 +512,7 @@ fn check_coordinate_type(
     }
 }
 
-pub(in crate::parse) fn validate_rust_field_identifier_collisions(
+pub(crate) fn validate_rust_field_identifier_collisions(
     context: &str,
     fields: &[CheckedField],
 ) -> Result<(), ValidationError> {
@@ -566,7 +564,7 @@ pub(in crate::parse) fn validate_rust_field_identifier_collisions(
     Ok(())
 }
 
-pub(in crate::parse) fn validated_enum(
+pub(crate) fn validated_enum(
     enum_values: &[JsonValue],
     explicit_variants: &BTreeMap<String, String>,
     fallback: EnumFallback,
@@ -612,7 +610,7 @@ pub(in crate::parse) fn validated_enum(
 
     Ok(Enum { variants, fallback })
 }
-pub(in crate::parse) fn parse_parameter_default(
+pub(crate) fn parse_parameter_default(
     value: &JsonValue,
     ty: &CheckedType,
     wire_name: &str,
@@ -758,7 +756,7 @@ fn parameter_default_integer(value: &JsonValue) -> Option<i128> {
         .or_else(|| value.as_u64().map(i128::from))
 }
 
-pub(in crate::parse) fn validate_parameter_default_constraints(
+pub(crate) fn validate_parameter_default_constraints(
     default: &ParameterDefault,
     validation: Option<&Validation>,
 ) -> Result<(), String> {
@@ -868,7 +866,7 @@ fn validate_number_default_constraints(
     Ok(())
 }
 
-pub(in crate::parse) fn invalid_parameter_default(
+pub(crate) fn invalid_parameter_default(
     wire_name: &str,
     value: &JsonValue,
     reason: impl Into<String>,

@@ -1,20 +1,20 @@
 //! HTTP lowering over semantic records, preserving encounter and response order.
-use super::LowerError;
+use super::error::ValidationError;
+use super::helpers;
+use super::helpers::is_json_media_type;
 use super::{
     constraint, policy,
     schema::{Schemas, constraints},
 };
-use crate::ValidationError;
+use crate::error::Error;
 use crate::ident::{field_ident, unique_ident};
+use crate::lower::checked::{
+    CheckedOperation, CheckedParameter, CheckedRequestBody, CheckedResponse,
+    CheckedResponseProjection, CheckedTypeKind,
+};
 use crate::model::{
     ApiKeyLocation, ApiKeySecurityScheme, HttpMethod, ParameterLocation, PathSegment,
     ResponseStatus, TypeRef,
-};
-use crate::parse::helpers;
-use crate::parse::helpers::is_json_media_type;
-use crate::parse::rust::checked::{
-    CheckedOperation, CheckedParameter, CheckedRequestBody, CheckedResponse,
-    CheckedResponseProjection, CheckedTypeKind,
 };
 use satay_ir::{
     self as ir, ApiKeyLocation as SemanticApiKeyLocation, CompositionKind,
@@ -59,7 +59,7 @@ pub(super) fn security_schemes(api: &ir::Api) -> Vec<ApiKeySecurityScheme> {
 pub(super) fn operations(
     api: &ir::Api,
     schemas: &mut Schemas<'_>,
-) -> Result<Vec<CheckedOperation>, LowerError> {
+) -> Result<Vec<CheckedOperation>, Error> {
     if let Some(diagnostic) = &api.http().diagnostic {
         return Err(diagnostic.clone().into());
     }
@@ -97,7 +97,7 @@ pub(super) fn operations(
             let request_body = operation
                 .request_body
                 .as_ref()
-                .map(|body| -> Result<_, LowerError> {
+                .map(|body| -> Result<_, Error> {
                     let context = format!("{context} requestBody");
                     if body.content.is_empty() {
                         return Err(ValidationError::MissingContent { context }.into());
@@ -151,7 +151,16 @@ pub(super) fn operations(
                         }
                         ResponseStatus::Exact(*code)
                     }
-                    SemanticResponseStatus::Range(class) => ResponseStatus::Range(*class),
+                    SemanticResponseStatus::Range(class) => {
+                        if !(1..=5).contains(class) {
+                            return Err(ValidationError::OutOfRangeStatusClass {
+                                context: format!("{context} responses"),
+                                class: *class,
+                            }
+                            .into());
+                        }
+                        ResponseStatus::Range(*class)
+                    }
                 };
                 let (body, projection) = if response.content.is_empty() {
                     (None, None)
@@ -224,7 +233,7 @@ fn select_media<T>(content: &[T], name: impl Fn(&T) -> &str) -> Option<&T> {
 fn parameter_type(
     parameter: &ir::Parameter,
     schemas: &mut Schemas<'_>,
-) -> Result<CheckedParameter, LowerError> {
+) -> Result<CheckedParameter, Error> {
     if let TypeExpr::Invalid(diagnostic) = &parameter.schema.ty {
         return Err(diagnostic.clone().into());
     }
@@ -411,7 +420,7 @@ fn upsert_parameter(parameters: &mut Vec<CheckedParameter>, parameter: CheckedPa
     }
 }
 
-fn validate_path_parameters(path: &str, parameters: &[CheckedParameter]) -> Result<(), LowerError> {
+fn validate_path_parameters(path: &str, parameters: &[CheckedParameter]) -> Result<(), Error> {
     let declared = parameters
         .iter()
         .filter(|parameter| parameter.location == ParameterLocation::Path)
@@ -442,7 +451,7 @@ fn validate_path_parameters(path: &str, parameters: &[CheckedParameter]) -> Resu
     Ok(())
 }
 
-pub(in crate::parse) fn path_parameter_names(path: &str) -> Result<BTreeSet<String>, LowerError> {
+pub(crate) fn path_parameter_names(path: &str) -> Result<BTreeSet<String>, Error> {
     let mut names = BTreeSet::new();
     let mut rest = path;
 
@@ -461,7 +470,7 @@ pub(in crate::parse) fn path_parameter_names(path: &str) -> Result<BTreeSet<Stri
     }
 }
 
-fn parse_path_segments(path: &str) -> Result<Vec<PathSegment>, LowerError> {
+fn parse_path_segments(path: &str) -> Result<Vec<PathSegment>, Error> {
     let mut segments = vec![];
     let mut rest = path;
 

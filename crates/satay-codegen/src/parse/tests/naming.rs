@@ -1,8 +1,9 @@
+use super::ast::*;
 use super::*;
 
 #[test]
 fn deduplicates_parameter_field_names_after_identifier_sanitization() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -27,14 +28,18 @@ paths:
 "#,
     );
 
-    let operation = &api.operations[0];
-    assert_eq!(parameter(operation, "user-id").rust_name, "user_id");
-    assert_eq!(parameter(operation, "user_id").rust_name, "user_id_2");
+    let api_file = parse_rust(file(&files, "api.rs"));
+    assert!(has_method(&api_file, "ListUsersAction", "user_id"));
+    assert!(has_method(&api_file, "ListUsersAction", "user_id_2"));
+
+    let parts = parse_rust(file(&files, "list_users/parts.rs"));
+    let input = find_struct(&parts, "ListUsersInput");
+    assert_eq!(field_names(input), ["user_id", "user_id_2"]);
 }
 
 #[test]
 fn renames_request_body_field_when_parameter_uses_body() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -60,21 +65,18 @@ paths:
 "#,
     );
 
-    let operation = &api.operations[0];
-    assert_eq!(parameter(operation, "body").rust_name, "body");
-    assert_eq!(
-        operation
-            .request_body
-            .as_ref()
-            .expect("request body")
-            .field_name,
-        "body_2"
-    );
+    let api_file = parse_rust(file(&files, "api.rs"));
+    assert!(has_method(&api_file, "CreateUserAction", "body"));
+    assert!(has_method(&api_file, "CreateUserAction", "body_2"));
+
+    let parts = parse_rust(file(&files, "create_user/parts.rs"));
+    let input = find_struct(&parts, "CreateUserInput");
+    assert_eq!(field_names(input), ["body", "body_2"]);
 }
 
 #[test]
 fn api_key_names_do_not_collide_with_builder_methods() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -112,19 +114,27 @@ components:
 "#,
     );
 
-    assert_eq!(api_key_rust_name(&api, "new"), "new_2");
-    assert_eq!(api_key_rust_name(&api, "apply"), "apply_2");
-    assert_eq!(api_key_rust_name(&api, "base_url"), "base_url_2");
-    assert_eq!(api_key_rust_name(&api, "http"), "http_2");
-    assert_eq!(
-        api_key_rust_name(&api, "string_storage"),
-        "string_storage_2"
-    );
+    let api_file = parse_rust(file(&files, "api.rs"));
+    for name in [
+        "new_2",
+        "apply_2",
+        "base_url_2",
+        "http_2",
+        "string_storage_2",
+    ] {
+        assert!(
+            has_method(&api_file, "Api", name),
+            "missing API key builder method {name}"
+        );
+    }
+    // The colliding originals remain under their non-colliding identities.
+    assert!(has_method(&api_file, "Api", "base_url"));
+    assert!(has_method(&api_file, "Api", "string_storage"));
 }
 
 #[test]
 fn response_name_collision_uses_operation_response_suffix() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -153,14 +163,17 @@ components:
 "#,
     );
 
-    component(&api, "PsiResponse");
+    let types = parse_rust(file(&files, "types.rs"));
+    find_struct(&types, "PsiResponse");
 
-    assert_eq!(api.operations.len(), 1);
-    let operation = &api.operations[0];
-    assert_eq!(operation.input_name, "PsiInput");
-    assert_eq!(operation.response_name, "PsiOperationResponse");
-    assert_eq!(
-        operation.responses[0].body,
-        Some(TypeRef::Named("PsiResponse".to_owned()))
-    );
+    let parts = parse_rust(file(&files, "psi/parts.rs"));
+    find_struct(&parts, "PsiInput");
+
+    // The response case keeps the component name; the generated response
+    // wrapper carries the operation-response suffix.
+    let json = parse_rust(file(&files, "psi/json.rs"));
+    assert!(contains_tokens(
+        find_fn(&json, "decode_psi_response"),
+        "PsiOperationResponse"
+    ));
 }

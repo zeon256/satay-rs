@@ -1,12 +1,12 @@
 //! OpenAPI syntax checks used before constructing the semantic graph.
 use crate::error::ValidationError;
-use crate::model::HttpMethod;
 use crate::parse::satay::{SatayIdentifier, SataySchemaOptions, operation_options};
 use crate::parse::{helpers, reference::schema_type_wire};
 use oas3::spec::{
     ObjectSchema as OasObjectSchema, Operation as OasOperation, Schema as OasSchema,
     SchemaType as OasSchemaType, SchemaTypeSet as OasSchemaTypeSet,
 };
+use satay_ir::HttpMethod;
 use serde_json::Value as JsonValue;
 use std::collections::BTreeSet;
 /// Annotation keywords permitted beside a single `allOf`/`$ref` branch.
@@ -407,8 +407,21 @@ pub(in crate::parse) fn path_parameter_names(
     }
 }
 
+fn operation_prefix(method: HttpMethod) -> &'static str {
+    match method {
+        HttpMethod::Delete => "delete",
+        HttpMethod::Get => "get",
+        HttpMethod::Head => "head",
+        HttpMethod::Options => "options",
+        HttpMethod::Patch => "patch",
+        HttpMethod::Post => "post",
+        HttpMethod::Put => "put",
+        HttpMethod::Trace => "trace",
+    }
+}
+
 pub(super) fn inferred_operation_id(method: HttpMethod, path: &str) -> String {
-    helpers::inferred_operation_id(method.operation_prefix(), path)
+    helpers::inferred_operation_id(operation_prefix(method), path)
 }
 
 pub(in crate::parse) fn reject_property_options_on_value(

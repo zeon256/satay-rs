@@ -4,17 +4,13 @@
     clippy::too_many_lines
 )]
 
-use crate::parse::{normalize, rust};
-
 use crate::Error;
 use crate::error::ValidationError;
-use crate::model::{
-    Api, ApiKeyLocation, Component, ComponentKind, EnumFallback, Field, HttpMethod, IntegerLimit,
-    IntegerType, Operation, Parameter, ParameterLocation, ParseAs, PathSegment, RangeScalar,
-    RangeTypeRef, ResponseStatus, StringCodec, TypeRef, UnionTagStyle, Validation,
-};
+use crate::parse::normalize;
+use satay_codegen_rust::GeneratedFile;
 
 mod all_of;
+mod ast;
 mod constraints;
 mod cutover;
 mod errors;
@@ -29,58 +25,28 @@ mod unions;
 const INLINE_CONSTRAINED_ENUM_RANGE: &str =
     include_str!("../../../../../tests/fixtures/parse-inline-constrained-enum-range.yaml");
 
-fn parse_valid(spec: &str) -> Api {
-    let semantic = normalize::normalize_for_rust(spec, "test.yaml").expect("valid spec normalizes");
-    rust::lower_model(&semantic).expect("valid semantic IR lowers")
+/// Generates Rust files from a valid spec through the public facade route.
+fn generate_valid(spec: &str) -> Vec<GeneratedFile> {
+    crate::generate_with(spec, satay_codegen_rust::GenerateOptions::default())
+        .expect("valid spec generates")
+}
+
+/// Looks up a generated file by its relative output path.
+fn file<'a>(files: &'a [GeneratedFile], relative_path: &str) -> &'a GeneratedFile {
+    files
+        .iter()
+        .find(|file| file.relative_path == relative_path)
+        .unwrap_or_else(|| panic!("missing generated file {relative_path}"))
+}
+
+/// Normalizes a spec into the owned semantic IR for frontend fact assertions.
+fn normalize_spec(spec: &str) -> satay_ir::Api {
+    normalize::normalize_for_rust(spec, "test.yaml").expect("valid spec normalizes")
 }
 
 fn parse_invalid(spec: &str) -> ValidationError {
     match crate::generate(spec).expect_err("OpenAPI must be rejected") {
         Error::Validation(error) => error,
         error => panic!("expected validation error, got {error:?}"),
-    }
-}
-
-fn component<'a>(api: &'a Api, rust_name: &str) -> &'a Component {
-    api.components
-        .iter()
-        .find(|component| component.rust_name == rust_name)
-        .unwrap_or_else(|| panic!("missing component {rust_name}"))
-}
-
-fn field<'a>(fields: &'a [Field], wire_name: &str) -> &'a Field {
-    fields
-        .iter()
-        .find(|field| field.wire_name == wire_name)
-        .unwrap_or_else(|| panic!("missing field {wire_name}"))
-}
-
-fn parameter<'a>(operation: &'a Operation, wire_name: &str) -> &'a Parameter {
-    operation
-        .parameters
-        .iter()
-        .find(|parameter| parameter.wire_name == wire_name)
-        .unwrap_or_else(|| panic!("missing parameter {wire_name}"))
-}
-
-fn api_key_rust_name<'a>(api: &'a Api, wire_name: &str) -> &'a str {
-    api.api_key_security_schemes
-        .iter()
-        .find(|scheme| scheme.wire_name == wire_name)
-        .map(|scheme| scheme.rust_name.as_str())
-        .unwrap_or_else(|| panic!("missing API key security scheme {wire_name}"))
-}
-
-fn assert_literal_segment(segment: &PathSegment, expected: &str) {
-    match segment {
-        PathSegment::Literal(actual) => assert_eq!(actual, expected),
-        other => panic!("expected literal path segment {expected:?}, got {other:?}"),
-    }
-}
-
-fn assert_parameter_segment(segment: &PathSegment, expected: &str) {
-    match segment {
-        PathSegment::Parameter(actual) => assert_eq!(actual, expected),
-        other => panic!("expected parameter path segment {expected:?}, got {other:?}"),
     }
 }

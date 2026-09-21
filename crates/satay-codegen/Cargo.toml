@@ -10,21 +10,19 @@ documentation = "https://docs.rs/satay-codegen"
 rust-version.workspace = true
 
 [dependencies]
-heck = "0.5"
 oas3 = { workspace = true, features = ["preserve-order", "yaml-spec"] }
-prettyplease.workspace = true
-proc-macro2.workspace = true
-quote.workspace = true
-regex.workspace = true
+satay-codegen-rust.workspace = true
+satay-ir.workspace = true
 serde = { workspace = true }
 serde_json.workspace = true
 serde-saphyr.workspace = true
-satay-ir.workspace = true
-syn = { workspace = true, features = ["visit-mut"] }
 thiserror.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+proc-macro2.workspace = true
+quote.workspace = true
+syn = { workspace = true, features = ["visit-mut"] }
 # Pre-fetch the dependency used by generated crates before their offline resolution.
 compact_str = { version = "0.9", features = ["serde"] }
 tempfile.workspace = true

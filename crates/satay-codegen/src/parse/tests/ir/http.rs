@@ -1,8 +1,8 @@
 use super::{definition, normalize, object, string};
 use crate::error::ValidationError;
-use crate::model::TypeRef;
 use crate::parse::normalize::{self, NormalizeError, normalize_spec};
-use crate::parse::tests::parse_valid;
+use crate::parse::tests::ast::*;
+use crate::parse::tests::{file, generate_valid};
 use satay_ir::{
     AdditionalProperties, ApiKeyLocation, CompositionKind, HttpMethod, OAuthFlowKind,
     ParameterLocation, ParameterStyle, ResponseStatus, SchemaUse, SecuritySchemeKind, SourceRef,
@@ -1221,11 +1221,19 @@ paths:
     ));
 
     crate::generate(spec).expect("compatibility input generates");
-    let legacy = parse_valid(spec);
-    assert_eq!(
-        legacy.operations[0].responses[0].body,
-        Some(TypeRef::String)
-    );
+    // NOTE: the legacy private-model assertion (`responses[0].body` was the
+    // string type) is re-expressed as generated output: the selected
+    // `application/json` string body remains the `200` response body, decoded
+    // into the component string storage type.
+    let files = generate_valid(spec);
+    let parts = parse_rust(file(&files, "read/parts.rs"));
+    let response = find_enum(&parts, "ReadResponse");
+    assert_eq!(norm(&variant(response, "Ok").fields), "(S)");
+    let json_rs = parse_rust(file(&files, "read/json.rs"));
+    assert!(contains_tokens(
+        find_fn(&json_rs, "decode_read_response"),
+        "satay_runtime::from_json_slice::<S>(body)"
+    ));
 
     let request = operation_spec(json!({
         "requestBody":{"content":{

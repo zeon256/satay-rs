@@ -203,10 +203,10 @@ pub(crate) struct CheckedParsedString {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::parse) struct NotParsedString;
+pub(crate) struct NotParsedString;
 
 impl CheckedParsedString {
-    pub(in crate::parse) fn try_from_type(ty: CheckedType) -> Result<Self, NotParsedString> {
+    pub(crate) fn try_from_type(ty: CheckedType) -> Result<Self, NotParsedString> {
         if matches!(
             ty.kind,
             CheckedTypeKind::ParsedString(_) | CheckedTypeKind::Coordinates(_)
@@ -311,7 +311,7 @@ pub(crate) struct CheckedCoordinates {
 }
 
 impl CheckedCoordinates {
-    pub(in crate::parse) fn from_semantic(
+    pub(crate) fn from_semantic(
         target: String,
         field_indices: [usize; 2],
         delimiter: CoordinateDelimiter,

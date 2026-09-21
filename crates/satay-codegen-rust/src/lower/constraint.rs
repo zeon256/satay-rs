@@ -2,28 +2,28 @@
 
 use serde_json::Number;
 
-use crate::error::ValidationError;
+use super::error::ValidationError;
+use super::helpers::{json_integer, reject_keyword};
 use crate::model::{FloatLimit, IntegerLimit, IntegerType, TypeRef, Validation};
-use crate::parse::helpers::{json_integer, reject_keyword};
 
 /// Scalar facts used by Rust width selection and constraint lowering.
 #[derive(Debug, Default)]
-pub(in crate::parse) struct ConstraintInput {
-    pub(in crate::parse) format: Option<String>,
-    pub(in crate::parse) minimum: Option<Number>,
-    pub(in crate::parse) maximum: Option<Number>,
-    pub(in crate::parse) exclusive_minimum: Option<Number>,
-    pub(in crate::parse) exclusive_maximum: Option<Number>,
-    pub(in crate::parse) multiple_of: Option<Number>,
-    pub(in crate::parse) min_length: Option<u64>,
-    pub(in crate::parse) max_length: Option<u64>,
-    pub(in crate::parse) pattern: Option<String>,
-    pub(in crate::parse) min_items: Option<u64>,
-    pub(in crate::parse) max_items: Option<u64>,
-    pub(in crate::parse) unique_items: Option<bool>,
+pub(crate) struct ConstraintInput {
+    pub(crate) format: Option<String>,
+    pub(crate) minimum: Option<Number>,
+    pub(crate) maximum: Option<Number>,
+    pub(crate) exclusive_minimum: Option<Number>,
+    pub(crate) exclusive_maximum: Option<Number>,
+    pub(crate) multiple_of: Option<Number>,
+    pub(crate) min_length: Option<u64>,
+    pub(crate) max_length: Option<u64>,
+    pub(crate) pattern: Option<String>,
+    pub(crate) min_items: Option<u64>,
+    pub(crate) max_items: Option<u64>,
+    pub(crate) unique_items: Option<bool>,
 }
 
-pub(in crate::parse) fn parse_validation(
+pub(crate) fn parse_validation(
     schema: &ConstraintInput,
     base: &TypeRef,
     context: &str,

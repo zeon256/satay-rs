@@ -1,8 +1,29 @@
+use super::ast::*;
 use super::*;
+use syn::{Fields, Item};
+
+/// Extracts single-field tuple-struct names from `types.rs` in declaration
+/// order. Every lifted inline constraint renders as a newtype tuple struct,
+/// so this recovers the constrained-type ordering the old private model
+/// exposed via its register.
+fn newtype_names(file: &syn::File) -> Vec<String> {
+    file.items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Struct(item) => match &item.fields {
+                Fields::Unnamed(fields) if fields.unnamed.len() == 1 && is_pub(&item.vis) => {
+                    Some(item.ident.to_string())
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
 
 #[test]
 fn lifts_inline_constraints_into_generated_types() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -42,115 +63,74 @@ components:
 "#,
     );
 
-    let age = component(&api, "Age");
-    match &age.kind {
-        ComponentKind::Nutype(constrained) => {
-            assert_eq!(constrained.rust_name, "Age");
-            assert_eq!(constrained.inner, TypeRef::Integer(IntegerType::I32));
-            match &constrained.validation {
-                Validation::Integer { minimum, maximum } => {
-                    assert_eq!(
-                        minimum,
-                        &Some(IntegerLimit {
-                            value: 0,
-                            exclusive: false,
-                        })
-                    );
-                    assert_eq!(
-                        maximum,
-                        &Some(IntegerLimit {
-                            value: 130,
-                            exclusive: false,
-                        })
-                    );
-                }
-                other => panic!("expected Age integer validation, got {other:?}"),
-            }
-        }
-        other => panic!("expected Age nutype, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
 
-    let display_name = component(&api, "DisplayName");
-    match &display_name.kind {
-        ComponentKind::Alias(TypeRef::Option(inner)) => match inner.as_ref() {
-            TypeRef::Constrained { rust_name, inner } => {
-                assert_eq!(rust_name, "DisplayNameValue");
-                assert_eq!(inner.as_ref(), &TypeRef::String);
-            }
-            other => panic!("expected constrained nullable DisplayName, got {other:?}"),
-        },
-        other => panic!("expected DisplayName nullable alias, got {other:?}"),
-    }
+    // `Age` lifts both inclusive integer bounds onto a plain `i32` newtype.
+    let age = find_struct(&types, "Age");
+    assert_tuple_struct(&types, "Age", "i32");
+    assert_attr_contains(&age.attrs, "nutype::nutype", "greater_or_equal = 0");
+    assert_attr_contains(&age.attrs, "nutype::nutype", "less_or_equal = 130");
 
-    let generated_names = api
-        .constrained_types
-        .iter()
-        .map(|constrained| constrained.rust_name.as_str())
-        .collect::<Vec<_>>();
+    // The nullable string renders as a plain `Option` alias over the lifted
+    // constrained newtype.
+    let display_name = find_type_alias(&types, "DisplayName");
+    assert_eq!(norm(&display_name.ty), norm_str("Option<DisplayNameValue>"));
+
+    // `DisplayNameValue` keeps the inline length constraint; no upper length
+    // bound or pattern was specified.
+    let display_name_value = find_struct(&types, "DisplayNameValue");
+    assert_tuple_struct(&types, "DisplayNameValue", "String");
+    assert_attr_contains(
+        &display_name_value.attrs,
+        "nutype::nutype",
+        "len_char_min = 1",
+    );
+    assert!(!contains_tokens(&display_name_value, "len_char_max"));
+    assert!(!contains_tokens(&display_name_value, "pattern"));
+
+    // The inline-constrained tag item lifts its `minLength` onto the item
+    // newtype.
+    let tag_item = find_struct(&types, "GetUserTagParameterItem");
+    assert_tuple_struct(&types, "GetUserTagParameterItem", "String");
+    assert_attr_contains(&tag_item.attrs, "nutype::nutype", "len_char_min = 2");
+    assert!(!contains_tokens(&tag_item, "len_char_max"));
+    assert!(!contains_tokens(&tag_item, "pattern"));
+
+    // The constrained array keeps its `minItems` bound as a predicate over
+    // the lifted item newtype; no upper bound was specified.
+    let tag = find_struct(&types, "GetUserTagParameter");
+    assert_tuple_struct(
+        &types,
+        "GetUserTagParameter",
+        "Vec<GetUserTagParameterItem>",
+    );
+    assert_attr_contains(
+        &tag.attrs,
+        "nutype::nutype",
+        "predicate = |items|items.len() >= 1",
+    );
+    assert!(!contains_tokens(&tag, "less_or_equal"));
+    assert!(!contains_tokens(&tag, "len_char_max"));
+
+    // NOTE: the old private model asserted its constrained-type register as
+    // [DisplayNameValue, GetUserTagParameterItem, GetUserTagParameter]; in the
+    // generated `types.rs` those newtypes appear in the same relative order,
+    // interleaved with the `Age` integer newtype.
     assert_eq!(
-        generated_names,
+        newtype_names(&types),
         [
+            "Age",
             "DisplayNameValue",
             "GetUserTagParameterItem",
             "GetUserTagParameter",
         ]
     );
 
-    match &api.constrained_types[0].validation {
-        Validation::String {
-            min_length,
-            max_length,
-            pattern,
-        } => {
-            assert_eq!(*min_length, Some(1));
-            assert_eq!(*max_length, None);
-            assert_eq!(*pattern, None);
-        }
-        other => panic!("expected DisplayNameValue string validation, got {other:?}"),
-    }
-
-    match &api.constrained_types[1].validation {
-        Validation::String {
-            min_length,
-            max_length,
-            pattern,
-        } => {
-            assert_eq!(*min_length, Some(2));
-            assert_eq!(*max_length, None);
-            assert_eq!(*pattern, None);
-        }
-        other => panic!("expected tag item string validation, got {other:?}"),
-    }
-
-    match &api.constrained_types[2].validation {
-        Validation::Array {
-            min_items,
-            max_items,
-        } => {
-            assert_eq!(*min_items, Some(1));
-            assert_eq!(*max_items, None);
-        }
-        other => panic!("expected tag array validation, got {other:?}"),
-    }
-
-    let operation = &api.operations[0];
-    let tag = parameter(operation, "tag");
-    match &tag.ty {
-        TypeRef::Constrained { rust_name, inner } => {
-            assert_eq!(rust_name, "GetUserTagParameter");
-            match inner.as_ref() {
-                TypeRef::Array(item) => match item.as_ref() {
-                    TypeRef::Constrained { rust_name, inner } => {
-                        assert_eq!(rust_name, "GetUserTagParameterItem");
-                        assert_eq!(inner.as_ref(), &TypeRef::String);
-                    }
-                    other => panic!("expected constrained tag item, got {other:?}"),
-                },
-                other => panic!("expected constrained tag array, got {other:?}"),
-            }
-        }
-        other => panic!("expected constrained tag parameter, got {other:?}"),
-    }
+    // The query parameter carries the lifted constrained array through its
+    // optional wrapper.
+    let parts = parse_rust(file(&files, "get_user/parts.rs"));
+    let input = find_struct(&parts, "GetUserInput");
+    assert_field(input, "tag", "Option<GetUserTagParameter>");
 }
 
 #[test]
@@ -255,7 +235,7 @@ components:
 
 #[test]
 fn parses_uint32_and_uint64_integer_formats() {
-    let api = parse_valid(
+    let files = generate_valid(
         r#"
 openapi: 3.1.0
 info:
@@ -288,62 +268,26 @@ components:
 "#,
     );
 
-    match &component(&api, "Index").kind {
-        ComponentKind::Alias(ty) => {
-            assert_eq!(ty, &TypeRef::Integer(IntegerType::U32));
-        }
-        other => panic!("expected Index alias, got {other:?}"),
-    }
+    let types = parse_rust(file(&files, "types.rs"));
 
-    match &component(&api, "BigCount").kind {
-        ComponentKind::Alias(ty) => {
-            assert_eq!(ty, &TypeRef::Integer(IntegerType::U64));
-        }
-        other => panic!("expected BigCount alias, got {other:?}"),
-    }
+    let index = find_type_alias(&types, "Index");
+    assert_eq!(norm(&index.ty), norm_str("u32"));
+
+    let big_count = find_type_alias(&types, "BigCount");
+    assert_eq!(norm(&big_count.ty), norm_str("u64"));
 
     // Explicit format keeps the u32 base (no single-bound widening to u64)
     // while the bound becomes a validation newtype.
-    match &component(&api, "FlooredIndex").kind {
-        ComponentKind::Nutype(constrained) => {
-            assert_eq!(constrained.inner, TypeRef::Integer(IntegerType::U32));
-            match &constrained.validation {
-                Validation::Integer { minimum, maximum } => {
-                    assert_eq!(
-                        minimum,
-                        &Some(IntegerLimit {
-                            value: 5,
-                            exclusive: false,
-                        })
-                    );
-                    assert_eq!(maximum, &None);
-                }
-                other => panic!("expected FlooredIndex integer validation, got {other:?}"),
-            }
-        }
-        other => panic!("expected FlooredIndex nutype, got {other:?}"),
-    }
+    let floored = find_struct(&types, "FlooredIndex");
+    assert_tuple_struct(&types, "FlooredIndex", "u32");
+    assert_attr_contains(&floored.attrs, "nutype::nutype", "greater_or_equal = 5");
+    assert!(!contains_tokens(&floored, "less_or_equal"));
 
     // Explicit format wins over dual-bound narrowing: the base stays u32.
-    match &component(&api, "BoundedIndex").kind {
-        ComponentKind::Nutype(constrained) => {
-            assert_eq!(constrained.inner, TypeRef::Integer(IntegerType::U32));
-            match &constrained.validation {
-                Validation::Integer { minimum, maximum } => {
-                    assert_eq!(minimum, &None);
-                    assert_eq!(
-                        maximum,
-                        &Some(IntegerLimit {
-                            value: 10,
-                            exclusive: false,
-                        })
-                    );
-                }
-                other => panic!("expected BoundedIndex integer validation, got {other:?}"),
-            }
-        }
-        other => panic!("expected BoundedIndex nutype, got {other:?}"),
-    }
+    let bounded = find_struct(&types, "BoundedIndex");
+    assert_tuple_struct(&types, "BoundedIndex", "u32");
+    assert_attr_contains(&bounded.attrs, "nutype::nutype", "less_or_equal = 10");
+    assert!(!contains_tokens(&bounded, "greater_or_equal"));
 }
 
 #[test]

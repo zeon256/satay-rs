@@ -782,6 +782,14 @@ pub enum ValidationError {
     #[error("{context} contains out-of-range status code `{status_code}`")]
     OutOfRangeStatusCode { context: String, status_code: u16 },
 
+    /// A wildcard response status class is outside the valid 1–5 range.
+    #[error("{context} contains out-of-range status class `{class}`; expected 1 through 5")]
+    OutOfRangeStatusClass { context: String, class: u8 },
+
+    /// A mapped response projection does not lower to an array.
+    #[error("{context} mapped response projection must lower to an array")]
+    MappedResponseProjectionRequiresArray { context: String },
+
     /// A response for a given status code is missing `application/json` content.
     ///
     /// Error message: `{context} {status} response must declare application/json content`

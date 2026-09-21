@@ -54,16 +54,17 @@ Rust lowering. Storage-family integration remains a successor to this
 migration.
 
 Rust lowering owns its checked representations, coordinate target proof,
-identifier words, and type registry under `parse/rust`. OpenAPI syntax and
-selection checks belong to normalization. The obsolete validator and its
-frontend intermediate types have been deleted.
+identifier words, and type registry in `crates/satay-codegen-rust`'s
+`lower` module. OpenAPI syntax and selection checks belong to
+normalization. The obsolete validator and its frontend intermediate types
+have been deleted.
 
 ## Focused commands
 
 ```sh
 cargo test -p satay-codegen --lib parse::tests::cutover --offline
 cargo test -p satay-codegen --test generate roots --offline
-cargo test -p satay-codegen --lib parse::rust::tests --offline
+cargo test -p satay-codegen-rust --lib lower::tests --offline
 cargo test -p satay-codegen --lib parse::tests::ir --offline
 cargo test -p satay-codegen --test generate optional_projected_fields --offline
 cargo test -p satay-ir --test http --offline
