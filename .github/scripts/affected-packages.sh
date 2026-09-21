@@ -108,6 +108,7 @@ jq -cn \
         or startswith(".github/scripts/")
         or (
           (startswith(".github/") | not)
+          and (startswith("website/") | not)
           and (startswith("crates/satay-oas3/") | not)
           and (
             (

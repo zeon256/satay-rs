@@ -6,6 +6,13 @@ export type SatayUser = {
   /** Site path (e.g. /users/nea-rs.webp) or absolute URL. */
   logo?: string
   logoAlt?: string
+  /**
+   * CSS `object-position` for the logo inside its art well (e.g. "center bottom").
+   * Defaults to the stylesheet's right-bottom anchor.
+   */
+  logoPosition?: string
+  /** Art well width override (e.g. "60%"). Defaults to var(--card-art-size). */
+  logoScale?: string
   crates?: string
   docs?: string
 }
@@ -29,5 +36,14 @@ export const satayUsers: SatayUser[] = [
     logo: "/users/nea-rs.webp",
     crates: "https://crates.io/crates/nea-rs",
     docs: "https://docs.rs/nea-rs",
+  },
+  {
+    name: "InfiniteUnion/lta-rs",
+    description:
+      "Type-safe, sans-IO Rust client for Singapore LTA DataMall APIs.",
+    href: "https://github.com/InfiniteUnion/lta-rs/tree/lta-next",
+    repo: "https://github.com/InfiniteUnion/lta-rs/tree/lta-next",
+    logo: "/users/lta-rs.webp",
+    logoPosition: "center bottom",
   },
 ]

@@ -222,26 +222,50 @@ Monitored:
 For example, a `Bus` struct with `parse-as` fields generates:
 
 ```rust
+#[cfg(feature = "serde")]
+use satay_runtime::{serde_integer, serde_string};
+
 pub struct Bus {
-    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_u32"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(rename = "BusStopCode", with = "serde_string::as_u32")
+    )]
     pub bus_stop_code: u32,
-    
-    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_f64"))]
+
+    #[cfg_attr(
+        feature = "serde",
+        serde(rename = "Latitude", with = "serde_string::as_f64")
+    )]
     pub latitude: f64,
-    
-    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_offset_datetime"))]
+
+    #[cfg_attr(
+        feature = "serde",
+        serde(rename = "EstimatedArrival", with = "serde_string::as_offset_datetime")
+    )]
     pub estimated_arrival: satay_runtime::OffsetDateTime,
 
-    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_date"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(rename = "ReadingDay", with = "serde_string::as_date")
+    )]
     pub reading_day: satay_runtime::Date,
 
-    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_naive_datetime"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(rename = "ReadingAt", with = "serde_string::as_naive_datetime")
+    )]
     pub reading_at: satay_runtime::PrimitiveDateTime,
 
-    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_string::as_time::option"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(rename = "FirstBus", with = "serde_string::as_time::option")
+    )]
     pub first_bus: Option<satay_runtime::Time>,
 
-    #[cfg_attr(feature = "serde", serde(with = "satay_runtime::serde_integer::as_bool"))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(rename = "Monitored", with = "serde_integer::as_bool")
+    )]
     pub monitored: bool,
 }
 ```
@@ -426,15 +450,20 @@ BusServiceArrival:
 When `treat-error-as-none` is `true`, the generated Rust field becomes `Option<BusArrivalTiming>` with a custom deserializer that catches any error and returns `None`:
 
 ```rust
+use satay_runtime::treat_error_as_none;
+
 pub struct BusServiceArrival {
     pub service_no: String,
-    #[cfg_attr(feature = "serde", serde(
-        rename = "NextBus",
-        deserialize_with = "satay_runtime::treat_error_as_none::deserialize",
-        serialize_with = "satay_runtime::treat_error_as_none::serialize",
-        default,
-        skip_serializing_if = "Option::is_none"
-    ))]
+    #[cfg_attr(
+        feature = "serde",
+        serde(
+            rename = "NextBus",
+            deserialize_with = "treat_error_as_none::deserialize",
+            serialize_with = "treat_error_as_none::serialize",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )
+    )]
     pub next_bus: Option<BusArrivalTiming>,
 }
 ```
