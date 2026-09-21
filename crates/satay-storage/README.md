@@ -1,8 +1,6 @@
 # satay-storage
 
-Independent `no_std` storage type families: `Text<'a>`, `Contiguous<'a, T>`,
-and `Map<'a, V>`. No production dependencies. Disable default features for
-core-only traits; the default `alloc` feature adds owned policies.
+> Easily turn your data structure libraries to support `no_std` via storage type families.
 
 ```rust
 # #[cfg(feature = "alloc")] {
@@ -13,6 +11,7 @@ let names = storage.try_contiguous([
     storage.try_text("Milo")?,
     storage.try_text("Luna")?,
 ])?;
+
 let pets = storage.try_map([(storage.try_text("cats")?, names)])?;
 assert_eq!(Map::get(&pets, "cats").unwrap()[0], "Milo");
 
@@ -21,9 +20,10 @@ let boxed = {
     let storage = BoxedStorage;
     storage.try_contiguous([storage.try_text("Milo")?])?
 };
+
 assert_eq!(boxed[0].as_ref(), "Milo");
-# }
-# Ok::<(), core::convert::Infallible>(())
+
+Ok::<(), core::convert::Infallible>(())
 ```
 
 | Policy | Text | Contiguous | Map |
