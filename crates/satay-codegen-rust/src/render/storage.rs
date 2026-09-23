@@ -2,67 +2,51 @@
 //!
 //! Eligibility comes from the schema graph, not Rust type spellings: constrained
 //! strings, API configuration, JSON values, and encoding buffers remain concrete.
+use super::storage_traits;
 use crate::ident::type_ident;
+use crate::model::Operation;
 use proc_macro2::TokenTree;
 use quote::ToTokens;
 use std::collections::BTreeSet;
+use syn::{Member, Stmt};
 
 use syn::{
     Expr, Fields, ImplItem, Item, Meta, PathArguments, Type, parse_quote,
     visit_mut::{self, VisitMut},
 };
 
-use crate::model::{Api, ComponentKind, EnumFallback, TypeRef};
+use super::storage_requirements::StorageRequirements;
+use crate::model::{Api, ComponentKind, TypeRef};
 
-pub(super) struct StorageGenerics {
-    parameter: syn::Ident,
-    models: BTreeSet<String>,
+pub(super) struct StorageGenerics<'api> {
+    pub(super) parameter: syn::Ident,
+    pub(super) models: BTreeSet<String>,
     owned: BTreeSet<String>,
-    names: BTreeSet<String>,
+    pub(super) names: BTreeSet<String>,
     actions: BTreeSet<String>,
+    pub(super) api: &'api Api,
 }
 
-impl StorageGenerics {
-    pub fn new(api: &Api) -> Self {
-        let mut models = BTreeSet::new();
-        loop {
-            let previous = models.len();
-            for component in &api.components {
-                let generic = match &component.kind {
-                    ComponentKind::Struct(fields) => {
-                        fields.iter().any(|f| uses_storage(&f.ty, &models))
-                    }
-                    ComponentKind::Alias(ty) => uses_storage(ty, &models),
-                    ComponentKind::Union(union) => {
-                        union.variants.iter().any(|v| uses_storage(&v.ty, &models))
-                    }
-                    ComponentKind::Enum(value) => value.fallback == EnumFallback::OtherString,
-                    ComponentKind::Nutype(_) | ComponentKind::Range(_) => false,
-                };
-                if generic {
-                    models.insert(component.rust_name.clone());
-                }
-            }
-            if previous == models.len() {
-                break;
-            }
-        }
+impl<'api> StorageGenerics<'api> {
+    pub fn new(api: &'api Api) -> Self {
+        let requirements = StorageRequirements::new(api);
+        let models = requirements
+            .models
+            .iter()
+            .filter(|(_, usage)| usage.text || usage.contiguous)
+            .map(|(name, _)| name.clone())
+            .collect::<BTreeSet<_>>();
         let mut names = models.clone();
+        names.extend(
+            requirements
+                .inputs
+                .iter()
+                .chain(&requirements.responses)
+                .filter(|(_, usage)| usage.text || usage.contiguous)
+                .map(|(name, _)| name.clone()),
+        );
         let mut actions = BTreeSet::new();
         for operation in &api.operations {
-            if super::input_fields(operation)
-                .iter()
-                .any(|f| uses_storage(&f.ty, &models))
-            {
-                names.insert(operation.input_name.clone());
-            }
-            if operation
-                .responses
-                .iter()
-                .any(|r| r.body.as_ref().is_some_and(|t| uses_storage(t, &models)))
-            {
-                names.insert(operation.response_name.clone());
-            }
             let action = format!("{}Action", type_ident(&operation.fn_name));
             names.insert(action.clone());
             actions.insert(action);
@@ -81,12 +65,34 @@ impl StorageGenerics {
             suffix += 1;
         }
         Self {
+            api,
             parameter: super::ident(&parameter),
             owned: owned_models(api, &models),
             models,
             names,
             actions,
         }
+    }
+
+    pub(super) fn owned_aliases(&self) -> Item {
+        let names = self
+            .api
+            .components
+            .iter()
+            .map(|component| component.rust_name.as_str())
+            .chain(self.api.operations.iter().flat_map(|operation| {
+                [
+                    operation.input_name.as_str(),
+                    operation.response_name.as_str(),
+                ]
+            }));
+        let aliases = names.map(|name| {
+            let ident = super::ident(name);
+            if self.names.contains(name) { quote::quote!(pub type #ident = super::#ident<'static, satay_runtime::storage::AllocStorage>;) }
+            else { quote::quote!(pub type #ident = super::#ident;) }
+        });
+        parse_quote!(/// Owned model and operation aliases using the default allocation policy.
+            pub mod owned { #(#aliases)* })
     }
 
     pub fn apply(&self, mut file: syn::File) -> syn::File {
@@ -112,26 +118,28 @@ impl StorageGenerics {
         for item in &mut file.items {
             match item {
                 Item::Struct(item) if self.names.contains(&item.ident.to_string()) => {
-                    let wire =
-                        item.ident != "Api" && !self.actions.contains(&item.ident.to_string());
-                    let mut rewrite = Rewrite::new(&self.names, wire, storage);
+                    let mut rewrite = Rewrite::new(&self.names, storage);
                     for field in &mut item.fields {
                         rewrite.visit_type_mut(&mut field.ty);
                         rewrite_helper_paths(&mut field.attrs, &item.ident.to_string(), storage);
                     }
                     item.generics
                         .params
-                        .push(parse_quote!(#storage: satay_runtime::StringStorage = String));
-                    self.add_serde_bounds(&mut item.attrs, &item.ident);
+                        .push(parse_quote!(#storage: satay_runtime::storage::Storage + 'storage = satay_runtime::storage::AllocStorage));
+                    item.generics.params.insert(0, parse_quote!('storage));
+                    let fields = item.fields.iter().map(|f| f.ty.clone()).collect::<Vec<_>>();
+                    self.add_serde_bounds(&mut item.attrs, &item.ident, &fields);
                     if item.ident == "Api" && root_fields.is_some() {
                         let Fields::Named(fields) = &mut item.fields else {
                             unreachable!()
                         };
-                        fields.named.push(parse_quote!(__satay_storage: std::marker::PhantomData<fn() -> #storage>));
+                        fields
+                            .named
+                            .push(parse_quote!(__satay_storage: &'storage #storage));
                     }
                 }
                 Item::Enum(item) if self.names.contains(&item.ident.to_string()) => {
-                    let mut rewrite = Rewrite::new(&self.names, true, storage);
+                    let mut rewrite = Rewrite::new(&self.names, storage);
                     for variant in &mut item.variants {
                         for field in &mut variant.fields {
                             rewrite.visit_type_mut(&mut field.ty);
@@ -139,16 +147,26 @@ impl StorageGenerics {
                     }
                     item.generics
                         .params
-                        .push(parse_quote!(#storage: satay_runtime::StringStorage = String));
-                    self.add_serde_bounds(&mut item.attrs, &item.ident);
+                        .push(parse_quote!(#storage: satay_runtime::storage::Storage + 'storage = satay_runtime::storage::AllocStorage));
+                    item.generics.params.insert(0, parse_quote!('storage));
+                    let fields = item
+                        .variants
+                        .iter()
+                        .flat_map(|v| &v.fields)
+                        .map(|f| f.ty.clone())
+                        .collect::<Vec<_>>();
+                    self.add_serde_bounds(&mut item.attrs, &item.ident, &fields);
                 }
                 Item::Type(item) if self.names.contains(&item.ident.to_string()) => {
-                    Rewrite::new(&self.names, true, storage).visit_type_mut(&mut item.ty);
-                    item.generics.params.push(parse_quote!(#storage = String));
+                    Rewrite::new(&self.names, storage).visit_type_mut(&mut item.ty);
+                    item.generics.params.insert(0, parse_quote!('storage));
+                    item.generics
+                        .params
+                        .push(parse_quote!(#storage = satay_runtime::storage::AllocStorage));
                 }
                 Item::Impl(item) => self.apply_impl(item, root_fields.as_deref(), &mut extra),
                 Item::Fn(item) => {
-                    let mut rewrite = Rewrite::new(&self.names, true, storage);
+                    let mut rewrite = Rewrite::new(&self.names, storage);
                     rewrite.visit_signature_mut(&mut item.sig);
                     if !rewrite.changed {
                         continue;
@@ -157,15 +175,45 @@ impl StorageGenerics {
                     item.sig
                         .generics
                         .params
-                        .push(parse_quote!(#storage: satay_runtime::StringStorage));
+                        .push(parse_quote!(#storage: satay_runtime::storage::Storage + 'storage));
+                    item.sig.generics.params.insert(0, parse_quote!('storage));
                     let name = item.sig.ident.to_string();
                     if name.starts_with("encode_") || name.starts_with("decode_") {
-                        codec_bounds(&mut item.sig.generics, storage);
+                        self.function_bounds(item);
                     }
                 }
                 _ => {}
             }
         }
+        self.finish_file(file, extra)
+    }
+
+    fn finish_file(&self, mut file: syn::File, mut extra: Vec<Item>) -> syn::File {
+        for item in &mut file.items {
+            match item {
+                Item::Struct(value) if self.names.contains(&value.ident.to_string()) => {
+                    if let Some(implementations) = self.model_value_traits(&value.ident) {
+                        value.attrs.retain(|attr| !attr.path().is_ident("derive"));
+                        extra.extend(implementations);
+                    } else {
+                        extra.extend(storage_traits::struct_impls(value));
+                    }
+                }
+                Item::Enum(value) if self.names.contains(&value.ident.to_string()) => {
+                    if let Some(implementations) = self.model_value_traits(&value.ident) {
+                        value.attrs.retain(|attr| !attr.path().is_ident("derive"));
+                        extra.extend(implementations);
+                    } else {
+                        extra.extend(storage_traits::enum_impls(value));
+                    }
+                }
+                _ => {}
+            }
+        }
+        self.owned_deserializers(&mut file, &mut extra);
+        extra.extend(self.field_serializers(&mut file));
+        extra.extend(self.model_seeds(&file));
+        extra.extend(self.context_decoders(&file));
         file.items.extend(extra);
         let mut imports = StorageImports::default();
         imports.visit_file_mut(&mut file);
@@ -181,6 +229,7 @@ impl StorageGenerics {
             file.items.insert(
                 0,
                 parse_quote!(
+                    #[cfg(feature = "serde")]
                     use serde::de;
                 ),
             );
@@ -188,12 +237,82 @@ impl StorageGenerics {
         file
     }
 
-    fn add_serde_bounds(&self, attrs: &mut Vec<syn::Attribute>, name: &syn::Ident) {
-        add_serde_bounds(
-            attrs,
-            &self.parameter,
-            self.owned.contains(&name.to_string()),
-        );
+    fn add_serde_bounds(
+        &self,
+        attrs: &mut Vec<syn::Attribute>,
+        name: &syn::Ident,
+        fields: &[Type],
+    ) {
+        if attrs.iter().any(|a| {
+            a.to_token_stream()
+                .to_string()
+                .contains("serde :: Deserialize")
+        }) {
+            let serialize = String::new();
+            let deserialize = fields
+                .iter()
+                .map(|ty| {
+                    {
+                        if self.owned.contains(&name.to_string()) {
+                            quote::quote!(#ty: serde::de::DeserializeOwned)
+                        } else {
+                            quote::quote!(#ty: serde::Deserialize<'de>)
+                        }
+                    }
+                    .to_string()
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            attrs.push(parse_quote!(#[cfg_attr(feature = "serde", serde(bound(serialize = #serialize, deserialize = #deserialize)))]));
+        }
+    }
+
+    fn function_bounds(&self, item: &mut syn::ItemFn) {
+        let name = item.sig.ident.to_string();
+        for operation in &self.api.operations {
+            if name == format!("encode_{}", operation.fn_name) {
+                let expression = self.request_expression(operation);
+                if let Some(Stmt::Expr(tail, None)) = item.block.stmts.last_mut() {
+                    *tail = expression;
+                }
+            } else if name == format!("decode_{}_response", operation.fn_name) {
+                self.response_bounds(&mut item.sig.generics, operation);
+            }
+        }
+    }
+
+    pub(super) fn ty(&self, ty: &TypeRef) -> Type {
+        struct Qualify<'a>(&'a Api);
+        impl VisitMut for Qualify<'_> {
+            fn visit_type_path_mut(&mut self, path: &mut syn::TypePath) {
+                visit_mut::visit_type_path_mut(self, path);
+                if path.path.segments.len() == 1
+                    && self
+                        .0
+                        .components
+                        .iter()
+                        .any(|component| path.path.is_ident(&component.rust_name))
+                {
+                    path.path.segments.insert(0, parse_quote!(self));
+                }
+            }
+        }
+        let mut ty = super::rust_type(ty);
+        Qualify(self.api).visit_type_mut(&mut ty);
+        Rewrite::new(&self.names, &self.parameter).visit_type_mut(&mut ty);
+        ty
+    }
+
+    fn response_bounds(&self, generics: &mut syn::Generics, operation: &Operation) {
+        for response in &operation.responses {
+            if let Some(body) = &response.body {
+                let ty = self.ty(body);
+                generics
+                    .make_where_clause()
+                    .predicates
+                    .push(parse_quote!(#ty: serde::de::DeserializeOwned));
+            }
+        }
     }
 
     fn apply_impl(
@@ -218,65 +337,121 @@ impl StorageGenerics {
             if let Some(position) = position {
                 let mut new = item.items.remove(position);
                 AddMarker.visit_impl_item_mut(&mut new);
-                extra.push(parse_quote!(impl Api<String> { #new }));
-            }
-        }
-        let wire = !root;
-        let mut rewrite = Rewrite::new(&self.names, wire, storage);
-        rewrite.expressions = if self.models.contains(&name) {
-            Expressions::ModelStrings
-        } else if !self.actions.contains(&name) && name != "Api" {
-            Expressions::InputDefaults
-        } else {
-            Expressions::Unchanged
-        };
-        rewrite.visit_item_impl_mut(item);
-        item.generics
-            .params
-            .push(parse_quote!(#storage: satay_runtime::StringStorage));
-        if let Some((_, path, _)) = &item.trait_ {
-            let last = &path.segments.last().unwrap().ident;
-            if last == "Serialize" {
-                add_bound(&mut item.generics, storage, parse_quote!(serde::Serialize));
-            } else if last == "Deserialize" {
-                add_bound(
-                    &mut item.generics,
-                    storage,
-                    deserialize_bound(self.owned.contains(&name)),
+                extra.push(
+                    parse_quote!(impl Api<'static, satay_runtime::storage::AllocStorage> { #new }),
                 );
             }
         }
-        if self.actions.contains(&name) || (name == "Api" && !root) {
-            codec_bounds(&mut item.generics, storage);
+        let mut rewrite = Rewrite::new(&self.names, storage);
+        rewrite.expressions =
+            if !self.models.contains(&name) && !self.actions.contains(&name) && name != "Api" {
+                Expressions::InputDefaults
+            } else {
+                Expressions::Unchanged
+            };
+        rewrite.visit_item_impl_mut(item);
+        item.generics
+            .params
+            .push(parse_quote!(#storage: satay_runtime::storage::Storage + 'storage));
+        item.generics.params.insert(0, parse_quote!('storage));
+        if let Some((_, path, _)) = &item.trait_ {
+            let last = &path.segments.last().unwrap().ident;
+            if last == "Deserialize" {
+                let text: Type =
+                    parse_quote!(<#storage as satay_runtime::storage::Storage>::Text<'storage>);
+                item.generics
+                    .make_where_clause()
+                    .predicates
+                    .push(parse_quote!(#text: serde::Deserialize<'de>));
+            }
+        }
+        if self.actions.contains(&name) {
+            let operation = self
+                .api
+                .operations
+                .iter()
+                .find(|operation| format!("{}Action", type_ident(&operation.fn_name)) == name)
+                .unwrap();
+            if item.trait_.is_some() {
+                self.response_bounds(&mut item.generics, operation);
+            } else {
+                for member in &mut item.items {
+                    if let ImplItem::Fn(method) = member {
+                        if method.sig.ident == "request" {
+                            let expression = self.request_expression(operation);
+                            if let Some(Stmt::Expr(tail, None)) = method.block.stmts.last_mut() {
+                                *tail = expression;
+                            }
+                        }
+                        if method.sig.ident == "decode" {
+                            self.response_bounds(&mut method.sig.generics, operation);
+                        }
+                    }
+                }
+            }
+        }
+        if self.actions.contains(&name) && item.trait_.is_none() {
+            let operation = self
+                .api
+                .operations
+                .iter()
+                .find(|operation| format!("{}Action", type_ident(&operation.fn_name)) == name)
+                .unwrap();
+            self.action_constructor(item, operation);
+        }
+        if name == "Api" && !root && item.trait_.is_none() {
+            self.group_constructors(item);
+        }
+        if let Some(operation) = self
+            .api
+            .operations
+            .iter()
+            .find(|operation| operation.input_name == name)
+        {
+            self.input_constructors(item, operation, extra);
         }
         if root {
-            if item
-                .trait_
-                .as_ref()
-                .is_some_and(|(_, p, _)| p.is_ident("Default"))
-            {
-                item.items = vec![parse_quote!(
-                    fn default() -> Self {
-                        Api::new().string_storage()
-                    }
-                )];
-            } else {
-                let fields = root_fields.as_ref().unwrap();
-                item.items.push(parse_quote!(
-                    /// Selects dynamic string storage for generated models and actions.
-                    pub fn string_storage<T: satay_runtime::StringStorage>(self) -> Api<T> {
-                        Api { #(#fields: self.#fields,)* __satay_storage: std::marker::PhantomData }
+            self.root_impl(item, root_fields.unwrap());
+        }
+    }
+
+    fn root_impl(&self, item: &mut syn::ItemImpl, fields: &[syn::Ident]) {
+        let storage = &self.parameter;
+        if item
+            .trait_
+            .as_ref()
+            .is_some_and(|(_, p, _)| p.is_ident("Default"))
+        {
+            item.generics
+                .make_where_clause()
+                .predicates
+                .push(parse_quote!(#storage: satay_runtime::StaticStorage));
+            item.items = vec![parse_quote!(
+                fn default() -> Self {
+                    Api::new().storage()
+                }
+            )];
+        } else {
+            item.items.push(parse_quote!(
+                /// Selects a static storage family for generated models and actions.
+                pub fn storage<T: satay_runtime::StaticStorage>(self) -> Api<'static, T> {
+                    self.storage_in(T::context())
+                }
+            ));
+            item.items.push(parse_quote!(
+                    /// Selects a borrowed context for generated inputs and responses.
+                    pub fn storage_in<T: satay_runtime::storage::Storage>(self, storage: &T) -> Api<'_, T> {
+                        Api { #(#fields: self.#fields,)* __satay_storage: storage }
                     }
                 ));
-            }
         }
     }
 }
 
 fn uses_storage(ty: &TypeRef, names: &BTreeSet<String>) -> bool {
     match ty {
-        TypeRef::String | TypeRef::Map(_) => true,
-        TypeRef::Array(inner) | TypeRef::Option(inner) => uses_storage(inner, names),
+        TypeRef::String | TypeRef::Array(_) => true,
+        TypeRef::Map(inner) | TypeRef::Option(inner) => uses_storage(inner, names),
         TypeRef::Named(name) => names.contains(name),
         TypeRef::Coordinates(codec) => names.contains(codec.target()),
         _ => false,
@@ -348,67 +523,24 @@ fn type_name(ty: &Type) -> Option<String> {
     }
 }
 
-fn codec_bounds(generics: &mut syn::Generics, storage: &syn::Ident) {
-    add_bound(generics, storage, parse_quote!(serde::Serialize));
-    add_bound(generics, storage, parse_quote!(serde::de::DeserializeOwned));
-}
-
-fn add_bound(generics: &mut syn::Generics, storage: &syn::Ident, bound: syn::TypeParamBound) {
-    let parameter = generics
-        .type_params_mut()
-        .find(|p| p.ident == *storage)
-        .unwrap();
-    parameter.bounds.push(bound);
-}
-
-fn deserialize_bound(owned: bool) -> syn::TypeParamBound {
-    if owned {
-        parse_quote!(serde::de::DeserializeOwned)
-    } else {
-        parse_quote!(serde::Deserialize<'de>)
-    }
-}
-
-fn add_serde_bounds(attrs: &mut Vec<syn::Attribute>, storage: &syn::Ident, owned: bool) {
-    if attrs.iter().any(|a| {
-        a.to_token_stream()
-            .to_string()
-            .contains("serde :: Deserialize")
-    }) {
-        let serialize = format!("{storage}: serde::Serialize");
-        let deserialize = if owned {
-            format!("{storage}: serde::de::DeserializeOwned")
-        } else {
-            format!("{storage}: serde::Deserialize<'de>")
-        };
-        attrs.push(parse_quote!(#[cfg_attr(feature = "serde", serde(bound(
-            serialize = #serialize,
-            deserialize = #deserialize
-        )))]));
-    }
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Expressions {
     Unchanged,
     InputDefaults,
-    ModelStrings,
 }
 
 struct Rewrite<'a> {
     names: &'a BTreeSet<String>,
     storage: &'a syn::Ident,
-    wire: bool,
     changed: bool,
     expressions: Expressions,
 }
 
 impl<'a> Rewrite<'a> {
-    fn new(names: &'a BTreeSet<String>, wire: bool, storage: &'a syn::Ident) -> Self {
+    fn new(names: &'a BTreeSet<String>, storage: &'a syn::Ident) -> Self {
         Self {
             names,
             storage,
-            wire,
             changed: false,
             expressions: Expressions::Unchanged,
         }
@@ -438,17 +570,32 @@ impl VisitMut for Rewrite<'_> {
     fn visit_type_path_mut(&mut self, path: &mut syn::TypePath) {
         let storage = self.storage;
         visit_mut::visit_type_path_mut(self, path);
-        if self.wire && path.path.is_ident("String") {
-            *path = parse_quote!(#storage);
+        if path.path.is_ident("__SatayText") {
+            *path = parse_quote!(<#storage as satay_runtime::storage::Storage>::Text<'storage>);
+            self.changed = true;
+        } else if path
+            .path
+            .segments
+            .last()
+            .is_some_and(|s| s.ident == "__SatayContiguous")
+        {
+            let PathArguments::AngleBracketed(args) = &path.path.segments.last().unwrap().arguments
+            else {
+                unreachable!()
+            };
+            let element = args.args.first().unwrap();
+            *path = parse_quote!(<#storage as satay_runtime::storage::Storage>::Contiguous<'storage, #element>);
             self.changed = true;
         } else if let Some(segment) = path.path.segments.last_mut()
             && self.names.contains(&segment.ident.to_string())
         {
             match &mut segment.arguments {
                 PathArguments::None => {
-                    segment.arguments = PathArguments::AngleBracketed(parse_quote!(<#storage>));
+                    segment.arguments =
+                        PathArguments::AngleBracketed(parse_quote!(<'storage, #storage>));
                 }
                 PathArguments::AngleBracketed(args) => {
+                    args.args.insert(0, parse_quote!('storage));
                     args.args.push(parse_quote!(#storage));
                 }
                 PathArguments::Parenthesized(_) => unreachable!(),
@@ -464,24 +611,11 @@ impl VisitMut for Rewrite<'_> {
             return;
         }
         let first = &mut path.path.segments[0];
-        if first.ident == "String" && self.expressions == Expressions::ModelStrings {
-            // Only model string deserialization and schema parameter defaults.
-            first.ident = parse_quote!(#storage);
-        } else if self.names.contains(&first.ident.to_string())
+        if self.names.contains(&first.ident.to_string())
             && first.ident != "Api"
             && first.arguments.is_empty()
         {
             first.arguments = PathArguments::AngleBracketed(parse_quote!(::<#storage>));
-        }
-    }
-
-    fn visit_expr_method_call_mut(&mut self, call: &mut syn::ExprMethodCall) {
-        visit_mut::visit_expr_method_call_mut(self, call);
-        if self.expressions == Expressions::ModelStrings
-            && call.method == "as_str"
-            && matches!(&*call.receiver, Expr::Path(p) if p.path.is_ident("value"))
-        {
-            call.method = parse_quote!(as_ref);
         }
     }
 }
@@ -492,7 +626,7 @@ impl VisitMut for AddMarker {
         visit_mut::visit_expr_struct_mut(self, item);
         if item.path.is_ident("Self") {
             item.fields
-                .push(parse_quote!(__satay_storage: std::marker::PhantomData));
+                .push(parse_quote!(__satay_storage: <satay_runtime::storage::AllocStorage as satay_runtime::StaticStorage>::context()));
         }
     }
 }
@@ -550,9 +684,41 @@ struct StorageImports {
 }
 
 impl VisitMut for StorageImports {
+    fn visit_field_value_mut(&mut self, field: &mut syn::FieldValue) {
+        visit_mut::visit_field_value_mut(self, field);
+        if let Member::Named(name) = &field.member
+            && matches!(&field.expr, Expr::Path(path) if path.path.is_ident(name))
+        {
+            field.colon_token = None;
+        }
+    }
+
+    fn visit_expr_mut(&mut self, expr: &mut Expr) {
+        visit_mut::visit_expr_mut(self, expr);
+        // Schema-recursive callbacks sometimes reduce to a direct call or identity.
+        if let Expr::Closure(closure) = expr
+            && let Expr::Call(call) = &*closure.body
+            && closure.inputs.len() == 1
+            && call.args.len() == 1
+            && closure.inputs[0].to_token_stream().to_string()
+                == call.args[0].to_token_stream().to_string()
+        {
+            *expr = (*call.func).clone();
+        } else if let Expr::MethodCall(call) = expr
+            && call.method == "map"
+            && call.args.len() == 1
+            && let Expr::Closure(closure) = &call.args[0]
+            && closure.inputs.len() == 1
+            && closure.inputs[0].to_token_stream().to_string()
+                == closure.body.to_token_stream().to_string()
+        {
+            *expr = (*call.receiver).clone();
+        }
+    }
+
     fn visit_path_mut(&mut self, path: &mut syn::Path) {
         visit_mut::visit_path_mut(self, path);
-        if path.segments.len() != 3 {
+        if path.segments.len() < 3 {
             return;
         }
         if path.segments[0].ident == "std" && path.segments[1].ident == "marker" {
@@ -564,4 +730,22 @@ impl VisitMut for StorageImports {
         }
         path.segments = path.segments.iter().skip(1).cloned().collect();
     }
+}
+
+pub(super) fn concrete_type(ty: &mut Type) {
+    struct Concrete;
+    impl VisitMut for Concrete {
+        fn visit_type_path_mut(&mut self, path: &mut syn::TypePath) {
+            visit_mut::visit_type_path_mut(self, path);
+            if let Some(segment) = path.path.segments.last_mut() {
+                if segment.ident == "__SatayText" {
+                    segment.ident = parse_quote!(String);
+                }
+                if segment.ident == "__SatayContiguous" {
+                    segment.ident = parse_quote!(Vec);
+                }
+            }
+        }
+    }
+    Concrete.visit_type_mut(ty);
 }

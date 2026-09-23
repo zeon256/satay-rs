@@ -7,7 +7,9 @@ fn pub_mod_names(file: &syn::File) -> Vec<String> {
     file.items
         .iter()
         .filter_map(|item| match item {
-            Item::Mod(item_mod) if is_pub(&item_mod.vis) => Some(item_mod.ident.to_string()),
+            Item::Mod(item_mod) if is_pub(&item_mod.vis) && item_mod.ident != "owned" => {
+                Some(item_mod.ident.to_string())
+            }
             _ => None,
         })
         .collect()
@@ -101,17 +103,27 @@ paths:
 
     let realtime = parse_rust(file(&files, "realtime.rs"));
     assert_eq!(mod_doc_lines(&root, "realtime"), ["Realtime views."]);
-    assert_eq!(group_methods(&realtime), ["get_bus_arrival"]);
+    assert_eq!(
+        group_methods(&realtime),
+        ["get_bus_arrival", "try_get_bus_arrival"]
+    );
 
     let bus = parse_rust(file(&files, "bus.rs"));
     assert_eq!(mod_doc_lines(&root, "bus"), ["Bus operations."]);
     assert_eq!(
         group_methods(&bus),
-        ["get_arrival", "list_stops", "get_arrival_2"]
+        [
+            "get_arrival",
+            "list_stops",
+            "get_arrival_2",
+            "try_get_arrival",
+            "try_list_stops",
+            "try_get_arrival_2"
+        ]
     );
 
     let untagged = parse_rust(file(&files, "untagged.rs"));
-    assert_eq!(group_methods(&untagged), ["health"]);
+    assert_eq!(group_methods(&untagged), ["health", "try_health"]);
 }
 
 #[test]
@@ -184,5 +196,5 @@ paths:
     );
 
     let get = parse_rust(file(&files, "get.rs"));
-    assert_eq!(group_methods(&get), ["type_"]);
+    assert_eq!(group_methods(&get), ["type_", "try_type_"]);
 }

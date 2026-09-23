@@ -54,13 +54,16 @@ pub(super) fn parse_api_groups(
         }
     }
 
-    let mut used_modules = BTreeSet::from(["api".to_owned(), "types".to_owned()]);
+    let mut used_modules =
+        BTreeSet::from(["api".to_owned(), "types".to_owned(), "owned".to_owned()]);
     used_modules.extend(operations.iter().map(|operation| operation.fn_name.clone()));
 
     let mut used_accessors = BTreeSet::from([
         "apply".to_owned(),
         "base_url".to_owned(),
         "string_storage".to_owned(),
+        "storage".to_owned(),
+        "storage_in".to_owned(),
         "new".to_owned(),
     ]);
     used_accessors.extend(
@@ -121,9 +124,14 @@ fn build_group(
             let candidate = group_base_name
                 .and_then(|group| strip_group_from_operation(&operation.fn_name, group))
                 .unwrap_or_else(|| operation.fn_name.clone());
+            let mut method_name = unique_ident(candidate.clone(), &mut used_methods);
+            while used_methods.contains(&format!("try_{method_name}")) {
+                method_name = unique_ident(candidate.clone(), &mut used_methods);
+            }
+            used_methods.insert(format!("try_{method_name}"));
             GroupOperation {
                 operation_index,
-                method_name: unique_ident(candidate, &mut used_methods),
+                method_name,
             }
         })
         .collect();

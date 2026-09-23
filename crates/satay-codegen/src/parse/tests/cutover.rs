@@ -162,7 +162,9 @@ paths:
         // when the wrapper schema carries unselected constraints.
         let tokens = norm(decode);
         assert!(tokens.contains("from_projected_json_slice"));
-        assert!(tokens.contains("Option < S >"));
+        assert!(tokens.contains(
+            "Option < < S as satay_runtime : : storage : : Storage > : : Text < ' storage > >"
+        ));
         assert!(tokens.contains("\"value\""));
     }
 }

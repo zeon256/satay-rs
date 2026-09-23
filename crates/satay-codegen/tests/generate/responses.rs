@@ -134,10 +134,13 @@ fn wildcard_range_generates_status_carrying_variant_after_exact_arms() {
     let parts = parse_rust(find_file(&files, "get_user/parts.rs"));
     let response = find_enum(&parts, "GetUserResponse");
     assert_eq!(
-        norm(&variant(response, "ClientError").fields),
-        norm_str("(http::StatusCode, ErrorResponse<S>)")
+        norm_fields(&variant(response, "ClientError").fields),
+        norm_str("(http::StatusCode, ErrorResponse<'storage, S>)")
     );
-    assert_eq!(norm(&variant(response, "Ok").fields), norm_str("(User<S>)"));
+    assert_eq!(
+        norm_fields(&variant(response, "Ok").fields),
+        norm_str("(User<'storage, S>)")
+    );
     assert!(matches!(variant(response, "NotFound").fields, Fields::Unit));
 
     // Exact-status arms must precede the covering range arm so 404 shadows
@@ -186,14 +189,16 @@ fn response_projection_generates_public_payload_types_and_projected_decoders() {
     let services_parts = parse_rust(find_file(&files, "get_services/parts.rs"));
     let services_response = find_enum(&services_parts, "GetServicesResponse");
     assert_eq!(
-        norm(&variant(services_response, "Ok").fields),
-        norm_str("(Vec<Service<S>>)")
+        norm_fields(&variant(services_response, "Ok").fields),
+        norm_str(
+            "(<S as satay_runtime::storage::Storage>::Contiguous<'storage, Service<'storage, S>>)"
+        )
     );
     let services_json = parse_rust(find_file(&files, "get_services/json.rs"));
     let services_decode = norm(find_fn(&services_json, "decode_get_services_response"));
     assert!(
         services_decode.contains(&norm_str(
-            "satay_runtime::from_projected_json_slice::<Vec<Service<S>>,>(body, \"value\", None)?"
+            "satay_runtime::from_projected_json_slice::<<S as satay_runtime::storage::Storage>::Contiguous<'storage, Service<'storage, S>>,>(body, \"value\", None)?"
         )),
         "{services_decode}"
     );
@@ -201,13 +206,15 @@ fn response_projection_generates_public_payload_types_and_projected_decoders() {
     let links_parts = parse_rust(find_file(&files, "get_links/parts.rs"));
     let links_response = find_enum(&links_parts, "GetLinksResponse");
     assert_eq!(
-        norm(&variant(links_response, "Ok").fields),
-        norm_str("(Vec<S>)")
+        norm_fields(&variant(links_response, "Ok").fields),
+        norm_str(
+            "(<S as satay_runtime::storage::Storage>::Contiguous<'storage, <S as satay_runtime::storage::Storage>::Text<'storage>>)"
+        )
     );
     let links_json = parse_rust(find_file(&files, "get_links/json.rs"));
     let links_decode = norm(find_fn(&links_json, "decode_get_links_response"));
     assert!(links_decode.contains(&norm_str(
-        "satay_runtime::from_projected_json_slice::<Vec<S>,>(body, \"value\", Some(\"Link\"))?"
+        "satay_runtime::from_projected_json_slice::<<S as satay_runtime::storage::Storage>::Contiguous<'storage, <S as satay_runtime::storage::Storage>::Text<'storage>>,>(body, \"value\", Some(\"Link\"))?"
     )));
 }
 

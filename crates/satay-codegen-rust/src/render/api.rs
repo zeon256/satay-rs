@@ -13,9 +13,13 @@ use crate::model::{
 pub(super) fn render_api_file(api: &Api, root_module: RootModule) -> syn::File {
     let mut items = vec![];
     let has_map_input = api.operations.iter().any(|operation| {
-        super::input_fields(operation)
+        operation
+            .responses
             .iter()
-            .any(|field| field.ty.contains_map())
+            .any(|response| response.body.as_ref().is_some_and(TypeRef::contains_map))
+            || super::input_fields(operation)
+                .iter()
+                .any(|field| field.ty.contains_map())
     });
 
     if has_map_input {
@@ -80,6 +84,11 @@ fn build_api_operation_use(api: &Api) -> Option<syn::ItemUse> {
     for operation in &api.operations {
         names.push(super::ident(&operation.input_name));
         names.push(super::ident(&operation.response_name));
+        for response in &operation.responses {
+            if let Some(body) = &response.body {
+                collect_type_refs(body, &mut names);
+            }
+        }
         for field in super::input_fields(operation) {
             collect_type_refs(&field.ty, &mut names);
         }

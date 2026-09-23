@@ -56,7 +56,7 @@ fn render_file_exposes_struct_ast_without_source_comparison() {
     let mut fields = fields.named.iter();
     let id = fields.next().expect("id field");
     assert_eq!(id.ident.as_ref().expect("field ident"), "id");
-    assert!(type_path_is(&id.ty, "String"));
+    assert!(type_path_is(&id.ty, "__SatayText"));
 
     let tag_count = fields.next().expect("tag_count field");
     assert_eq!(tag_count.ident.as_ref().expect("field ident"), "tag_count");
@@ -131,25 +131,25 @@ fn rust_field_type_wraps_optional_and_treat_error_as_none_fields() {
         rust_field_type(&TypeRef::String, true, false)
             .to_token_stream()
             .to_string(),
-        "String"
+        "__SatayText"
     );
     assert_eq!(
         rust_field_type(&TypeRef::String, false, false)
             .to_token_stream()
             .to_string(),
-        "Option < String >"
+        "Option < __SatayText >"
     );
     assert_eq!(
         rust_field_type(&TypeRef::String, true, true)
             .to_token_stream()
             .to_string(),
-        "Option < String >"
+        "Option < __SatayText >"
     );
     assert_eq!(
         rust_field_type(&TypeRef::Option(Box::new(TypeRef::String)), true, false)
             .to_token_stream()
             .to_string(),
-        "Option < String >"
+        "Option < __SatayText >"
     );
 }
 
@@ -157,7 +157,7 @@ fn rust_field_type_wraps_optional_and_treat_error_as_none_fields() {
 fn input_builder_arguments_convert_strings_only() {
     assert_eq!(
         input_builder_arg_type(&TypeRef::String).to_string(),
-        "impl Into < String >"
+        "impl Into < __SatayText >"
     );
     assert_eq!(
         input_builder_arg_type(&TypeRef::Integer(IntegerType::I32)).to_string(),

@@ -17,7 +17,7 @@ let request = api
 // Send `request` with reqwest, ureq, hyper, tests, WASM, or your own transport.
 
 let response = satay_runtime::ResponseParts { status, headers, body };
-let decoded = generated::GetBusArrivalAction::<String>::decode(response.as_bytes())?;
+let decoded = generated::GetBusArrivalAction::<satay_runtime::storage::AllocStorage>::decode(response.as_bytes())?;
 ```
 
 To compile JSON request and response helpers, define the generated crate's `json` feature:
@@ -77,7 +77,7 @@ let response = satay_runtime::ResponseParts {
     body: response.bytes().await?,
 };
 
-let decoded = generated::GetBusArrivalAction::<String>::decode(response.as_bytes())?;
+let decoded = generated::GetBusArrivalAction::<satay_runtime::storage::AllocStorage>::decode(response.as_bytes())?;
 ```
 
 ## Non-HTTP Transports
@@ -96,37 +96,18 @@ A custom transport needs to preserve the parts Satay cares about:
 
 The WebSocket example adds a small wire protocol and an extension trait so call sites can use `.send_over_ws(&mut transport).await` instead of manually calling `request()`, sending the request, and calling `decode(...)`.
 
-## String storage
+## Storage families
 
-Generated models, inputs, and actions use a string type parameter with `String`
-as the default. Select another container for an API without regenerating it:
+Generated text and arrays use `AllocStorage` by default (String and Vec).
+Select boxed text and collections with
+`Api::new().storage::<satay_runtime::storage::BoxedStorage>()`.
+For compact strings, use `satay_runtime::StringPolicy<CompactString>`.
 
-```rust
-let api = generated::Api::new().string_storage::<Box<str>>();
-// Or CompactString, with compact_str's serde feature enabled.
-let decoded = api.bus().get_arrival(83139).send_with(&client).await?;
-```
-
-Low-level calls sometimes need explicit types because Rust does not use generic
-parameter defaults to resolve every inference ambiguity:
-
-```rust
-let input = generated::GetUserInput::<Box<str>>::new("42");
-let user: generated::User<Box<str>> = serde_json::from_slice(body)?;
-```
-
-`StringStorage` is implemented automatically for containers supporting string
-access, conversion from `String`, cloning, debug formatting, equality and ordering.
-Generated JSON codecs additionally require Serde serialization and owned
-deserialization. Storage propagates through nested models, arrays, maps (including
-keys), aliases, and open-enum unknown values. Constrained string newtypes retain
-`String`; parsed values, closed enums, `JsonValue`, API configuration, and encoding
-buffers keep their existing representations.
-
-Generated borrowed-string decoding is a later step: substituting `Cow` currently
-produces owned strings. The runtime GAT and `from_json_slice` already support custom
-actions that borrow. Such models cannot outlive their `BufferedResponse`. Projected
-generated responses still deserialize through an owned JSON value.
+Owned annotations can use `generated::owned::User`, or
+`generated::User<'static, BoxedStorage>` for boxed storage. Context constructors
+use `Input::try_new_in(&storage, ...)`. Map containers and keys remain concrete;
+only map values propagate storage. See [storage families](storage-codec-prototype.md)
+for the breaking API migration and custom policy traits.
 
 ## Custom request bodies
 
@@ -134,3 +115,12 @@ Custom actions can choose another `RequestBody`. The async reqwest adapter requi
 `Into<reqwest::Body> + Send`, its blocking adapter requires
 `Into<reqwest::blocking::Body>`, and ureq accepts `AsRef<[u8]>`. These bounds describe
 buffer/container interoperability; they do not make response decoding streaming.
+
+## Explicit storage contexts
+
+For an arena policy, build a request using `Api::storage_in(&arena)`, send its
+owned bytes through the raw transport API, then call the operation's
+`decode_*_response_in(&arena, ResponseParts<&[u8]>)`. The returned model borrows
+the arena independently of the buffered response. Existing owned send helpers
+keep their Send and owned-decoding contracts. See [storage families](storage-codec-prototype.md)
+for the full flow and policy integration requirements.

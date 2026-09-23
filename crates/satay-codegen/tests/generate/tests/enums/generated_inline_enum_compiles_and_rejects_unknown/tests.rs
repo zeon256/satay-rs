@@ -36,5 +36,5 @@ fn unknown_closed_enum_variant_is_rejected() {
         headers: http::HeaderMap::new(),
         body: json,
     };
-    assert!(operations::get_item::decode_get_item_response::<String>(response.as_bytes()).is_err());
+    assert!(operations::get_item::decode_get_item_response::<satay_runtime::storage::AllocStorage>(response.as_bytes()).is_err());
 }

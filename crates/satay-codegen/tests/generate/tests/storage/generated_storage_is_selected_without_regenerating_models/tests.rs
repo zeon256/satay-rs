@@ -1,5 +1,6 @@
 use super::generated::*;
 use compact_str::CompactString;
+type CompactStorage = satay_runtime::StringPolicy<CompactString>;
 use satay_runtime::{Action, BufferedResponse, OwnedAction, ResponseParts};
 
 const RECORD: &str = r#"{"name":"Ada","labels":{"team":"ops"},"state":"future","children":[{"label":"kid"}],"choice":{"label":"chosen"}}"#;
@@ -7,8 +8,8 @@ const RECORD: &str = r#"{"name":"Ada","labels":{"team":"ops"},"state":"future","
 #[test]
 fn owned_defaults_and_alternate_strings_round_trip() {
     let standard: Record = serde_json::from_str(RECORD).unwrap();
-    let boxed: Record<Box<str>> = serde_json::from_str(RECORD).unwrap();
-    let compact: Record<CompactString> = serde_json::from_str(RECORD).unwrap();
+    let boxed: Record<satay_runtime::storage::BoxedStorage> = serde_json::from_str(RECORD).unwrap();
+    let compact: Record<CompactStorage> = serde_json::from_str(RECORD).unwrap();
     assert_eq!(standard.name, boxed.name.as_ref());
     assert_eq!(compact.name.as_str(), "Ada");
     assert_eq!(compact.children[0].label.as_str(), "kid");
@@ -19,12 +20,12 @@ fn owned_defaults_and_alternate_strings_round_trip() {
         serde_json::to_value(&boxed).unwrap(),
         serde_json::to_value(&compact).unwrap()
     );
-    let _: Label<Box<str>> = "alias".into();
+    let _: Label<satay_runtime::storage::BoxedStorage> = "alias".into();
 }
 
 #[test]
 fn top_level_map_responses_use_custom_keys_and_values() {
-    let buffered = BufferedResponse::<ListLabelsAction<'_, Box<str>>, _>::new(ResponseParts {
+    let buffered = BufferedResponse::<ListLabelsAction<'_, '_, satay_runtime::storage::BoxedStorage>, _>::new(ResponseParts {
         status: http::StatusCode::OK,
         headers: http::HeaderMap::new(),
         body: br#"{"team":"ops"}"#.to_vec(),
@@ -32,15 +33,15 @@ fn top_level_map_responses_use_custom_keys_and_values() {
     let ListLabelsResponse::Ok(labels) = buffered.decode().unwrap() else {
         panic!("expected labels")
     };
-    let (key, value): (&Box<str>, &Box<str>) = labels.first_key_value().unwrap();
-    assert_eq!(key.as_ref(), "team");
+    let (key, value): (&String, &Box<str>) = labels.first_key_value().unwrap();
+    assert_eq!(key, "team");
     assert_eq!(value.as_ref(), "ops");
 }
 
 #[test]
 fn custom_storage_builders_and_projected_decoding_use_native_buffers() {
-    let api = Api::new().string_storage::<CompactString>();
-    let record: Record<CompactString> = serde_json::from_str(RECORD).unwrap();
+    let api = Api::new().storage::<CompactStorage>();
+    let record: Record<CompactStorage> = serde_json::from_str(RECORD).unwrap();
     let action = api.untagged().store_record("a/b", record);
     let request = action.request().unwrap();
     assert_eq!(request.uri(), "/records/a%2Fb");
@@ -54,7 +55,7 @@ fn custom_storage_builders_and_projected_decoding_use_native_buffers() {
         .into_bytes()
         .into_boxed_slice();
     let buffered =
-        BufferedResponse::<StoreRecordAction<'_, CompactString>, _>::new(ResponseParts {
+        BufferedResponse::<StoreRecordAction<'_, '_, CompactStorage>, _>::new(ResponseParts {
             status: http::StatusCode::OK,
             headers: http::HeaderMap::new(),
             body,
@@ -64,14 +65,14 @@ fn custom_storage_builders_and_projected_decoding_use_native_buffers() {
     };
     drop(buffered); // Owned strings do not retain the HTTP body.
     assert_eq!(decoded.name.as_str(), "Ada");
-    let _ = <StoreRecordAction<'_, CompactString> as Action>::decode;
+    let _ = <StoreRecordAction<'_, '_, CompactStorage> as Action>::decode;
     let parts = ResponseParts {
         status: http::StatusCode::OK,
         headers: http::HeaderMap::new(),
         body: format!("{{\"value\":{RECORD}}}").into_bytes(),
     };
-    let owned: StoreRecordResponse<CompactString> =
-        StoreRecordAction::<CompactString>::decode_owned(parts.as_bytes()).unwrap();
+    let owned: StoreRecordResponse<CompactStorage> =
+        StoreRecordAction::<CompactStorage>::decode_owned(parts.as_bytes()).unwrap();
     drop(parts);
     let StoreRecordResponse::Ok(owned) = owned else {
         panic!("expected owned record")

@@ -129,7 +129,7 @@ components:
     }
     // The colliding originals remain under their non-colliding identities.
     assert!(has_method(&api_file, "Api", "base_url"));
-    assert!(has_method(&api_file, "Api", "string_storage"));
+    assert!(has_method(&api_file, "Api", "storage"));
 }
 
 #[test]

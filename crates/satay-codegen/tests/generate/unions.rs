@@ -96,10 +96,13 @@ components:
     assert_attr_contains(&union.attrs, "cfg_attr", "serde(untagged)");
 
     assert_eq!(variant_names(union), ["User", "Organization"]);
-    assert_eq!(norm(&variant(union, "User").fields), norm_str("(User<S>)"));
     assert_eq!(
-        norm(&variant(union, "Organization").fields),
-        norm_str("(Organization<S>)")
+        norm_fields(&variant(union, "User").fields),
+        norm_str("(User<'storage, S>)")
+    );
+    assert_eq!(
+        norm_fields(&variant(union, "Organization").fields),
+        norm_str("(Organization<'storage, S>)")
     );
 }
 
@@ -190,20 +193,24 @@ components:
         ]
     );
     assert_eq!(
-        norm(&variant(union, "AssistantToolsCode").fields),
+        norm_fields(&variant(union, "AssistantToolsCode").fields),
         norm_str("(AssistantToolsCode)")
     );
     assert_eq!(
-        norm(&variant(union, "AssistantToolsFileSearch").fields),
+        norm_fields(&variant(union, "AssistantToolsFileSearch").fields),
         norm_str("(AssistantToolsFileSearch)")
     );
     assert_eq!(
-        norm(&variant(union, "AssistantToolsFunction").fields),
+        norm_fields(&variant(union, "AssistantToolsFunction").fields),
         norm_str("(AssistantToolsFunction)")
     );
 
     let assistant = find_struct(&types_rs, "AssistantObject");
-    assert_field(assistant, "tools", "Vec<AssistantObjectToolsItem>");
+    assert_field(
+        assistant,
+        "tools",
+        "<S as satay_runtime::storage::Storage>::Contiguous<'storage, AssistantObjectToolsItem>",
+    );
     let code_type = find_enum(&types_rs, "AssistantToolsCodeType");
     assert_eq!(variant_names(code_type), ["CodeInterpreter"]);
     let tools_item = find_enum(&types_rs, "AssistantObjectToolsItem");
@@ -295,7 +302,7 @@ components:
         ]
     );
     assert_eq!(
-        norm(&variant(union, "Auto").fields),
+        norm_fields(&variant(union, "Auto").fields),
         norm_str("(AssistantsApiResponseFormatOptionAuto)")
     );
 
@@ -357,7 +364,7 @@ components:
     assert_attr_contains(&union.attrs, "cfg_attr", "serde(untagged)");
     assert_eq!(variant_names(union), ["Enum", "AssistantsNamedToolChoice"]);
     assert_eq!(
-        norm(&variant(union, "Enum").fields),
+        norm_fields(&variant(union, "Enum").fields),
         norm_str("(AssistantsApiToolChoiceOptionEnum)")
     );
 
@@ -376,15 +383,20 @@ fn one_of_generates_nullable_inline_primitive_union_branch() {
 
     let types_rs = parse_rust(find_file(&files, "types.rs"));
     let message = find_struct(&types_rs, "Message");
-    assert_field(message, "content", "Option<MessageContent<S>>");
+    assert_field(message, "content", "Option<MessageContent<'storage, S>>");
 
     let content = find_enum(&types_rs, "MessageContent");
     assert_attr_contains(&content.attrs, "cfg_attr", "serde(untagged)");
     assert_eq!(variant_names(content), ["String", "Array"]);
-    assert_eq!(norm(&variant(content, "String").fields), norm_str("(S)"));
     assert_eq!(
-        norm(&variant(content, "Array").fields),
-        norm_str("(Vec<ContentPart<S>>)")
+        norm_fields(&variant(content, "String").fields),
+        norm_str("(<S as satay_runtime::storage::Storage>::Text<'storage>)")
+    );
+    assert_eq!(
+        norm_fields(&variant(content, "Array").fields),
+        norm_str(
+            "(<S as satay_runtime::storage::Storage>::Contiguous<'storage, ContentPart<'storage, S>>)"
+        )
     );
 }
 

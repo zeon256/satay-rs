@@ -3,7 +3,7 @@
 
 use super::codegen::GeneratedFile;
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
-use quote::ToTokens;
+use quote::{ToTokens, quote};
 use syn::{Expr, ExprLit, Fields, ImplItem, Item, Lit, Meta, MetaNameValue, Type, Visibility};
 
 pub fn parse_rust(file: &GeneratedFile) -> syn::File {
@@ -32,7 +32,14 @@ pub fn norm_str(fragment: &str) -> String {
 
 fn canon(stream: TokenStream) -> String {
     fn push(stream: TokenStream, out: &mut String) {
-        for tree in stream {
+        let tokens = stream.into_iter().collect::<Vec<_>>();
+        for (index, tree) in tokens.iter().cloned().enumerate() {
+            if matches!(&tree, TokenTree::Punct(p) if p.as_char() == ',')
+                && (index + 1 == tokens.len()
+                    || matches!(tokens.get(index + 1), Some(TokenTree::Punct(p)) if p.as_char() == '>'))
+            {
+                continue;
+            }
             match tree {
                 TokenTree::Group(group) => {
                     let (open, close) = match group.delimiter() {
@@ -297,4 +304,10 @@ pub fn contains_ident(file: &syn::File, ident: &str) -> bool {
         })
     }
     walk(file.to_token_stream(), ident)
+}
+
+/// Compares variant field types independently of codec attributes.
+pub fn norm_fields(fields: &Fields) -> String {
+    let types = fields.iter().map(|field| &field.ty);
+    norm(&quote!((#(#types),*)))
 }

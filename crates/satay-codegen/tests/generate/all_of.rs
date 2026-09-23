@@ -63,10 +63,26 @@ components:
     let child = find_struct(&types_rs, "Child");
     assert_doc(&child.attrs, "A flattened child.");
     assert_eq!(field_names(child), ["id", "tag", "name", "nickname"]);
-    assert_field(child, "id", "S");
-    assert_field(child, "tag", "S");
-    assert_field(child, "name", "S");
-    assert_field(child, "nickname", "Option<S>");
+    assert_field(
+        child,
+        "id",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
+    assert_field(
+        child,
+        "tag",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
+    assert_field(
+        child,
+        "name",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
+    assert_field(
+        child,
+        "nickname",
+        "Option<<S as satay_runtime::storage::Storage>::Text<'storage>>",
+    );
 }
 
 #[test]
@@ -227,20 +243,36 @@ components:
 
     let types_rs = parse_rust(find_file(&files, "types.rs"));
     let list = find_struct(&types_rs, "ChatCompletionMessageList");
-    assert_field(list, "data", "Vec<ChatCompletionMessageListDataItem<S>>");
+    assert_field(
+        list,
+        "data",
+        "<S as satay_runtime::storage::Storage>::Contiguous<'storage, ChatCompletionMessageListDataItem<'storage, S>>",
+    );
 
     let item = find_struct(&types_rs, "ChatCompletionMessageListDataItem");
     assert_eq!(
         field_names(item),
         ["role", "content", "id", "content_parts"]
     );
-    assert_field(item, "role", "S");
-    assert_field(item, "content", "S");
-    assert_field(item, "id", "S");
+    assert_field(
+        item,
+        "role",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
+    assert_field(
+        item,
+        "content",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
+    assert_field(
+        item,
+        "id",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
     assert_field(
         item,
         "content_parts",
-        "Option<Vec<ChatCompletionMessageListDataItemContentPartsItem<S>>>",
+        "Option<<S as satay_runtime::storage::Storage>::Contiguous<'storage, ChatCompletionMessageListDataItemContentPartsItem<'storage, S>>>",
     );
 }
 

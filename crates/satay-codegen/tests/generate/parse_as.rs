@@ -56,11 +56,6 @@ components:
             "cfg_attr",
             r#"deserialize_with = "treat_error_as_none::deserialize""#,
         );
-        assert_attr_contains(
-            &field(service, field_name).attrs,
-            "cfg_attr",
-            r#"serialize_with = "treat_error_as_none::serialize""#,
-        );
         assert_attr_contains(&field(service, field_name).attrs, "cfg_attr", "default");
         assert_attr_contains(
             &field(service, field_name).attrs,

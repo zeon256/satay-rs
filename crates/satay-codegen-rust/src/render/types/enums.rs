@@ -14,7 +14,7 @@ pub(super) fn render_enum(name: &str, description: Option<&str>, enum_: &Enum) -
         .collect::<Vec<_>>();
     let fallback_variant = match enum_.fallback {
         EnumFallback::None => None,
-        EnumFallback::OtherString => Some(quote!(Other(String))),
+        EnumFallback::OtherString => Some(quote!(Other(__SatayText))),
     };
     let serde_derive = match enum_.fallback {
         EnumFallback::None => Some(quote!(
@@ -52,7 +52,7 @@ pub(super) fn render_enum(name: &str, description: Option<&str>, enum_: &Enum) -
                 pub fn as_str(&self) -> &str {
                     match self {
                         #(#as_str_arms)*
-                        Self::Other(value) => value.as_str(),
+                        Self::Other(value) => value.as_ref(),
                     }
                 }
             }
@@ -125,8 +125,8 @@ fn render_open_enum_deserialize_impl(name: &syn::Ident, enum_: &Enum) -> syn::It
             where
                 D: serde::Deserializer<'de>,
             {
-                let value = String::deserialize(deserializer)?;
-                Ok(match value.as_str() {
+                let value = <__SatayText as serde::Deserialize>::deserialize(deserializer)?;
+                Ok(match value.as_ref() {
                     #(#deserialize_arms)*
                     _ => Self::Other(value),
                 })

@@ -3,7 +3,7 @@ use super::generated::*;
 #[test]
 fn constructs_request_parts_without_io() {
     let parts = operations::get_user::get_user_parts(
-        GetUserInput::<String>::new("user/42").include_details(true),
+        GetUserInput::<satay_runtime::storage::AllocStorage>::new("user/42").include_details(true),
     )
     .expect("request parts");
 
@@ -30,7 +30,7 @@ fn action_builder_constructs_json_request_without_io() {
 #[test]
 fn encodes_json_request_body() {
     let request = operations::update_user::encode_update_user(
-        UpdateUserInput::<String>::new("42")
+        UpdateUserInput::<satay_runtime::storage::AllocStorage>::new("42")
             .notify(false)
             .body(UpdateUserRequest {
                 age: None,
@@ -50,7 +50,7 @@ fn encodes_json_request_body() {
     assert_eq!(body, serde_json::json!({ "name": "Ada" }));
 
     let empty_request =
-        operations::update_user::encode_update_user(UpdateUserInput::<String>::new("42"))
+        operations::update_user::encode_update_user(UpdateUserInput::<satay_runtime::storage::AllocStorage>::new("42"))
             .expect("encoded request without body");
     assert_eq!(empty_request.uri(), "/users/42");
     assert!(
@@ -69,7 +69,7 @@ fn decodes_json_response_enums() {
         headers: http::HeaderMap::new(),
         body: br#"{"id":"42","name":"Ada","status":"active","age":36,"tags":["admin"]}"#.to_vec(),
     };
-    let decoded = operations::get_user::GetUserAction::<String>::decode(response.as_bytes())
+    let decoded = operations::get_user::GetUserAction::<satay_runtime::storage::AllocStorage>::decode(response.as_bytes())
         .expect("decoded response");
 
     match decoded {

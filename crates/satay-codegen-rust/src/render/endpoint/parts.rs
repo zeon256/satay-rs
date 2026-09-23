@@ -1,3 +1,4 @@
+use super::super::rust_type;
 use proc_macro2::Literal;
 use syn::parse_quote;
 
@@ -246,12 +247,12 @@ enum ValueBase {
     Borrowed,
 }
 
-fn array_values_expr(base: syn::Expr, ty: &TypeRef, base_kind: ArrayValueBase) -> syn::Expr {
+fn array_values_expr(base: syn::Expr, ty: &TypeRef, _base_kind: ArrayValueBase) -> syn::Expr {
     match ty.non_option() {
-        TypeRef::Array(_) => match base_kind {
-            ArrayValueBase::Owned => parse_quote!(&#base),
-            ArrayValueBase::Borrowed => base,
-        },
+        TypeRef::Array(inner) => {
+            let inner = rust_type(inner);
+            parse_quote!(AsRef::<[#inner]>::as_ref(&#base).iter())
+        }
         TypeRef::Constrained { inner, .. } if is_array_type(inner.non_option()) => {
             parse_quote!(#base.as_ref())
         }

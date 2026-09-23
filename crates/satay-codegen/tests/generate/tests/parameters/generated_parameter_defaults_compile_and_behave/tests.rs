@@ -2,7 +2,7 @@ use super::generated::*;
 
 #[test]
 fn omitted_values_use_defaults() {
-    let parts = operations::get_parking::get_parking_parts(GetParkingInput::<String>::new())
+    let parts = operations::get_parking::get_parking_parts(GetParkingInput::<satay_runtime::storage::AllocStorage>::new())
         .expect("request parts");
 
     assert_eq!(
@@ -14,7 +14,7 @@ fn omitted_values_use_defaults() {
 
 #[test]
 fn default_impl_uses_parameter_defaults() {
-    let parts = operations::get_parking::get_parking_parts(GetParkingInput::<String>::default())
+    let parts = operations::get_parking::get_parking_parts(GetParkingInput::<satay_runtime::storage::AllocStorage>::default())
         .expect("request parts");
 
     assert_eq!(
@@ -27,7 +27,7 @@ fn default_impl_uses_parameter_defaults() {
 #[test]
 fn explicit_values_override_defaults_and_absent_parameters_stay_absent() {
     let parts = operations::get_parking::get_parking_parts(
-        GetParkingInput::<String>::new()
+        GetParkingInput::<satay_runtime::storage::AllocStorage>::new()
             .dist(1.25)
             .limit(50)
             .ratio(0.75)
@@ -43,7 +43,7 @@ fn explicit_values_override_defaults_and_absent_parameters_stay_absent() {
     );
     assert_eq!(parts.headers.get("X-Region").unwrap(), "west");
 
-    let omitted = operations::get_parking::get_parking_parts(GetParkingInput::<String>::new())
+    let omitted = operations::get_parking::get_parking_parts(GetParkingInput::<satay_runtime::storage::AllocStorage>::new())
         .expect("request parts");
     assert!(!omitted.uri.contains("Filter="));
 }

@@ -178,7 +178,11 @@ components:
 
     let types_rs = parse_rust(find_file(&files, "types.rs"));
     let transcription = find_struct(&types_rs, "AudioTranscription");
-    assert_field(transcription, "model", "Option<AudioTranscriptionModel<S>>");
+    assert_field(
+        transcription,
+        "model",
+        "Option<AudioTranscriptionModel<'storage, S>>",
+    );
 
     let model = find_enum(&types_rs, "AudioTranscriptionModel");
     assert_doc(&model.attrs, "Known transcription models.");
@@ -200,14 +204,17 @@ components:
         norm(&model_as_str.sig),
         norm_str("fn as_str(&self) -> &str")
     );
-    assert_eq!(norm(&variant(model, "Other").fields), norm_str("(S)"));
+    assert_eq!(
+        norm_fields(&variant(model, "Other").fields),
+        norm_str("(<S as satay_runtime::storage::Storage>::Text<'storage>)")
+    );
     assert!(contains_tokens(
         &types_rs,
-        "serde::Serialize for AudioTranscriptionModel<S>"
+        "serde::Serialize for AudioTranscriptionModel<'storage, S>"
     ));
     assert!(contains_tokens(
         &types_rs,
-        "serde::Deserialize<'de> for AudioTranscriptionModel<S>"
+        "serde::Deserialize<'de> for AudioTranscriptionModel<'storage, S>"
     ));
     // Regression for #155: must not emit the long UFCS path that fires the
     // `minimal_imports` lint; reference `Deserialize` unqualified instead.
@@ -217,7 +224,7 @@ components:
     ));
     assert!(contains_tokens(
         &types_rs,
-        "S :: deserialize ( deserializer )"
+        "<<S as satay_runtime::storage::Storage>::Text<'storage> as serde::Deserialize>::deserialize(deserializer)"
     ));
 }
 
@@ -257,7 +264,10 @@ components:
         variant_names(model),
         ["ClaudeSonnet5", "ClaudeHaiku45", "Other"]
     );
-    assert_eq!(norm(&variant(model, "Other").fields), norm_str("(S)"));
+    assert_eq!(
+        norm_fields(&variant(model, "Other").fields),
+        norm_str("(<S as satay_runtime::storage::Storage>::Text<'storage>)")
+    );
     assert!(contains_tokens(
         &types_rs,
         r#"Self::ClaudeSonnet5 => "claude-sonnet-5""#
@@ -305,11 +315,14 @@ components:
 
     let types_rs = parse_rust(find_file(&files, "types.rs"));
     let event = find_struct(&types_rs, "Event");
-    assert_field(event, "reason", "Option<EventReason<S>>");
+    assert_field(event, "reason", "Option<EventReason<'storage, S>>");
 
     let reason = find_enum(&types_rs, "EventReason");
     assert_eq!(variant_names(reason), ["ContentFilter", "Other_2", "Other"]);
-    assert_eq!(norm(&variant(reason, "Other").fields), norm_str("(S)"));
+    assert_eq!(
+        norm_fields(&variant(reason, "Other").fields),
+        norm_str("(<S as satay_runtime::storage::Storage>::Text<'storage>)")
+    );
 }
 
 #[test]

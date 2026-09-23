@@ -21,7 +21,7 @@ fn tagged_union_deserializes_response() {
 
 #[test]
 fn tagged_union_serializes_tag() {
-    let value = Pet::Dog(Dog {
+    let value: Pet = Pet::Dog(Dog {
         name: "Rex".to_owned(),
         bark_volume: 7,
     });

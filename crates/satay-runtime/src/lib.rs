@@ -1,5 +1,15 @@
 #![forbid(unsafe_code)]
 
+/// Storage families used by generated clients. Map integration remains separate
+/// from generated text and contiguous collection policies.
+pub use satay_storage as storage;
+
+use std::{borrow, collections::BTreeMap, convert};
+
+/// Context-aware Serde adapters for storage families.
+#[cfg(feature = "serde")]
+pub mod storage_serde;
+
 use std::str::FromStr;
 use std::{
     fmt::{self, Debug, Formatter},
@@ -360,10 +370,20 @@ pub fn from_projected_json_slice<T>(
 where
     T: de::DeserializeOwned,
 {
-    debug!(
+    Ok(serde_json::from_value(project_json_slice(
+        body,
         unwrap_field,
-        map_field, "deserializing projected JSON response"
-    );
+        map_field,
+    )?)?)
+}
+
+#[cfg(feature = "json")]
+fn project_json_slice(
+    body: &[u8],
+    unwrap_field: &str,
+    map_field: Option<&str>,
+) -> Result<JsonValue, Error> {
+    debug!(unwrap_field, map_field, "projecting JSON response");
     let mut value = serde_json::from_slice::<JsonValue>(body)?;
     let object = value.as_object_mut().ok_or(Error::InvalidResponse(
         "response projection expected a top-level JSON object",
@@ -392,7 +412,7 @@ where
         };
     }
 
-    Ok(serde_json::from_value(projected)?)
+    Ok(projected)
 }
 
 pub fn append_path_segment(out: &mut String, value: &str) {
@@ -2324,3 +2344,64 @@ mod tests;
 
 #[cfg(all(test, feature = "json"))]
 mod buffered_response_tests;
+
+/// An owned storage policy with a reusable static construction context.
+///
+/// Stateful policies use generated `storage_in` APIs instead.
+pub trait StaticStorage: storage::Storage + 'static {
+    /// Returns the policy's process-lifetime context.
+    fn context() -> &'static Self;
+}
+impl StaticStorage for storage::AllocStorage {
+    fn context() -> &'static Self {
+        &storage::AllocStorage
+    }
+}
+impl StaticStorage for storage::BoxedStorage {
+    fn context() -> &'static Self {
+        &storage::BoxedStorage
+    }
+}
+
+/// Compatibility family for former generated string-policy users.
+/// Text uses `T`; contiguous collections use `Vec`. Generated map keys remain
+/// concrete `String` independently of this policy.
+pub struct StringPolicy<T>(marker::PhantomData<fn() -> T>);
+impl<T> fmt::Debug for StringPolicy<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("StringPolicy")
+    }
+}
+impl<T> Default for StringPolicy<T> {
+    fn default() -> Self {
+        Self(marker::PhantomData)
+    }
+}
+impl<T: StringStorage + borrow::Borrow<str> + 'static> storage::Storage for StringPolicy<T> {
+    type Error = convert::Infallible;
+    type Text<'a> = T;
+    type Contiguous<'a, V: 'a> = Vec<V>;
+    type Map<'a, V: 'a> = BTreeMap<T, V>;
+    fn try_text(&self, value: &str) -> Result<T, Self::Error> {
+        Ok(value.to_owned().into())
+    }
+    fn try_contiguous<'a, V: 'a>(
+        &'a self,
+        values: impl IntoIterator<Item = V>,
+    ) -> Result<Vec<V>, Self::Error> {
+        Ok(values.into_iter().collect())
+    }
+    fn try_map<'a, V: 'a>(
+        &'a self,
+        entries: impl IntoIterator<Item = (T, V)>,
+    ) -> Result<Self::Map<'a, V>, Self::Error> {
+        Ok(entries.into_iter().collect())
+    }
+}
+impl<T: StringStorage + borrow::Borrow<str> + 'static> StaticStorage for StringPolicy<T> {
+    fn context() -> &'static Self {
+        &Self(marker::PhantomData)
+    }
+}
+
+pub mod storage_value;

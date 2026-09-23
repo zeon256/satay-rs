@@ -16,7 +16,7 @@ fn nested_union_deserializes_by_embedded_tag() {
 
 #[test]
 fn nested_union_serializes_embedded_tag() {
-    let widget = Widget {
+    let widget: Widget = Widget {
         id: "w2".to_owned(),
         status: Some(WidgetStatus::StatusOff(StatusOff {
             r#type: StatusOffType::Off,

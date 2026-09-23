@@ -45,7 +45,7 @@ fn unknown_open_enum_value_deserializes_to_other() {
 
 #[test]
 fn other_open_enum_value_serializes_as_string() {
-    let value = AudioTranscriptionModel::Other("gpt-custom-transcribe".to_owned());
+    let value: AudioTranscriptionModel = AudioTranscriptionModel::Other("gpt-custom-transcribe".to_owned());
     assert_eq!(value.as_str(), "gpt-custom-transcribe");
 
     let encoded = serde_json::to_value(value).expect("serialized model");
