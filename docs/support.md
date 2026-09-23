@@ -78,3 +78,11 @@ These are known gaps rather than silent compatibility promises:
 - Body support beyond JSON: form data, multipart, and bytes.
 - Validated schema references and remote reference loading.
 - First-class examples for common transports, keeping generated clients Sans-IO.
+
+## Storage families
+
+Generated text and arrays use a selectable storage family, defaulting to
+String/Vec. Boxed and downstream arena policies share the same generated models;
+arena decoding takes an explicit context. Maps and constrained scalar wrappers
+remain concrete. See [storage families](storage-codec-prototype.md) for owned
+aliases, trait capabilities, feature gates and migration from StringStorage.

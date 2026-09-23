@@ -1,0 +1,78 @@
+openapi: 3.1.0
+info: {title: Family, version: 1.0.0}
+paths:
+  /pets:
+    post:
+      operationId: savePets
+      parameters:
+        - name: counts
+          in: query
+          required: true
+          schema: {type: array, items: {type: integer}}
+        - name: region
+          in: header
+          schema: {type: string, default: central}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Envelope'}
+      x-satay:
+        output: {unwrap-field: result}
+      responses:
+        '200':
+          description: saved
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [result]
+                properties:
+                  result: {$ref: '#/components/schemas/Envelope'}
+components:
+  schemas:
+    Counts: {type: array, items: {type: integer}}
+    Pet:
+      type: object
+      required: [name, counts]
+      properties:
+        name: {type: string}
+        counts: {$ref: '#/components/schemas/Counts'}
+    Envelope:
+      type: object
+      required: [pets, matrix, flags]
+      properties:
+        pets: {type: array, items: {$ref: '#/components/schemas/Pet'}}
+        matrix: {type: array, items: {type: array, items: {type: integer}}}
+        flags: {type: array, items: {type: boolean}}
+        choice:
+          anyOf:
+            - {$ref: '#/components/schemas/Pet'}
+            - {type: integer}
+        lossy:
+          $ref: '#/components/schemas/Pet'
+          x-satay: {treat-error-as-none: true}
+        mapped: {type: object, additionalProperties: {$ref: '#/components/schemas/Pet'}}
+    Node:
+      type: object
+      required: [name, children]
+      properties:
+        name: {type: string}
+        children: {type: array, items: {$ref: '#/components/schemas/Node'}}
+    State: {type: string, enum: [ready, pending]}
+    Bounded: {type: integer, minimum: 0, maximum: 9}
+    Scalars:
+      type: object
+      required: [states, bounded]
+      properties:
+        states: {type: array, items: {$ref: '#/components/schemas/State'}}
+        bounded: {type: array, items: {$ref: '#/components/schemas/Bounded'}}
+    Tagged:
+      oneOf:
+        - {$ref: '#/components/schemas/Pet'}
+        - {$ref: '#/components/schemas/Scalars'}
+      discriminator:
+        propertyName: kind
+        mapping:
+          pet: '#/components/schemas/Pet'
+          scalars: '#/components/schemas/Scalars'

@@ -863,19 +863,21 @@ components:
     // NOTE: `treat_error_as_none` is expressed by `Option` wrapping plus the
     // runtime serde helpers on the generated field.
     let timing = field(arrival, "timing");
-    assert_eq!(norm(&timing.ty), norm_str("Option<S>"));
+    assert_eq!(
+        norm(&timing.ty),
+        norm_str("Option<<S as satay_runtime::storage::Storage>::Text<'storage>>")
+    );
     assert_attr_contains(
         &timing.attrs,
         "cfg_attr",
         r#""treat_error_as_none::deserialize""#,
     );
-    assert_attr_contains(
-        &timing.attrs,
-        "cfg_attr",
-        r#""treat_error_as_none::serialize""#,
-    );
+    assert_attr_contains(&timing.attrs, "cfg_attr", "serialize_with");
     let optional_timing = field(arrival, "optional_timing");
-    assert_eq!(norm(&optional_timing.ty), norm_str("Option<S>"));
+    assert_eq!(
+        norm(&optional_timing.ty),
+        norm_str("Option<<S as satay_runtime::storage::Storage>::Text<'storage>>")
+    );
     assert!(
         optional_timing
             .attrs
@@ -890,7 +892,7 @@ components:
     let parts = parse_rust(file(&files, "get_arrival/parts.rs"));
     assert_eq!(
         ok_payload(&parts, "GetArrivalResponse"),
-        norm_str("Arrival<S>")
+        norm_str("Arrival<'storage, S>")
     );
 }
 
@@ -933,14 +935,20 @@ components:
     // runtime serde helpers; without the extension the required reference
     // stays a direct value.
     let next_bus = field(arrival, "next_bus");
-    assert_eq!(norm(&next_bus.ty), norm_str("Option<BusArrivalTiming<S>>"));
+    assert_eq!(
+        norm(&next_bus.ty),
+        norm_str("Option<BusArrivalTiming<'storage, S>>")
+    );
     assert_attr_contains(
         &next_bus.attrs,
         "cfg_attr",
         r#""treat_error_as_none::deserialize""#,
     );
     let strict_next_bus = field(arrival, "strict_next_bus");
-    assert_eq!(norm(&strict_next_bus.ty), norm_str("BusArrivalTiming<S>"));
+    assert_eq!(
+        norm(&strict_next_bus.ty),
+        norm_str("BusArrivalTiming<'storage, S>")
+    );
     assert!(
         strict_next_bus
             .attrs
@@ -1247,7 +1255,10 @@ components:
     // NOTE: `identifier: kept` renames the retained field; plain semantics
     // (no treat-error-as-none) keep it a bare optional value.
     let retained = field(response, "kept");
-    assert_eq!(norm(&retained.ty), norm_str("Option<S>"));
+    assert_eq!(
+        norm(&retained.ty),
+        norm_str("Option<<S as satay_runtime::storage::Storage>::Text<'storage>>")
+    );
     assert_attr_contains(
         &retained.attrs,
         "cfg_attr",
@@ -1259,7 +1270,11 @@ components:
             .iter()
             .all(|attr| !norm(attr).contains(&norm_str("treat_error_as_none")))
     );
-    assert_field(response, "bus_stop_code", "S");
+    assert_field(
+        response,
+        "bus_stop_code",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
     assert_attr_contains(
         &field(response, "bus_stop_code").attrs,
         "cfg_attr",
@@ -2211,7 +2226,10 @@ paths:
     // NOTE: the private model's `fn_name` facts surface as the untagged view
     // methods of the generated API.
     let untagged = parse_rust(file(&files, "untagged.rs"));
-    assert_eq!(untagged_methods(&untagged), ["list_files"]);
+    assert_eq!(
+        untagged_methods(&untagged),
+        ["list_files", "try_list_files"]
+    );
 }
 
 #[test]
@@ -2235,7 +2253,7 @@ paths:
     );
 
     let untagged = parse_rust(file(&files, "untagged.rs"));
-    assert_eq!(untagged_methods(&untagged), ["ping"]);
+    assert_eq!(untagged_methods(&untagged), ["ping", "try_ping"]);
 }
 
 #[test]
@@ -2414,7 +2432,9 @@ components:
     let services_parts = parse_rust(file(&files, "get_services/parts.rs"));
     assert_eq!(
         ok_payload(&services_parts, "GetServicesResponse"),
-        norm_str("Vec<Service<S>>")
+        norm_str(
+            "<S as satay_runtime::storage::Storage>::Contiguous<'storage, Service<'storage, S>>"
+        )
     );
     let services_json = parse_rust(file(&files, "get_services/json.rs"));
     let decode = find_fn(&services_json, "decode_get_services_response");
@@ -2428,7 +2448,9 @@ components:
     let links_parts = parse_rust(file(&files, "get_links/parts.rs"));
     assert_eq!(
         ok_payload(&links_parts, "GetLinksResponse"),
-        norm_str("Vec<S>")
+        norm_str(
+            "<S as satay_runtime::storage::Storage>::Contiguous<'storage, <S as satay_runtime::storage::Storage>::Text<'storage>>"
+        )
     );
     let links_json = parse_rust(file(&files, "get_links/json.rs"));
     let decode = find_fn(&links_json, "decode_get_links_response");
@@ -2589,7 +2611,10 @@ components:
     // NOTE: no component survives, so no `types.rs` is emitted at all; the
     // exclusion is asserted across every generated file.
     let untagged = parse_rust(file(&files, "untagged.rs"));
-    assert_eq!(untagged_methods(&untagged), ["list_files"]);
+    assert_eq!(
+        untagged_methods(&untagged),
+        ["list_files", "try_list_files"]
+    );
     assert!(
         files
             .iter()
@@ -2640,7 +2665,7 @@ components:
     // NOTE: no component survives, so no `types.rs` is emitted at all; the
     // exclusion is asserted across every generated file.
     let untagged = parse_rust(file(&files, "untagged.rs"));
-    assert_eq!(untagged_methods(&untagged), ["health"]);
+    assert_eq!(untagged_methods(&untagged), ["health", "try_health"]);
     assert!(
         files
             .iter()
@@ -2693,7 +2718,7 @@ components:
     // NOTE: no component survives, so no `types.rs` is emitted at all; the
     // exclusion is asserted across every generated file.
     let untagged = parse_rust(file(&files, "untagged.rs"));
-    assert_eq!(untagged_methods(&untagged), ["health"]);
+    assert_eq!(untagged_methods(&untagged), ["health", "try_health"]);
     assert!(
         files.iter().all(|generated| {
             !generated.contents.contains("UploadTuple")
@@ -2748,7 +2773,10 @@ components:
     ir::assert_selection(spec, &["Shared"], &["getShared"]);
 
     let untagged = parse_rust(file(&files, "untagged.rs"));
-    assert_eq!(untagged_methods(&untagged), ["get_shared"]);
+    assert_eq!(
+        untagged_methods(&untagged),
+        ["get_shared", "try_get_shared"]
+    );
     let types = parse_rust(file(&files, "types.rs"));
     find_struct(&types, "Shared");
 }
@@ -2803,11 +2831,17 @@ components:
     ir::assert_selection(spec, &["Orphan"], &["listFiles"]);
 
     let untagged = parse_rust(file(&files, "untagged.rs"));
-    assert_eq!(untagged_methods(&untagged), ["list_files"]);
+    assert_eq!(
+        untagged_methods(&untagged),
+        ["list_files", "try_list_files"]
+    );
     let types = parse_rust(file(&files, "types.rs"));
     find_struct(&types, "Orphan");
     assert!(
-        !contains_ident(&types, "A"),
+        !types
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::Struct(item) if item.ident == "A")),
         "skipped-only rejectable component must be excluded"
     );
 }
@@ -2860,7 +2894,10 @@ components:
     ir::assert_selection(spec, &["Shared", "Holder"], &["listFiles"]);
 
     let untagged = parse_rust(file(&files, "untagged.rs"));
-    assert_eq!(untagged_methods(&untagged), ["list_files"]);
+    assert_eq!(
+        untagged_methods(&untagged),
+        ["list_files", "try_list_files"]
+    );
     let types = parse_rust(file(&files, "types.rs"));
     find_struct(&types, "Shared");
     find_struct(&types, "Holder");
@@ -2902,7 +2939,7 @@ paths:
     ir::assert_selection(spec, &[], &["health"]);
 
     let untagged = parse_rust(file(&files, "untagged.rs"));
-    assert_eq!(untagged_methods(&untagged), ["health"]);
+    assert_eq!(untagged_methods(&untagged), ["health", "try_health"]);
 }
 
 #[test]
@@ -2933,7 +2970,7 @@ components:
     );
 
     let untagged = parse_rust(file(&files, "untagged.rs"));
-    assert_eq!(untagged_methods(&untagged), ["ping"]);
+    assert_eq!(untagged_methods(&untagged), ["ping", "try_ping"]);
     let types = parse_rust(file(&files, "types.rs"));
     find_struct(&types, "Unused");
 }
@@ -2981,14 +3018,22 @@ components:
         r#"with = "serde_string::as_url::option""#,
     );
     // Other string formats stay plain; `uri-reference` is not a URL parse.
-    assert_field(record, "reference", "Option<S>");
+    assert_field(
+        record,
+        "reference",
+        "Option<<S as satay_runtime::storage::Storage>::Text<'storage>>",
+    );
     assert!(
         field(record, "reference")
             .attrs
             .iter()
             .all(|attr| !norm(attr).contains(&norm_str("as_url")))
     );
-    assert_field(record, "plain", "Option<S>");
+    assert_field(
+        record,
+        "plain",
+        "Option<<S as satay_runtime::storage::Storage>::Text<'storage>>",
+    );
     // An explicit parse-as overrides the format.
     assert_field(record, "r#override", "Option<u32>");
     assert_attr_contains(

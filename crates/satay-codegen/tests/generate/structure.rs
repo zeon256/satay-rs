@@ -53,7 +53,7 @@ fn simple_fixture_generates_expected_file_structure() {
     assert!(is_pub(&new_fn.vis));
     assert_eq!(
         norm(&new_fn.sig),
-        norm_str("fn new(user_id: impl Into<S>) -> Self")
+        norm_str("fn new(user_id: impl Into<String>) -> Self")
     );
     find_method(&parts, "GetUserInput", "include_details");
     find_enum(&parts, "GetUserResponse");
@@ -98,22 +98,26 @@ fn operation_tags_generate_namespaced_api_groups() {
         let method = find_method(&api, "Api", group);
         assert_eq!(
             norm(&method.sig),
-            norm_str(&format!("fn {group}(&self) -> {group}::Api<'_, S>")),
+            norm_str(&format!(
+                "fn {group}(&self) -> {group}::Api<'storage, '_, S>"
+            )),
         );
     }
     assert!(!has_method(&api, "Api", "get_bus_arrival"));
     assert!(!has_method(&api, "Api", "list_bus_stops"));
-    let list_stops_new = find_method(&api, "ListBusStopsAction", "new");
+    let list_stops_new = find_method(&api, "ListBusStopsAction", "try_new");
     assert_eq!(
         norm(&list_stops_new.sig),
-        norm_str("fn new(api_2: &'a Api<S>, api: impl Into<S>) -> Self"),
+        norm_str(
+            "fn try_new(api_2: &'a Api<'storage, S>, api: impl AsRef<str>) -> Result<Self, S::Error>"
+        ),
     );
     assert!(contains_tokens(list_stops_new, "api: api_2"));
     assert!(contains_tokens(
         list_stops_new,
-        "ListBusStopsInput::<S>::new(api)"
+        "ListBusStopsInput::try_new_in(api_2.__satay_storage, api)?"
     ));
-    let get_arrival_new = find_method(&api, "GetBusArrivalAction", "new");
+    let get_arrival_new = find_method(&api, "GetBusArrivalAction", "try_new");
     assert!(contains_tokens(get_arrival_new, "api,"));
     assert!(!contains_tokens(get_arrival_new, "api: api"));
     let action = find_struct(&api, "GetBusArrivalAction");
@@ -142,7 +146,9 @@ fn operation_tags_generate_namespaced_api_groups() {
     let get_arrival = find_method(&bus, "Api", "get_arrival");
     assert_eq!(
         norm(&get_arrival.sig),
-        norm_str("fn get_arrival(&self, bus_stop_code: u32) -> GetBusArrivalAction<'a, S>",),
+        norm_str(
+            "fn get_arrival(&self, bus_stop_code: u32) -> GetBusArrivalAction<'storage, 'a, S> where S: satay_runtime::storage::Storage<Error = core::convert::Infallible>",
+        ),
     );
     assert_doc(&get_arrival.attrs, "Get the next arrival.");
     assert_doc(&get_arrival.attrs, "# Arguments");
@@ -199,7 +205,7 @@ fn lib_root_module_option_emits_lib_rs_instead_of_mod_rs() {
     );
     assert_eq!(
         norm(&find_method(&api_rs, "Api", "users").sig),
-        norm_str("fn users(&self) -> users::Api<'_, S>"),
+        norm_str("fn users(&self) -> users::Api<'storage, '_, S>"),
     );
     assert!(!files.iter().any(|file| file.relative_path == "mod.rs"));
     assert!(
@@ -280,9 +286,17 @@ components:
     let user = find_struct(&types_rs, "User");
     assert_doc(&user.attrs, "A user record.");
     assert_doc(&field(user, "id").attrs, "Stable ID.");
-    assert_field(user, "id", "S");
+    assert_field(
+        user,
+        "id",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
     assert_doc(&field(user, "name").attrs, "Display name.");
-    assert_field(user, "name", "Option<S>");
+    assert_field(
+        user,
+        "name",
+        "Option<<S as satay_runtime::storage::Storage>::Text<'storage>>",
+    );
     assert_doc(&field(user, "code").attrs, "Reusable user code.");
     assert_field(user, "code", "UserCode");
     assert_doc(&field(user, "home_code").attrs, "Home user code.");
@@ -292,7 +306,11 @@ components:
     let input = find_struct(&parts_rs, "GetUserInput");
     assert_doc(&input.attrs, "Fetch a user.");
     assert_doc(&field(input, "user_id").attrs, "User identifier.");
-    assert_field(input, "user_id", "S");
+    assert_field(
+        input,
+        "user_id",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
     assert_doc(
         &field(input, "include_details").attrs,
         "Include detailed fields.",
@@ -300,7 +318,7 @@ components:
     let response = find_enum(&parts_rs, "GetUserResponse");
     let ok = variant(response, "Ok");
     assert_doc(&ok.attrs, "User found.");
-    assert_eq!(norm(&ok.fields), norm_str("(User<S>)"));
+    assert_eq!(norm_fields(&ok.fields), norm_str("(User<'storage, S>)"));
 }
 
 #[test]

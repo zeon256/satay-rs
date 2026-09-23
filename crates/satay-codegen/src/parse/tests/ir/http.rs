@@ -1228,11 +1228,14 @@ paths:
     let files = generate_valid(spec);
     let parts = parse_rust(file(&files, "read/parts.rs"));
     let response = find_enum(&parts, "ReadResponse");
-    assert_eq!(norm(&variant(response, "Ok").fields), "(S)");
+    assert_eq!(
+        norm_fields(&variant(response, "Ok").fields),
+        norm_str("(<S as satay_runtime::storage::Storage>::Text<'storage>)")
+    );
     let json_rs = parse_rust(file(&files, "read/json.rs"));
     assert!(contains_tokens(
         find_fn(&json_rs, "decode_read_response"),
-        "satay_runtime::from_json_slice::<S>(body)"
+        "satay_runtime::from_json_slice::<<S as satay_runtime::storage::Storage>::Text<'storage>>(body)"
     ));
 
     let request = operation_spec(json!({

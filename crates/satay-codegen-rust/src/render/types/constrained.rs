@@ -1,3 +1,4 @@
+use super::super::storage;
 use proc_macro2::{Literal, TokenStream};
 use quote::quote;
 use syn::parse_quote;
@@ -8,7 +9,8 @@ use super::super::{doc_attrs, ident, lit_str, rust_type};
 
 pub(super) fn render_constrained_type(constrained_type: &ConstrainedType) -> syn::ItemStruct {
     let name = ident(&constrained_type.rust_name);
-    let inner = rust_type(&constrained_type.inner);
+    let mut inner = rust_type(&constrained_type.inner);
+    storage::concrete_type(&mut inner);
     let validation = render_validation(&constrained_type.validation);
     let derives = nutype_derives(&constrained_type.validation);
     let docs = doc_attrs(constrained_type.description.as_deref());

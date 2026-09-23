@@ -53,17 +53,21 @@ fn map_schemas_generate_btree_map_fields() {
         "types.rs imports BTreeMap when map fields are present"
     );
     let environment = find_struct(&types_rs, "Environment");
-    assert_field(environment, "metadata", "BTreeMap<S, S>");
+    assert_field(
+        environment,
+        "metadata",
+        "BTreeMap<String, <S as satay_runtime::storage::Storage>::Text<'storage>>",
+    );
     assert_field(
         environment,
         "config",
-        "Option<BTreeMap<S, satay_runtime::JsonValue>>",
+        "Option<BTreeMap<String, satay_runtime::JsonValue>>",
     );
     // Component alias refs inline their target type.
     assert_field(
         environment,
         "input_examples",
-        "Option<Vec<BTreeMap<S, satay_runtime::JsonValue>>>",
+        "Option<<S as satay_runtime::storage::Storage>::Contiguous<'storage, BTreeMap<String, satay_runtime::JsonValue>>>",
     );
     assert!(
         contains_tokens(&types_rs, "pub type JsonValue = satay_runtime::JsonValue"),

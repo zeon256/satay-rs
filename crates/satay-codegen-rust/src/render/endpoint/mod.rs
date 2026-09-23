@@ -2,7 +2,7 @@ use syn::{Ident, Item, parse_quote};
 
 use crate::model::{Api, Operation, TypeRef};
 
-mod input;
+pub(in crate::render) mod input;
 mod json;
 pub(super) mod parts;
 mod response;
@@ -120,6 +120,9 @@ fn build_parts_types_use(api: &Api, operation: &Operation) -> Option<syn::ItemUs
 
 fn build_json_types_use(api: &Api, operation: &Operation) -> Option<syn::ItemUse> {
     let mut needed_names: Vec<Ident> = vec![];
+    if let Some(body) = &operation.request_body {
+        collect_type_refs(&body.ty, &mut needed_names);
+    }
 
     for response in &operation.responses {
         if let Some(body) = &response.body {

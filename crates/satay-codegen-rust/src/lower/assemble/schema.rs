@@ -301,6 +301,13 @@ impl<'a> SchemaLowerer<'a> {
         }
 
         let component = self.validated_component(rust_name);
+        // Struct identity is known before its fields are lowered. Register it
+        // first so self/mutual references do not recursively lower the fields.
+        if matches!(component.kind, CheckedComponentKind::Struct(_)) {
+            let ty = TypeRef::Named(rust_name.to_owned());
+            self.component_refs.insert(rust_name.to_owned(), ty.clone());
+            return ty;
+        }
         let kind = self.parse_component_kind(&component, registry);
         let ty = match &kind {
             ComponentKind::Struct(_) | ComponentKind::Enum(_) | ComponentKind::Union(_) => {

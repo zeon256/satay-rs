@@ -41,12 +41,28 @@ fn property_identifiers_render_with_rust_casing_and_wire_renames() {
     }
 
     assert_field(bus_stop, "bus_stop_code", "u32");
-    assert_field(bus_stop, "road_name", "S");
-    assert_field(bus_stop, "desc", "S");
+    assert_field(
+        bus_stop,
+        "road_name",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
+    assert_field(
+        bus_stop,
+        "desc",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
     assert_field(bus_stop, "lat", "f64");
     assert_field(bus_stop, "long", "f64");
-    assert_field(bus_stop, "request_id", "S");
-    assert_field(bus_stop, "r#type", "S");
+    assert_field(
+        bus_stop,
+        "request_id",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
+    assert_field(
+        bus_stop,
+        "r#type",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
 }
 
 #[test]

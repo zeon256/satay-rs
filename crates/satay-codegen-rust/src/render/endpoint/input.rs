@@ -91,7 +91,10 @@ pub(super) fn render_input_default_impl(operation: &Operation) -> Option<syn::It
     ))
 }
 
-fn render_parameter_default(default: &ParameterDefault, ty: &TypeRef) -> TokenStream {
+pub(in crate::render) fn render_parameter_default(
+    default: &ParameterDefault,
+    ty: &TypeRef,
+) -> TokenStream {
     if let TypeRef::Constrained { rust_name, inner } = ty {
         let rust_name = ident(rust_name);
         let value = render_parameter_default(default, inner);

@@ -29,7 +29,7 @@ mod consumer {
     use super::*;
     #[test]
     fn request_encoding() {
-        let parts = operations::get_user::get_user_parts(GetUserInput::<String>::new("user/42").include_details(true)).unwrap();
+        let parts = operations::get_user::get_user_parts(GetUserInput::<satay_runtime::storage::AllocStorage>::new("user/42").include_details(true)).unwrap();
         assert_eq!(parts.uri, "/users/user%2F42?includeDetails=true");
         let response = satay_runtime::ResponseParts {
             status: http::StatusCode::OK,

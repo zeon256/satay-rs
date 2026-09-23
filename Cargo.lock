@@ -1985,8 +1985,10 @@ dependencies = [
 name = "satay-runtime"
 version = "0.17.5"
 dependencies = [
+ "bumpalo",
  "fast-float2",
  "http",
+ "satay-storage",
  "serde",
  "serde_json",
  "thiserror 2.0.19",

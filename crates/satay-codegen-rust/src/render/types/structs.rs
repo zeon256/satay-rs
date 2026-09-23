@@ -110,12 +110,11 @@ fn field_attrs(
         serde_attrs.push(quote::quote!(serialize_with = #serialize));
     } else if field.treat_error_as_none {
         imports.insert("satay_runtime::treat_error_as_none".to_owned());
-        serde_attrs.push(quote::quote!(
-            deserialize_with = "treat_error_as_none::deserialize"
-        ));
-        serde_attrs.push(quote::quote!(
-            serialize_with = "treat_error_as_none::serialize"
-        ));
+        attrs.push(
+            parse_quote!(#[cfg_attr(all(feature = "serde", feature = "json"), serde(
+                deserialize_with = "treat_error_as_none::deserialize"
+            ))]),
+        );
     } else if let Some(module) = parsed_serde_module(field, imports) {
         serde_attrs.push(quote::quote!(with = #module));
     }

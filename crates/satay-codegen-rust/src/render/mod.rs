@@ -40,7 +40,8 @@ pub(crate) fn render_api(api: &Api, options: GenerateOptions) -> Vec<GeneratedFi
         RootModule::ModRs => "mod.rs",
         RootModule::LibRs => "lib.rs",
     };
-    let top_mod = render_top_mod(api);
+    let mut top_mod = render_top_mod(api);
+    top_mod.items.push(storage.owned_aliases());
     files.push(GeneratedFile {
         relative_path: root_module.to_owned(),
         contents: format_file(top_mod),
@@ -220,7 +221,7 @@ pub fn doc_attrs(description: Option<&str>) -> Vec<syn::Attribute> {
 
 pub fn rust_type(ty: &TypeRef) -> syn::Type {
     match ty {
-        TypeRef::String => parse_quote!(String),
+        TypeRef::String => parse_quote!(__SatayText),
         TypeRef::ParsedString(codec) => parse_as_rust_type(codec.parse_as()),
         TypeRef::Coordinates(codec) => {
             let name = ident(codec.target());
@@ -233,7 +234,7 @@ pub fn rust_type(ty: &TypeRef) -> syn::Type {
         TypeRef::Bool => parse_quote!(bool),
         TypeRef::Array(item) => {
             let item = rust_type(item);
-            parse_quote!(Vec<#item>)
+            parse_quote!(__SatayContiguous<#item>)
         }
         TypeRef::Map(value) => {
             let value = rust_type(value);
@@ -398,7 +399,7 @@ pub fn input_setter_name(field: &Field) -> Ident {
 
 pub fn input_builder_arg_type(ty: &TypeRef) -> TokenStream {
     if ty == &TypeRef::String {
-        quote!(impl Into<String>)
+        quote!(impl Into<__SatayText>)
     } else {
         let ty = rust_type(ty);
         quote!(#ty)
@@ -430,6 +431,13 @@ mod api;
 mod endpoint;
 mod group;
 mod storage;
+mod storage_builders;
+mod storage_model_traits;
+mod storage_operations;
+mod storage_requirements;
+mod storage_seeds;
+mod storage_serialization;
+mod storage_traits;
 mod types;
 
 #[cfg(test)]

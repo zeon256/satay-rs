@@ -105,10 +105,26 @@ components:
     let child = find_struct(&types, "Child");
     assert_doc(&child.attrs, "A flattened child.");
     assert_eq!(field_names(child), ["id", "tag", "name", "nickname"]);
-    assert_field(child, "id", "S");
-    assert_field(child, "tag", "S");
-    assert_field(child, "name", "S");
-    assert_field(child, "nickname", "Option<S>");
+    assert_field(
+        child,
+        "id",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
+    assert_field(
+        child,
+        "tag",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
+    assert_field(
+        child,
+        "name",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
+    assert_field(
+        child,
+        "nickname",
+        "Option<<S as satay_runtime::storage::Storage>::Text<'storage>>",
+    );
 
     let decorated = find_struct(&types, "Decorated");
     assert_eq!(field_names(decorated), ["id", "tag"]);
@@ -118,7 +134,7 @@ components:
     let response = find_enum(&parts, "GetChildResponse");
     let ok = variant(response, "Ok");
     assert!(
-        contains_tokens(ok, "Child<S>"),
+        contains_tokens(ok, "Child<'storage, S>"),
         "response body must be the flattened `Child` type, got `{}`",
         norm(ok)
     );
@@ -221,13 +237,29 @@ components:
     // generated `Vec<...DataItem<S>>` field type on the list struct.
     let types = parse_rust(file(&files, "types.rs"));
     let list = find_struct(&types, "ChatCompletionMessageList");
-    assert_field(list, "data", "Vec<ChatCompletionMessageListDataItem<S>>");
+    assert_field(
+        list,
+        "data",
+        "<S as satay_runtime::storage::Storage>::Contiguous<'storage, ChatCompletionMessageListDataItem<'storage, S>>",
+    );
 
     let item = find_struct(&types, "ChatCompletionMessageListDataItem");
     assert_eq!(field_names(item), ["role", "content", "id"]);
-    assert_field(item, "role", "S");
-    assert_field(item, "content", "S");
-    assert_field(item, "id", "S");
+    assert_field(
+        item,
+        "role",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
+    assert_field(
+        item,
+        "content",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
+    assert_field(
+        item,
+        "id",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
 }
 
 #[test]
@@ -654,11 +686,15 @@ components:
     let types = parse_rust(file(&files, "types.rs"));
 
     let parent = find_struct(&types, "Parent");
-    assert_field(parent, "child", "Option<ParentChild<S>>");
+    assert_field(parent, "child", "Option<ParentChild<'storage, S>>");
 
     let child = find_struct(&types, "ParentChild");
     assert_eq!(field_names(child), ["id"]);
-    assert_field(child, "id", "Option<S>");
+    assert_field(
+        child,
+        "id",
+        "Option<<S as satay_runtime::storage::Storage>::Text<'storage>>",
+    );
 }
 
 #[test]
@@ -943,7 +979,7 @@ components:
 
     let holder = find_struct(&types, "Holder");
     assert_eq!(field_names(holder), ["choice"]);
-    assert_field(holder, "choice", "Option<Choice<S>>");
+    assert_field(holder, "choice", "Option<Choice<'storage, S>>");
     assert_doc(&field(holder, "choice").attrs, "Pick one.");
 }
 
@@ -984,13 +1020,17 @@ components:
     let types = parse_rust(file(&files, "types.rs"));
 
     let holder = find_struct(&types, "Holder");
-    assert_field(holder, "child", "Option<HolderChild<S>>");
+    assert_field(holder, "child", "Option<HolderChild<'storage, S>>");
 
     // Struct-target wrappers keep the flattening carve-out: the referenced
     // object's properties land on a dedicated named struct.
     let child = find_struct(&types, "HolderChild");
     assert_eq!(field_names(child), ["id"]);
-    assert_field(child, "id", "S");
+    assert_field(
+        child,
+        "id",
+        "<S as satay_runtime::storage::Storage>::Text<'storage>",
+    );
 }
 
 #[test]
