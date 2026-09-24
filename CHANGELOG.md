@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.7](https://github.com/zeon256/satay-rs/compare/satay-cli-v0.17.6...satay-cli-v0.17.7) - 2026-09-24
+
+### Other
+
+- update Cargo.lock dependencies
+
 ## [0.17.6](https://github.com/zeon256/satay-rs/compare/satay-runtime-v0.17.5...satay-runtime-v0.17.6) - 2026-09-24
 
 ### Other
