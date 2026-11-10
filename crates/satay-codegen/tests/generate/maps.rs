@@ -48,22 +48,18 @@ fn map_schemas_generate_btree_map_fields() {
     let files = codegen::generate(MAP_SCHEMAS).expect("generate map schema fixture");
 
     let types_rs = parse_rust(find_file(&files, "types.rs"));
-    assert!(
-        contains_tokens(&types_rs, "use std::collections::BTreeMap"),
-        "types.rs imports BTreeMap when map fields are present"
-    );
     let environment = find_struct(&types_rs, "Environment");
-    assert_field(environment, "metadata", "BTreeMap<S, S>");
+    assert_field(environment, "metadata", "S::Map<'s, S::Text<'s>>");
     assert_field(
         environment,
         "config",
-        "Option<BTreeMap<S, satay_runtime::JsonValue>>",
+        "Option<S::Map<'s, satay_runtime::JsonValue>>",
     );
     // Component alias refs inline their target type.
     assert_field(
         environment,
         "input_examples",
-        "Option<Vec<BTreeMap<S, satay_runtime::JsonValue>>>",
+        "Option<S::Contiguous<'s, S::Map<'s, satay_runtime::JsonValue>>>",
     );
     assert!(
         contains_tokens(&types_rs, "pub type JsonValue = satay_runtime::JsonValue"),

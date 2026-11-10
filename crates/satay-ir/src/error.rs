@@ -61,6 +61,7 @@ pub enum GraphOwner {
 pub struct BuildErrors(Vec<BuildError>);
 
 impl BuildErrors {
+    #[allow(clippy::assert_is_empty)]
     pub(crate) fn new(errors: Vec<BuildError>) -> Self {
         debug_assert!(!errors.is_empty());
         Self(errors)

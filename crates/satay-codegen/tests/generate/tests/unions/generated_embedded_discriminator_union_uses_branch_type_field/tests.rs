@@ -23,7 +23,7 @@ fn embedded_tag_union_deserializes_response() {
 
 #[test]
 fn embedded_tag_union_serializes_branch_type() {
-    let value = ToolCall::FunctionToolCall(FunctionToolCall {
+    let value: ToolCall = ToolCall::FunctionToolCall(FunctionToolCall {
         id: "call_2".to_owned(),
         r#type: FunctionToolCallType::Function,
         function: "lookup".to_owned(),

@@ -1,11 +1,31 @@
 use super::codegen;
 use std::fs;
+use std::path::Path;
 
 use super::ast;
 use super::common::*;
 
+const POLICIES: &str = include_str!("tests/storage/policies.rs");
+const POLICY_CRATE_LIB: &str =
+    "pub mod generated;\npub mod policies;\n\n#[cfg(test)]\nmod tests;\n";
+
+/// Adds the crates the fixture policies wrap. `compact_str` deliberately lacks
+/// its Serde feature: a policy's containers implement only the storage contract.
+fn write_policy_crate(crate_dir: &Path, constrained: bool, files: &[codegen::GeneratedFile]) {
+    write_manifest(crate_dir, &runtime_path_toml(), constrained, false);
+    let manifest_path = crate_dir.join("Cargo.toml");
+    let mut manifest = fs::read_to_string(&manifest_path).unwrap();
+    manifest.push_str(
+        "\ncompact_str = \"0.9\"\nbumpalo = { version = \"3.20\", default-features = false, features = [\"collections\"] }\n",
+    );
+    fs::write(manifest_path, manifest).unwrap();
+    write_generated_files(&crate_dir.join("src/generated"), files);
+    fs::write(crate_dir.join("src/policies.rs"), POLICIES).unwrap();
+    fs::write(crate_dir.join("src/lib.rs"), POLICY_CRATE_LIB).unwrap();
+}
+
 #[test]
-fn generated_storage_is_selected_without_regenerating_models() {
+fn storage_policy_is_selected_without_regenerating_models() {
     let files = codegen::generate(
         r#"
 openapi: 3.1.0
@@ -22,6 +42,31 @@ paths:
               schema:
                 type: object
                 additionalProperties: {type: string}
+  /grids:
+    post:
+      operationId: storeGrids
+      parameters:
+        - name: tag
+          in: query
+          required: true
+          schema:
+            type: array
+            items: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: {$ref: '#/components/schemas/Grid'}
+      responses:
+        '200':
+          description: Stored grids
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Grid'}
   /records/{key}:
     post:
       operationId: storeRecord
@@ -80,35 +125,71 @@ components:
       required: [label]
       properties:
         label: {type: string}
+    Grid:
+      type: object
+      required: [rows, points]
+      properties:
+        rows:
+          type: array
+          items:
+            type: array
+            items: {type: integer, format: int32}
+        points:
+          type: array
+          items: {$ref: '#/components/schemas/Point'}
+    Point:
+      type: object
+      required: [x]
+      properties:
+        x: {type: integer, format: int32}
 "#,
     )
     .unwrap();
+
+    // Arrays make a model generic even when nothing in it is text.
+    let types = ast::parse_rust(find_file(&files, "types.rs"));
+    assert_eq!(ast::find_struct(&types, "Grid").generics.params.len(), 2);
+    assert!(ast::find_struct(&types, "Point").generics.params.is_empty());
+
     let temp = tempfile::tempdir().unwrap();
-    write_manifest(temp.path(), &runtime_path_toml(), true, false);
-    let manifest_path = temp.path().join("Cargo.toml");
-    let mut manifest = fs::read_to_string(&manifest_path).unwrap();
-    manifest.push_str("\ncompact_str = { version = \"0.9\", features = [\"serde\"] }\n");
-    fs::write(manifest_path, manifest).unwrap();
-    write_generated_files(&temp.path().join("src/generated"), &files);
+    write_policy_crate(temp.path(), true, &files);
     write_fixture_tests(
         temp.path(),
         include_str!(
-            "tests/storage/generated_storage_is_selected_without_regenerating_models/tests.rs"
+            "tests/storage/storage_policy_is_selected_without_regenerating_models/tests.rs"
         ),
     );
-    fs::write(temp.path().join("src/lib.rs"), TEST_CRATE_LIB).unwrap();
-    run_temp_cargo(temp.path(), "test", &[], "generic string storage");
+    run_temp_cargo(temp.path(), "test", &[], "storage policies");
     run_temp_cargo(
         temp.path(),
         "check",
         &["--no-default-features"],
-        "generic storage without serde",
+        "storage policies without serde",
     );
     run_temp_cargo(
         temp.path(),
         "check",
         &["--no-default-features", "--features", "serde"],
-        "generic storage with serde only",
+        "storage policies with serde only",
+    );
+
+    // A model decoded into an arena must not outlive it.
+    fs::write(
+        temp.path().join("src/escape.rs"),
+        include_str!(
+            "tests/storage/storage_policy_is_selected_without_regenerating_models/escape.rs"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        temp.path().join("src/lib.rs"),
+        format!("{POLICY_CRATE_LIB}mod escape;\n"),
+    )
+    .unwrap();
+    let stderr = run_temp_cargo_failure(temp.path(), "check", &[], "arena escape");
+    assert!(
+        stderr.contains("`arena` does not live long enough"),
+        "{stderr}"
     );
 }
 
@@ -169,7 +250,7 @@ components:
 }
 
 #[test]
-fn lossy_storage_bounds_propagate_through_containing_models() {
+fn lossy_fields_decode_into_every_storage_policy() {
     let files = codegen::generate(
         r#"
 openapi: 3.1.0
@@ -187,6 +268,10 @@ components:
       properties:
         child:
           $ref: '#/components/schemas/Child'
+          x-satay: {treat-error-as-none: true}
+        tags:
+          type: array
+          items: {type: string}
           x-satay: {treat-error-as-none: true}
     Parents:
       type: array
@@ -207,24 +292,16 @@ components:
     )
     .unwrap();
     let temp = tempfile::tempdir().unwrap();
-    write_manifest(temp.path(), &runtime_path_toml(), false, false);
-    let manifest_path = temp.path().join("Cargo.toml");
-    let mut manifest = fs::read_to_string(&manifest_path).unwrap();
-    manifest.push_str("\ncompact_str = { version = \"0.9\", features = [\"serde\"] }\n");
-    fs::write(manifest_path, manifest).unwrap();
-    write_generated_files(&temp.path().join("src/generated"), &files);
+    write_policy_crate(temp.path(), false, &files);
     write_fixture_tests(
         temp.path(),
-        include_str!(
-            "tests/storage/lossy_storage_bounds_propagate_through_containing_models/tests.rs"
-        ),
+        include_str!("tests/storage/lossy_fields_decode_into_every_storage_policy/tests.rs"),
     );
-    fs::write(temp.path().join("src/lib.rs"), TEST_CRATE_LIB).unwrap();
-    run_temp_cargo(temp.path(), "test", &[], "lossy storage bounds");
+    run_temp_cargo(temp.path(), "test", &[], "lossy storage fields");
     run_temp_cargo(
         temp.path(),
         "check",
         &["--no-default-features"],
-        "lossy storage without serde",
+        "lossy storage fields without serde",
     );
 }

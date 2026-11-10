@@ -135,15 +135,18 @@ fn wildcard_range_generates_status_carrying_variant_after_exact_arms() {
     let response = find_enum(&parts, "GetUserResponse");
     assert_eq!(
         norm(&variant(response, "ClientError").fields),
-        norm_str("(http::StatusCode, ErrorResponse<S>)")
+        norm_str("(http::StatusCode, ErrorResponse<'s, S>)")
     );
-    assert_eq!(norm(&variant(response, "Ok").fields), norm_str("(User<S>)"));
+    assert_eq!(
+        norm(&variant(response, "Ok").fields),
+        norm_str("(User<'s, S>)")
+    );
     assert!(matches!(variant(response, "NotFound").fields, Fields::Unit));
 
     // Exact-status arms must precede the covering range arm so 404 shadows
     // 400..=499; UnexpectedStatus stays last.
     let json = parse_rust(find_file(&files, "get_user/json.rs"));
-    let decode = norm(find_fn(&json, "decode_get_user_response"));
+    let decode = norm(find_fn(&json, "decode_get_user_response_in"));
     let ok_arm = decode.find(&norm_str("200 =>")).expect("200 arm");
     let not_found_arm = decode.find(&norm_str("404 =>")).expect("404 arm");
     let range_arm = decode.find(&norm_str("400..=499 =>")).expect("range arm");
@@ -187,13 +190,13 @@ fn response_projection_generates_public_payload_types_and_projected_decoders() {
     let services_response = find_enum(&services_parts, "GetServicesResponse");
     assert_eq!(
         norm(&variant(services_response, "Ok").fields),
-        norm_str("(Vec<Service<S>>)")
+        norm_str("(S::Contiguous<'s, Service<'s, S>>)")
     );
     let services_json = parse_rust(find_file(&files, "get_services/json.rs"));
-    let services_decode = norm(find_fn(&services_json, "decode_get_services_response"));
+    let services_decode = norm(find_fn(&services_json, "decode_get_services_response_in"));
     assert!(
         services_decode.contains(&norm_str(
-            "satay_runtime::from_projected_json_slice::<Vec<Service<S>>,>(body, \"value\", None)?"
+            "shape::from_projected_json_slice::<shape::Contiguous<shape::Model<Service<'s, S>>>, S>(body, \"value\", None, storage)?"
         )),
         "{services_decode}"
     );
@@ -202,13 +205,13 @@ fn response_projection_generates_public_payload_types_and_projected_decoders() {
     let links_response = find_enum(&links_parts, "GetLinksResponse");
     assert_eq!(
         norm(&variant(links_response, "Ok").fields),
-        norm_str("(Vec<S>)")
+        norm_str("(S::Contiguous<'s, S::Text<'s>>)")
     );
     let links_json = parse_rust(find_file(&files, "get_links/json.rs"));
-    let links_decode = norm(find_fn(&links_json, "decode_get_links_response"));
+    let links_decode = norm(find_fn(&links_json, "decode_get_links_response_in"));
     assert!(links_decode.contains(&norm_str(
-        "satay_runtime::from_projected_json_slice::<Vec<S>,>(body, \"value\", Some(\"Link\"))?"
-    )));
+        "shape::from_projected_json_slice::<shape::Contiguous<shape::Text>, S>(body, \"value\", Some(\"Link\"), storage)?"
+    )), "{links_decode}");
 }
 
 #[test]

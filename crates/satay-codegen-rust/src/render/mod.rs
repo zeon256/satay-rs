@@ -5,7 +5,7 @@ use tracing::info;
 
 use crate::ident::type_ident;
 use crate::model::{Api, Field, IntegerType, Operation, ParseAs, RangeScalar, TypeRef};
-use crate::render::storage::StorageGenerics;
+use crate::render::family::{Family, Spelling};
 use crate::{GenerateOptions, RootModule};
 
 const PREAMBLE: &str = "\
@@ -16,7 +16,8 @@ const PREAMBLE: &str = "\
     clippy::must_use_candidate,
     clippy::needless_pass_by_value,
     clippy::return_self_not_must_use,
-    clippy::single_match_else
+    clippy::single_match_else,
+    clippy::type_complexity
 )]
 
 ";
@@ -34,7 +35,7 @@ pub(crate) fn render_api(api: &Api, options: GenerateOptions) -> Vec<GeneratedFi
         "rendering API"
     );
     let mut files = vec![];
-    let storage = StorageGenerics::new(api);
+    let family = Family::new(api);
 
     let root_module = match options.root_module {
         RootModule::ModRs => "mod.rs",
@@ -47,24 +48,24 @@ pub(crate) fn render_api(api: &Api, options: GenerateOptions) -> Vec<GeneratedFi
     });
 
     if !api.components.is_empty() || !api.constrained_types.is_empty() {
-        let types_file = types::render_types_file(api);
+        let types_file = types::render_types_file(api, &family);
         files.push(GeneratedFile {
             relative_path: "types.rs".to_owned(),
-            contents: format_file(storage.apply(types_file)),
+            contents: format_file(imports::add(types_file)),
         });
     }
 
-    let api_file = api::render_api_file(api, options.root_module);
+    let api_file = api::render_api_file(api, &family, options.root_module);
     files.push(GeneratedFile {
         relative_path: "api.rs".to_owned(),
-        contents: format_file(storage.apply(api_file)),
+        contents: format_file(imports::add(api_file)),
     });
 
     for group in &api.groups {
-        let group_file = group::render_group_file(api, group);
+        let group_file = group::render_group_file(api, &family, group);
         files.push(GeneratedFile {
             relative_path: format!("{}.rs", group.rust_name),
-            contents: format_file(storage.apply(group_file)),
+            contents: format_file(imports::add(group_file)),
         });
     }
 
@@ -76,16 +77,16 @@ pub(crate) fn render_api(api: &Api, options: GenerateOptions) -> Vec<GeneratedFi
             contents: format_file(endpoint_mod),
         });
 
-        let parts_file = endpoint::render_endpoint_parts_file(api, operation);
+        let parts_file = endpoint::render_endpoint_parts_file(api, &family, operation);
         files.push(GeneratedFile {
             relative_path: format!("{dir}/parts.rs"),
-            contents: format_file(storage.apply(parts_file)),
+            contents: format_file(imports::add(parts_file)),
         });
 
-        let json_file = endpoint::render_endpoint_json_file(api, operation);
+        let json_file = endpoint::render_endpoint_json_file(api, &family, operation);
         files.push(GeneratedFile {
             relative_path: format!("{dir}/json.rs"),
-            contents: format_file(storage.apply(json_file)),
+            contents: format_file(imports::add(json_file)),
         });
     }
 
@@ -218,9 +219,10 @@ pub fn doc_attrs(description: Option<&str>) -> Vec<syn::Attribute> {
         .collect()
 }
 
-pub fn rust_type(ty: &TypeRef) -> syn::Type {
+/// Renders a type whose representation does not depend on the storage family.
+/// Text, arrays, maps, and their compositions are spelled by [`Family::ty`].
+pub fn plain_type(ty: &TypeRef) -> syn::Type {
     match ty {
-        TypeRef::String => parse_quote!(String),
         TypeRef::ParsedString(codec) => parse_as_rust_type(codec.parse_as()),
         TypeRef::Coordinates(codec) => {
             let name = ident(codec.target());
@@ -231,14 +233,6 @@ pub fn rust_type(ty: &TypeRef) -> syn::Type {
         TypeRef::F32 => parse_quote!(f32),
         TypeRef::F64 => parse_quote!(f64),
         TypeRef::Bool => parse_quote!(bool),
-        TypeRef::Array(item) => {
-            let item = rust_type(item);
-            parse_quote!(Vec<#item>)
-        }
-        TypeRef::Map(value) => {
-            let value = rust_type(value);
-            parse_quote!(BTreeMap<String, #value>)
-        }
         TypeRef::JsonValue => parse_quote!(satay_runtime::JsonValue),
         TypeRef::Range(range_type) => {
             let name = ident(&range_type.rust_name);
@@ -251,9 +245,8 @@ pub fn rust_type(ty: &TypeRef) -> syn::Type {
             let name = ident(name);
             parse_quote!(#name)
         }
-        TypeRef::Option(inner) => {
-            let inner = rust_type(inner);
-            parse_quote!(Option<#inner>)
+        TypeRef::String | TypeRef::Array(_) | TypeRef::Map(_) | TypeRef::Option(_) => {
+            unreachable!("family-dependent types are spelled by `Family::ty`")
         }
     }
 }
@@ -349,15 +342,6 @@ pub fn parse_as_integer_serde_leaf(parse_as: ParseAs) -> &'static str {
     }
 }
 
-pub fn rust_field_type(ty: &TypeRef, required: bool, treat_error_as_none: bool) -> syn::Type {
-    if (required && !treat_error_as_none) || ty.is_option() {
-        rust_type(ty)
-    } else {
-        let ty = rust_type(ty);
-        parse_quote!(Option<#ty>)
-    }
-}
-
 pub fn input_fields(operation: &Operation) -> Vec<Field> {
     let mut input_fields = Vec::with_capacity(
         operation.parameters.len() + usize::from(operation.request_body.is_some()),
@@ -396,12 +380,12 @@ pub fn input_setter_name(field: &Field) -> Ident {
     }
 }
 
-pub fn input_builder_arg_type(ty: &TypeRef) -> TokenStream {
+pub fn input_builder_arg_type(family: &Family, ty: &TypeRef) -> TokenStream {
+    let rendered = family.ty(ty, Spelling::Bounded);
     if ty == &TypeRef::String {
-        quote!(impl Into<String>)
+        quote!(impl Into<#rendered>)
     } else {
-        let ty = rust_type(ty);
-        quote!(#ty)
+        quote!(#rendered)
     }
 }
 
@@ -413,10 +397,19 @@ pub fn input_builder_value(value: TokenStream, ty: &TypeRef) -> TokenStream {
     }
 }
 
-pub fn request_from_parts_expr(operation: &Operation) -> syn::Expr {
+pub fn request_from_parts_expr(family: &Family, operation: &Operation) -> syn::Expr {
+    let storage = family.storage();
     match &operation.request_body {
-        Some(body) if body.required => parse_quote!(satay_runtime::into_json_request(parts)),
-        Some(_) => parse_quote!(satay_runtime::into_optional_json_request(parts)),
+        Some(body) if body.required => match family.view(&body.ty, false) {
+            Some(shape) => parse_quote!(shape::into_json_request::<#shape, #storage>(parts)),
+            None => parse_quote!(satay_runtime::into_json_request(parts)),
+        },
+        Some(body) => match family.view(body.ty.non_option(), false) {
+            Some(shape) => {
+                parse_quote!(shape::into_optional_json_request::<#shape, #storage>(parts))
+            }
+            None => parse_quote!(satay_runtime::into_optional_json_request(parts)),
+        },
         None => parse_quote!(satay_runtime::into_empty_request(parts)),
     }
 }
@@ -428,8 +421,9 @@ pub fn input_field(field: &str) -> syn::Expr {
 
 mod api;
 mod endpoint;
+mod family;
 mod group;
-mod storage;
+mod imports;
 mod types;
 
 #[cfg(test)]

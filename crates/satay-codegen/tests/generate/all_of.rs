@@ -63,10 +63,10 @@ components:
     let child = find_struct(&types_rs, "Child");
     assert_doc(&child.attrs, "A flattened child.");
     assert_eq!(field_names(child), ["id", "tag", "name", "nickname"]);
-    assert_field(child, "id", "S");
-    assert_field(child, "tag", "S");
-    assert_field(child, "name", "S");
-    assert_field(child, "nickname", "Option<S>");
+    assert_field(child, "id", "S::Text<'s>");
+    assert_field(child, "tag", "S::Text<'s>");
+    assert_field(child, "name", "S::Text<'s>");
+    assert_field(child, "nickname", "Option<S::Text<'s>>");
 }
 
 #[test]
@@ -227,20 +227,24 @@ components:
 
     let types_rs = parse_rust(find_file(&files, "types.rs"));
     let list = find_struct(&types_rs, "ChatCompletionMessageList");
-    assert_field(list, "data", "Vec<ChatCompletionMessageListDataItem<S>>");
+    assert_field(
+        list,
+        "data",
+        "S::Contiguous<'s, ChatCompletionMessageListDataItem<'s, S>>",
+    );
 
     let item = find_struct(&types_rs, "ChatCompletionMessageListDataItem");
     assert_eq!(
         field_names(item),
         ["role", "content", "id", "content_parts"]
     );
-    assert_field(item, "role", "S");
-    assert_field(item, "content", "S");
-    assert_field(item, "id", "S");
+    assert_field(item, "role", "S::Text<'s>");
+    assert_field(item, "content", "S::Text<'s>");
+    assert_field(item, "id", "S::Text<'s>");
     assert_field(
         item,
         "content_parts",
-        "Option<Vec<ChatCompletionMessageListDataItemContentPartsItem<S>>>",
+        "Option<S::Contiguous<'s, ChatCompletionMessageListDataItemContentPartsItem<'s, S>>>",
     );
 }
 

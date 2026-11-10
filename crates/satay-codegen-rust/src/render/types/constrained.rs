@@ -4,11 +4,17 @@ use syn::parse_quote;
 
 use crate::model::{ConstrainedType, FloatLimit, IntegerLimit, Validation};
 
-use super::super::{doc_attrs, ident, lit_str, rust_type};
+use super::super::family::{Family, Spelling};
+use super::super::{doc_attrs, ident, lit_str};
 
-pub(super) fn render_constrained_type(constrained_type: &ConstrainedType) -> syn::ItemStruct {
+pub(super) fn render_constrained_type(
+    family: &Family,
+    constrained_type: &ConstrainedType,
+) -> syn::ItemStruct {
     let name = ident(&constrained_type.rust_name);
-    let inner = rust_type(&constrained_type.inner);
+    // Constrained newtypes validate a concrete inner value, so they keep the
+    // default policy's representation.
+    let inner = family.ty(&constrained_type.inner, Spelling::Concrete);
     let validation = render_validation(&constrained_type.validation);
     let derives = nutype_derives(&constrained_type.validation);
     let docs = doc_attrs(constrained_type.description.as_deref());

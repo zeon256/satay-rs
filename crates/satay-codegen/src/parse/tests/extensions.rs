@@ -11,7 +11,7 @@ fn untagged_methods(file: &syn::File) -> Vec<String> {
             let Item::Impl(item_impl) = item else {
                 return None;
             };
-            (norm(&item_impl.self_ty).contains("Api")).then(|| {
+            (item_impl.trait_.is_none() && norm(&item_impl.self_ty).contains("Api")).then(|| {
                 item_impl
                     .items
                     .iter()
@@ -860,22 +860,14 @@ components:
     let types = parse_rust(file(&files, "types.rs"));
     let arrival = find_struct(&types, "Arrival");
 
-    // NOTE: `treat_error_as_none` is expressed by `Option` wrapping plus the
-    // runtime serde helpers on the generated field.
+    // NOTE: `treat_error_as_none` is expressed by `Option` wrapping plus a
+    // lossy seed in the generated decoder.
     let timing = field(arrival, "timing");
-    assert_eq!(norm(&timing.ty), norm_str("Option<S>"));
-    assert_attr_contains(
-        &timing.attrs,
-        "cfg_attr",
-        r#""treat_error_as_none::deserialize""#,
-    );
-    assert_attr_contains(
-        &timing.attrs,
-        "cfg_attr",
-        r#""treat_error_as_none::serialize""#,
-    );
+    assert_eq!(norm(&timing.ty), norm_str("Option<S::Text<'s>>"));
+    assert!(contains_tokens(&types, "shape::lossy"));
+    assert_attr_contains(&timing.attrs, "cfg_attr", "serialize_with");
     let optional_timing = field(arrival, "optional_timing");
-    assert_eq!(norm(&optional_timing.ty), norm_str("Option<S>"));
+    assert_eq!(norm(&optional_timing.ty), norm_str("Option<S::Text<'s>>"));
     assert!(
         optional_timing
             .attrs
@@ -885,12 +877,12 @@ components:
 
     // The operation decode body keeps decoding the whole struct.
     let json = parse_rust(file(&files, "get_arrival/json.rs"));
-    let decode = find_fn(&json, "decode_get_arrival_response");
-    assert!(contains_tokens(decode, "satay_runtime::from_json_slice"));
+    let decode = find_fn(&json, "decode_get_arrival_response_in");
+    assert!(contains_tokens(decode, "shape::from_json_slice"));
     let parts = parse_rust(file(&files, "get_arrival/parts.rs"));
     assert_eq!(
         ok_payload(&parts, "GetArrivalResponse"),
-        norm_str("Arrival<S>")
+        norm_str("Arrival<'s, S>")
     );
 }
 
@@ -929,18 +921,25 @@ components:
     let types = parse_rust(file(&files, "types.rs"));
     let arrival = find_struct(&types, "BusServiceArrival");
 
-    // NOTE: `required` plus `treat-error-as-none` lowers to `Option` with the
-    // runtime serde helpers; without the extension the required reference
-    // stays a direct value.
+    // NOTE: `required` plus `treat-error-as-none` lowers to `Option` with a
+    // lossy decode and the runtime serialize helper; without the extension the
+    // required reference stays a direct value.
     let next_bus = field(arrival, "next_bus");
-    assert_eq!(norm(&next_bus.ty), norm_str("Option<BusArrivalTiming<S>>"));
+    assert_eq!(
+        norm(&next_bus.ty),
+        norm_str("Option<BusArrivalTiming<'s, S>>")
+    );
+    assert!(contains_tokens(&types, "shape::lossy"));
     assert_attr_contains(
         &next_bus.attrs,
         "cfg_attr",
-        r#""treat_error_as_none::deserialize""#,
+        r#""treat_error_as_none::serialize""#,
     );
     let strict_next_bus = field(arrival, "strict_next_bus");
-    assert_eq!(norm(&strict_next_bus.ty), norm_str("BusArrivalTiming<S>"));
+    assert_eq!(
+        norm(&strict_next_bus.ty),
+        norm_str("BusArrivalTiming<'s, S>")
+    );
     assert!(
         strict_next_bus
             .attrs
@@ -1247,7 +1246,7 @@ components:
     // NOTE: `identifier: kept` renames the retained field; plain semantics
     // (no treat-error-as-none) keep it a bare optional value.
     let retained = field(response, "kept");
-    assert_eq!(norm(&retained.ty), norm_str("Option<S>"));
+    assert_eq!(norm(&retained.ty), norm_str("Option<S::Text<'s>>"));
     assert_attr_contains(
         &retained.attrs,
         "cfg_attr",
@@ -1259,11 +1258,11 @@ components:
             .iter()
             .all(|attr| !norm(attr).contains(&norm_str("treat_error_as_none")))
     );
-    assert_field(response, "bus_stop_code", "S");
+    assert_field(response, "bus_stop_code", "S::Text<'s>");
     assert_attr_contains(
         &field(response, "bus_stop_code").attrs,
         "cfg_attr",
-        r#"serde(rename = "BusStopCode")"#,
+        r#"rename = "BusStopCode""#,
     );
 }
 
@@ -2410,33 +2409,30 @@ components:
     // NOTE: the private model's `response.body` and `projection` facts surface
     // as the projected decode body and the `Ok` payload type of the generated
     // response enum.
-    // getServices: the envelope unwraps `value` into `Vec<Service<S>>`.
+    // getServices: the envelope unwraps `value` into `S::Contiguous<Service>`.
     let services_parts = parse_rust(file(&files, "get_services/parts.rs"));
     assert_eq!(
         ok_payload(&services_parts, "GetServicesResponse"),
-        norm_str("Vec<Service<S>>")
+        norm_str("S::Contiguous<'s, Service<'s, S>>")
     );
     let services_json = parse_rust(file(&files, "get_services/json.rs"));
-    let decode = find_fn(&services_json, "decode_get_services_response");
-    assert!(contains_tokens(
-        decode,
-        "satay_runtime::from_projected_json_slice"
-    ));
-    assert!(contains_tokens(decode, r#"(body, "value", None)"#));
+    let decode = find_fn(&services_json, "decode_get_services_response_in");
+    assert!(contains_tokens(decode, "shape::from_projected_json_slice"));
+    assert!(contains_tokens(decode, r#"(body, "value", None, storage)"#));
 
-    // getLinks: mapping `Link` further projects the payload to `Vec<S>`.
+    // getLinks: mapping `Link` further projects the payload to `S::Contiguous<S::Text>`.
     let links_parts = parse_rust(file(&files, "get_links/parts.rs"));
     assert_eq!(
         ok_payload(&links_parts, "GetLinksResponse"),
-        norm_str("Vec<S>")
+        norm_str("S::Contiguous<'s, S::Text<'s>>")
     );
     let links_json = parse_rust(file(&files, "get_links/json.rs"));
-    let decode = find_fn(&links_json, "decode_get_links_response");
+    let decode = find_fn(&links_json, "decode_get_links_response_in");
+    assert!(contains_tokens(decode, "shape::from_projected_json_slice"));
     assert!(contains_tokens(
         decode,
-        "satay_runtime::from_projected_json_slice"
+        r#"(body, "value", Some("Link"), storage)"#
     ));
-    assert!(contains_tokens(decode, r#"(body, "value", Some("Link"))"#));
 }
 
 #[test]
@@ -2978,23 +2974,23 @@ components:
     assert_attr_contains(
         &field(record, "url").attrs,
         "cfg_attr",
-        r#"with = "serde_string::as_url::option""#,
+        r#"serialize_with = "serde_string::as_url::option::serialize""#,
     );
     // Other string formats stay plain; `uri-reference` is not a URL parse.
-    assert_field(record, "reference", "Option<S>");
+    assert_field(record, "reference", "Option<S::Text<'s>>");
     assert!(
         field(record, "reference")
             .attrs
             .iter()
             .all(|attr| !norm(attr).contains(&norm_str("as_url")))
     );
-    assert_field(record, "plain", "Option<S>");
+    assert_field(record, "plain", "Option<S::Text<'s>>");
     // An explicit parse-as overrides the format.
     assert_field(record, "r#override", "Option<u32>");
     assert_attr_contains(
         &field(record, "r#override").attrs,
         "cfg_attr",
-        r#"with = "serde_string::as_u32::option""#,
+        r#"serialize_with = "serde_string::as_u32::option::serialize""#,
     );
     // Boolean schemas are untouched by string formats.
     assert_field(record, "flag", "Option<bool>");

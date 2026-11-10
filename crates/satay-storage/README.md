@@ -38,6 +38,11 @@ fn main() -> Result<(), Infallible> {
 | Downstream arena example | bumpalo `String<'a>` | bumpalo `Vec<'a, T>` | `BTreeMap<BumpString<'a>, V>` |
 | Downstream hash example | `String` | `Vec<T>` | local `HashMap<String, V>` wrapper |
 
+`AllocStorage` and `BoxedStorage` also implement `OwnedStorage`: their values own
+their storage, so `OwnedStorage::CONTEXT` constructs them without a caller-provided
+context. Consumers use it where no context can be threaded through, such as an
+ordinary `Deserialize` implementation. Arena policies do not implement it.
+
 External policies need local wrappers under Rust's orphan rules. The complete
 [`bumpalo`](https://github.com/zeon256/satay-rs/blob/main/crates/satay-storage/examples/bumpalo.rs)
 and [`hash_map`](https://github.com/zeon256/satay-rs/blob/main/crates/satay-storage/examples/hash_map.rs)

@@ -100,7 +100,7 @@ let request: http::Request<Vec<u8>> = action.request()?;
 // Send `request` with reqwest, ureq, hyper, tests, WASM, WebSocket, or your own transport.
 
 let response = satay_runtime::ResponseParts { status, headers, body };
-let decoded = generated::GetBusArrivalAction::<String>::decode(response.as_bytes())?;
+let decoded = generated::GetBusArrivalAction::<satay_runtime::AllocStorage>::decode(response.as_bytes())?;
 ```
  
 ## What It Generates
@@ -110,7 +110,8 @@ let decoded = generated::GetBusArrivalAction::<String>::decode(response.as_bytes
 - Request builders that return `http::Request<Vec<u8>>` without choosing a transport.
 - Response decoders for known JSON responses, preserving unknown statuses as `UnexpectedStatus(http::StatusCode, Vec<u8>)`.
 - Optional `Api` action builders for base URL, API-key auth, request construction, and response decoding.
-- `serde` derives and field renames behind a generated crate `serde` feature.
+- `serde` support and field renames behind a generated crate `serde` feature.
+- Models generic over a [storage policy](docs/transports.md#storage-policies): `String`/`Vec`/`BTreeMap` by default, `Box<str>`/`Box<[T]>` or your own containers, including arena-backed decoding, without regenerating.
 - `nutype` validation for OpenAPI string, number, integer, and array bounds.
 - Satay extensions under `x-satay` for typed string parsing, strict sentinel values, integer primitive overrides, enum variant names, target-neutral property identifiers, lossy optional fields, and ignored wire-only properties.
 

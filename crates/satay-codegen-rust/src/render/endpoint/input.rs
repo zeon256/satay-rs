@@ -6,15 +6,17 @@ use syn::parse_quote;
 
 use crate::model::{Field, Operation, ParameterDefault, TypeRef};
 
+use super::super::family::Family;
 use super::super::types::structs;
 use super::super::{
     ident, input_builder_arg_type, input_builder_value, input_fields, input_setter_name,
 };
 
-pub(super) fn render_input(operation: &Operation) -> syn::ItemStruct {
+pub(super) fn render_input(family: &Family, operation: &Operation) -> Vec<syn::Item> {
     let input_fields = input_fields(operation);
 
     structs::render_struct(
+        family,
         &operation.input_name,
         operation.description.as_deref(),
         &input_fields,
@@ -24,8 +26,54 @@ pub(super) fn render_input(operation: &Operation) -> syn::ItemStruct {
     )
 }
 
-pub(super) fn render_input_impl(operation: &Operation) -> syn::ItemImpl {
+/// Generics for implementations on an operation's input.
+struct InputGenerics {
+    parameters: Option<TokenStream>,
+    arguments: Option<TokenStream>,
+    /// Bound required to materialize text defaults without a storage context.
+    defaults: Option<TokenStream>,
+}
+
+impl InputGenerics {
+    fn new(family: &Family, operation: &Operation) -> Self {
+        if !family.input_is_generic(operation) {
+            return Self {
+                parameters: None,
+                arguments: None,
+                defaults: None,
+            };
+        }
+        let (parameters, arguments) = (family.parameters(), family.arguments());
+        let storage = family.storage();
+        let owned = family.owned_bound();
+        Self {
+            parameters: Some(quote!(<#parameters>)),
+            arguments: Some(quote!(<#arguments>)),
+            defaults: has_text_default(operation).then(|| quote!(where #storage: #owned)),
+        }
+    }
+}
+
+/// Whether building the input stores a default in policy text.
+pub(in super::super) fn has_text_default(operation: &Operation) -> bool {
+    operation.parameters.iter().any(|parameter| {
+        !parameter.required
+            && !matches!(parameter.ty, TypeRef::Constrained { .. })
+            && matches!(
+                parameter.default,
+                Some(ParameterDefault::String(_) | ParameterDefault::OpenEnum(_))
+            )
+    })
+}
+
+pub(super) fn render_input_impl(family: &Family, operation: &Operation) -> syn::ItemImpl {
     let input_name = ident(&operation.input_name);
+    let generics = InputGenerics::new(family, operation);
+    let (parameters, arguments, defaults) = (
+        &generics.parameters,
+        &generics.arguments,
+        &generics.defaults,
+    );
     let fields = input_fields(operation);
     let required_fields = fields
         .iter()
@@ -33,7 +81,7 @@ pub(super) fn render_input_impl(operation: &Operation) -> syn::ItemImpl {
         .collect::<Vec<_>>();
     let new_args = required_fields.iter().map(|field| {
         let name = ident(&field.rust_name);
-        let ty = input_builder_arg_type(&field.ty);
+        let ty = input_builder_arg_type(family, &field.ty);
         quote!(#name: #ty)
     });
     let initializers = fields.iter().map(|field| {
@@ -51,7 +99,7 @@ pub(super) fn render_input_impl(operation: &Operation) -> syn::ItemImpl {
             .find(|parameter| parameter.rust_name == field.rust_name)
             .and_then(|parameter| parameter.default.as_ref())
         {
-            let value = render_parameter_default(default, &field.ty);
+            let value = render_parameter_default(family, default, &field.ty, false);
             quote!(#name: Some(#value))
         } else {
             quote!(#name: None)
@@ -60,12 +108,12 @@ pub(super) fn render_input_impl(operation: &Operation) -> syn::ItemImpl {
     let setters = fields
         .iter()
         .filter(|field| !field.required)
-        .map(render_input_setter)
+        .map(|field| render_input_setter(family, field))
         .collect::<Vec<_>>();
 
     parse_quote!(
-        impl #input_name {
-            pub fn new(#(#new_args),*) -> Self {
+        impl #parameters #input_name #arguments {
+            pub fn new(#(#new_args),*) -> Self #defaults {
                 Self {
                     #(#initializers),*
                 }
@@ -76,14 +124,23 @@ pub(super) fn render_input_impl(operation: &Operation) -> syn::ItemImpl {
     )
 }
 
-pub(super) fn render_input_default_impl(operation: &Operation) -> Option<syn::ItemImpl> {
+pub(super) fn render_input_default_impl(
+    family: &Family,
+    operation: &Operation,
+) -> Option<syn::ItemImpl> {
     if input_fields(operation).iter().any(|field| field.required) {
         return None;
     }
 
     let input_name = ident(&operation.input_name);
+    let generics = InputGenerics::new(family, operation);
+    let (parameters, arguments, defaults) = (
+        &generics.parameters,
+        &generics.arguments,
+        &generics.defaults,
+    );
     Some(parse_quote!(
-        impl Default for #input_name {
+        impl #parameters Default for #input_name #arguments #defaults {
             fn default() -> Self {
                 Self::new()
             }
@@ -91,19 +148,28 @@ pub(super) fn render_input_default_impl(operation: &Operation) -> Option<syn::It
     ))
 }
 
-fn render_parameter_default(default: &ParameterDefault, ty: &TypeRef) -> TokenStream {
+fn render_parameter_default(
+    family: &Family,
+    default: &ParameterDefault,
+    ty: &TypeRef,
+    concrete: bool,
+) -> TokenStream {
     if let TypeRef::Constrained { rust_name, inner } = ty {
         let rust_name = ident(rust_name);
-        let value = render_parameter_default(default, inner);
+        let value = render_parameter_default(family, default, inner, true);
         return quote!(
             #rust_name::try_new(#value)
                 .expect("parameter default was validated by satay-codegen")
         );
     }
 
+    let storage = family.storage();
     match (default, ty) {
-        (ParameterDefault::String(value), TypeRef::String) => {
+        (ParameterDefault::String(value), TypeRef::String) if concrete => {
             quote!(String::from(#value))
+        }
+        (ParameterDefault::String(value), TypeRef::String) => {
+            quote!(shape::owned_text::<#storage>(#value))
         }
         (ParameterDefault::Integer(value), TypeRef::Integer(_)) => {
             let value = Literal::i128_unsuffixed(*value);
@@ -125,16 +191,16 @@ fn render_parameter_default(default: &ParameterDefault, ty: &TypeRef) -> TokenSt
         }
         (ParameterDefault::OpenEnum(value), TypeRef::Named(name)) => {
             let name = ident(name);
-            quote!(#name::Other(String::from(#value)))
+            quote!(#name::Other(shape::owned_text::<#storage>(#value)))
         }
         _ => unreachable!("validated parameter default must match its lowered type"),
     }
 }
 
-fn render_input_setter(field: &Field) -> TokenStream {
+fn render_input_setter(family: &Family, field: &Field) -> TokenStream {
     let setter_name = input_setter_name(field);
     let name = ident(&field.rust_name);
-    let ty = input_builder_arg_type(&field.ty);
+    let ty = input_builder_arg_type(family, &field.ty);
     if field.ty.is_option() {
         quote!(
             pub fn #setter_name(mut self, #name: #ty) -> Self {

@@ -27,7 +27,7 @@ fn ignored_wire_fields_are_lossy_on_round_trip() {
 
 #[test]
 fn ignored_required_fields_do_not_affect_rust_construction_or_decoding() {
-    let constructed = BusArrivalResponse {
+    let constructed: BusArrivalResponse = BusArrivalResponse {
         bus_stop_code: "83139".to_owned(),
         services: vec![],
         retained_metadata: None,

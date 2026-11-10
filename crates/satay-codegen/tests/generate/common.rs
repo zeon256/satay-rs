@@ -121,10 +121,38 @@ pub fn runtime_path_toml() -> String {
 }
 
 pub fn run_temp_cargo(crate_dir: &Path, subcommand: &str, extra_args: &[&str], context: &str) {
+    let output = temp_cargo_output(crate_dir, subcommand, extra_args, context);
+    assert!(
+        output.status.success(),
+        "{context} failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Runs cargo expecting the crate to be rejected, returning the diagnostics.
+pub fn run_temp_cargo_failure(
+    crate_dir: &Path,
+    subcommand: &str,
+    extra_args: &[&str],
+    context: &str,
+) -> String {
+    let output = temp_cargo_output(crate_dir, subcommand, extra_args, context);
+    assert!(!output.status.success(), "{context} unexpectedly succeeded");
+    String::from_utf8_lossy(&output.stderr).into_owned()
+}
+
+fn temp_cargo_output(
+    crate_dir: &Path,
+    subcommand: &str,
+    extra_args: &[&str],
+    context: &str,
+) -> process::Output {
     let cargo = env::var("CARGO").unwrap_or_else(|_| "cargo".to_owned());
     prepare_temp_lock(crate_dir, &cargo, context);
 
-    let output = process::Command::new(&cargo)
+    process::Command::new(&cargo)
         .arg(subcommand)
         .env(
             "CARGO_TARGET_DIR",
@@ -136,15 +164,7 @@ pub fn run_temp_cargo(crate_dir: &Path, subcommand: &str, extra_args: &[&str], c
         .args(extra_args)
         .current_dir(crate_dir)
         .output()
-        .unwrap_or_else(|err| panic!("run cargo {subcommand} for {context}: {err}"));
-
-    assert!(
-        output.status.success(),
-        "{context} failed\nstatus: {}\nstdout:\n{}\nstderr:\n{}",
-        output.status,
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
-    );
+        .unwrap_or_else(|err| panic!("run cargo {subcommand} for {context}: {err}"))
 }
 
 pub fn prepare_temp_lock(crate_dir: &Path, cargo: &str, context: &str) {

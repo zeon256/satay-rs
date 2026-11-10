@@ -90,7 +90,8 @@ flowchart LR
         renderMod --> renderEndpoint["endpoint/<br/>input, response, parts, json"]
         renderMod --> renderApi["api.rs<br/>Api builder + Action impls"]
         renderMod --> group["group.rs<br/>tag group files"]
-        renderMod --> storage["storage.rs<br/>storage generics"]
+        renderMod --> family["family.rs<br/>storage family spelling"]
+        renderMod --> imports["imports.rs<br/>use items"]
         ident["ident.rs<br/>Rust names"]
         backendError["error.rs<br/>Error::{Rust, Frontend}"]
     end
@@ -357,7 +358,7 @@ flowchart TD
 
 The renderer builds `syn::File` values with `quote` and `parse_quote`, then formats them with `prettyplease`. `format_file` prepends the generated-file preamble to the pretty-printed output.
 
-Before rendering, `render/storage.rs` applies storage generics to schema-derived types so generated models and actions can pick dynamic string storage. Shared rendering helpers in `render/mod.rs` handle:
+`render/family.rs` decides which schema-derived items are generic over the storage family (`<'s, S: satay_runtime::Storage + 's>`) and spells their types and shape markers; renderers consult it directly. Family-generic items store the policy's `Text`, `Contiguous`, and `Map` projections, and their `Debug`, `Clone`, `PartialEq`, serialization, and storage-context decoding are generated in terms of `satay_runtime::shape` instead of derives, so the policy is bounded only by `Storage`. `render/imports.rs` then adds the `use` items a file's short paths need. Shared rendering helpers in `render/mod.rs` handle:
 
 - Identifier and string literal construction.
 - Rustdoc attribute generation from descriptions.
@@ -367,12 +368,12 @@ Before rendering, `render/storage.rs` applies storage generics to schema-derived
 
 Renderer submodules:
 
-- `render/types` emits `types.rs` with structs, string enums, unions, ranges, aliases, and `nutype` constrained types.
+- `render/types` emits `types.rs` with structs, string enums, unions, ranges, aliases, and `nutype` constrained types, plus the generated trait and decoder implementations of family-generic models.
 - `render/endpoint/input.rs` emits operation input structs, required-field constructors, optional-field setters, and `Default` when possible.
 - `render/endpoint/response.rs` emits response enums with known status variants plus `UnexpectedStatus(http::StatusCode, Vec<u8>)`.
 - `render/endpoint/parts.rs` emits `<operation>_parts`, which builds `satay_runtime::RequestParts<B>` without serializing JSON or choosing a transport.
-- `render/endpoint/json.rs` emits `encode_<operation>` and `decode_<operation>_response` helpers behind the generated crate's `json` feature.
-- `render/api.rs` emits the generated `Api` builder, API-key application, per-operation action structs, and `satay_runtime::Action`/`OwnedAction` impls.
+- `render/endpoint/json.rs` emits `encode_<operation>` and `decode_<operation>_response` helpers behind the generated crate's `json` feature, and `decode_<operation>_response_in` for responses decoded into a storage context.
+- `render/api.rs` emits the generated `Api` builder, API-key application, per-operation action structs, and `satay_runtime::Action`/`OwnedAction`/`StorageAction` impls.
 - `render/group.rs` emits one `<group>.rs` file per OpenAPI tag, with a group struct exposing that tag's operations.
 
 ## Generated File Layout
@@ -385,7 +386,7 @@ Renderer submodules:
 | `<group>.rs` | Contains one group struct per OpenAPI tag, exposing that tag's operations behind `feature = "json"`. |
 | `<operation>/mod.rs` | Re-exports `parts` and, behind `feature = "json"`, `json`. |
 | `<operation>/parts.rs` | Contains `<Operation>Input`, `<Operation>Response`, and `<operation>_parts`. |
-| `<operation>/json.rs` | Contains `encode_<operation>` and `decode_<operation>_response`. |
+| `<operation>/json.rs` | Contains `encode_<operation>`, `decode_<operation>_response`, and, for family-generic responses, `decode_<operation>_response_in`. |
 
 Generated code preserves Satay's sans-IO boundary:
 
