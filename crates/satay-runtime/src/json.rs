@@ -1,5 +1,8 @@
+use std::fmt;
+
 use http::header::CONTENT_TYPE;
 
+use satay_storage::Storage;
 use serde::de;
 use tracing::{debug, instrument};
 
@@ -7,6 +10,7 @@ use crate::Error;
 use crate::JsonValue;
 use crate::http_parts::RequestParts;
 use crate::http_parts::into_empty_request;
+use crate::shape;
 
 /// Converts serializable request parts into a JSON HTTP request.
 ///
@@ -92,6 +96,23 @@ where
     debug!("deserializing JSON response");
     Ok(serde_json::from_slice(body)?)
 }
+/// Deserializes a generated model from JSON bytes into caller-provided storage.
+///
+/// Text, collections, and maps are constructed in `storage`, so the model is
+/// bounded by the storage lifetime and never borrows from `body`.
+///
+/// # Errors
+///
+/// Returns an error if the body is not valid JSON for `T`, or the storage policy
+/// cannot hold a decoded value.
+#[cfg(feature = "json")]
+pub fn from_json_slice_in<'de, 's, T, S>(body: &'de [u8], storage: &'s S) -> Result<T, Error>
+where
+    T: shape::DecodeIn<'de, 's, S> + 's,
+    S: Storage<Error: fmt::Display> + 's,
+{
+    shape::from_json_slice::<shape::Model<T>, S>(body, storage)
+}
 /// Deserializes a projected JSON response body from bytes.
 ///
 /// The top-level `unwrap_field` is selected first. When `map_field` is set, the
@@ -113,6 +134,19 @@ pub fn from_projected_json_slice<T>(
 where
     T: de::DeserializeOwned,
 {
+    Ok(serde_json::from_value(project(
+        body,
+        unwrap_field,
+        map_field,
+    )?)?)
+}
+
+/// Selects the projected JSON value described by [`from_projected_json_slice`].
+pub(crate) fn project(
+    body: &[u8],
+    unwrap_field: &str,
+    map_field: Option<&str>,
+) -> Result<JsonValue, Error> {
     debug!(
         unwrap_field,
         map_field, "deserializing projected JSON response"
@@ -145,5 +179,5 @@ where
         };
     }
 
-    Ok(serde_json::from_value(projected)?)
+    Ok(projected)
 }

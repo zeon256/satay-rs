@@ -6,13 +6,14 @@ use crate::model::{
     is_array_type,
 };
 
-use super::super::{doc_attrs, ident, input_field, lit_str, rust_field_type};
+use super::super::family::{Family, Spelling};
+use super::super::{doc_attrs, ident, input_field, lit_str};
 
-pub(super) fn render_parts_function(operation: &Operation) -> syn::ItemFn {
+pub(super) fn render_parts_function(family: &Family, operation: &Operation) -> syn::ItemFn {
     let docs = doc_attrs(operation.description.as_deref());
     let body_type = operation.request_body.as_ref().map_or_else(
         || parse_quote!(()),
-        |body| rust_field_type(&body.ty, body.required, false),
+        |body| family.field_ty(&body.ty, !body.required, Spelling::Bounded),
     );
     let parts_fn = ident(&format!("{}_parts", operation.fn_name));
     let input_name = ident(if operation_uses_input(operation) {
@@ -21,6 +22,15 @@ pub(super) fn render_parts_function(operation: &Operation) -> syn::ItemFn {
         "_input"
     });
     let input_type = ident(&operation.input_name);
+    let (parameters, arguments) = if family.input_is_generic(operation) {
+        let (parameters, arguments) = (family.parameters(), family.arguments());
+        (
+            Some(quote::quote!(<#parameters>)),
+            Some(quote::quote!(<#arguments>)),
+        )
+    } else {
+        (None, None)
+    };
     let path_capacity = Literal::usize_unsuffixed(operation.path.len());
 
     let mut statements = vec![parse_quote!(let mut uri = String::with_capacity(#path_capacity);)];
@@ -31,8 +41,8 @@ pub(super) fn render_parts_function(operation: &Operation) -> syn::ItemFn {
 
     parse_quote!(
         #(#docs)*
-        pub fn #parts_fn(
-            #input_name: #input_type,
+        pub fn #parts_fn #parameters(
+            #input_name: #input_type #arguments,
         ) -> Result<satay_runtime::RequestParts<#body_type>, satay_runtime::Error> {
             #(#statements)*
             #request_parts
@@ -248,9 +258,10 @@ enum ValueBase {
 
 fn array_values_expr(base: syn::Expr, ty: &TypeRef, base_kind: ArrayValueBase) -> syn::Expr {
     match ty.non_option() {
+        // Policy collections promise only slice access.
         TypeRef::Array(_) => match base_kind {
-            ArrayValueBase::Owned => parse_quote!(&#base),
-            ArrayValueBase::Borrowed => base,
+            ArrayValueBase::Owned => parse_quote!(AsRef::<[_]>::as_ref(&#base)),
+            ArrayValueBase::Borrowed => parse_quote!(AsRef::<[_]>::as_ref(#base)),
         },
         TypeRef::Constrained { inner, .. } if is_array_type(inner.non_option()) => {
             parse_quote!(#base.as_ref())

@@ -21,7 +21,7 @@ fn group_methods(file: &syn::File) -> Vec<String> {
             let Item::Impl(item_impl) = item else {
                 return None;
             };
-            (norm(&item_impl.self_ty).contains("Api")).then(|| {
+            (item_impl.trait_.is_none() && norm(&item_impl.self_ty).contains("Api")).then(|| {
                 item_impl
                     .items
                     .iter()
@@ -125,7 +125,7 @@ info:
 tags:
   - name: api
   - name: base-url
-  - name: string-storage
+  - name: storage
   - name: get-user
   - name: bus-service
   - name: bus_service
@@ -133,7 +133,7 @@ paths:
   /user:
     get:
       operationId: getUser
-      tags: [api, base-url, string-storage, get-user, bus-service, bus_service]
+      tags: [api, base-url, storage, get-user, bus-service, bus_service]
       responses:
         '204':
           description: No content
@@ -155,7 +155,7 @@ paths:
         [
             "api_2",
             "base_url_2",
-            "string_storage_2",
+            "storage_2",
             "get_user_2",
             "bus_service",
             "bus_service_2",

@@ -55,7 +55,8 @@ fn canon(stream: TokenStream) -> String {
     }
     let mut out = String::new();
     push(stream, &mut out);
-    out
+    // A wrapped generic list gains a trailing comma; it is formatting, not structure.
+    out.replace(", >", ">")
 }
 
 pub fn is_pub(vis: &Visibility) -> bool {

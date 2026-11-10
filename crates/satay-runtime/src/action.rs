@@ -1,6 +1,8 @@
 use std::fmt::{self, Debug, Formatter};
 use std::marker;
 
+use satay_storage::Storage;
+
 use crate::error::Error;
 use crate::http_parts::ResponseParts;
 
@@ -98,5 +100,38 @@ impl<A: OwnedAction, B: AsRef<[u8]>> BufferedResponse<A, B> {
             headers,
             body: body.as_ref(),
         })
+    }
+}
+
+/// An action whose response can be decoded into caller-selected storage.
+///
+/// The policy is chosen where the response is decoded, independently of the one
+/// used to build the request. Decoding copies text into the storage context, so
+/// the result borrows from that context and never from the response buffer.
+pub trait StorageAction: Action {
+    /// Decoded response whose text, collections, and maps live in `S`.
+    type StorageResponse<'s, S: Storage + 's>;
+
+    /// Decodes the response, constructing its values in `storage`.
+    ///
+    /// # Errors
+    /// Returns an error if the response is invalid, cannot be decoded, or the
+    /// storage policy cannot hold a decoded value.
+    fn decode_in<'s, S: Storage<Error: fmt::Display>>(
+        response: ResponseParts<&[u8]>,
+        storage: &'s S,
+    ) -> Result<Self::StorageResponse<'s, S>, Error>;
+}
+
+impl<A: StorageAction, B: AsRef<[u8]>> BufferedResponse<A, B> {
+    /// Decodes a response whose values live in `storage`, such as an arena.
+    ///
+    /// # Errors
+    /// Returns the action's decoding error for invalid response data.
+    pub fn decode_in<'s, S: Storage<Error: fmt::Display>>(
+        &self,
+        storage: &'s S,
+    ) -> Result<A::StorageResponse<'s, S>, Error> {
+        A::decode_in(self.parts.as_bytes(), storage)
     }
 }

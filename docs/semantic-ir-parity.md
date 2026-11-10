@@ -50,8 +50,7 @@ A migration-route retention test drops the source before inspecting its IR.
   legacy generator does; strict normalization still rejects them.
 
 There is no migration switch, legacy fallback, or source-document input to
-Rust lowering. Storage-family integration remains a successor to this
-migration.
+Rust lowering.
 
 Rust lowering owns its checked representations, coordinate target proof,
 identifier words, and type registry in `crates/satay-codegen-rust`'s

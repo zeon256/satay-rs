@@ -1,24 +1,19 @@
+use std::iter;
+
 use syn::{Item, parse_quote};
 
+use super::api::ActionGenerics;
+use super::family::Family;
 use crate::ident::type_ident;
 use crate::model::{Api, ApiGroup, Field, GroupOperation, Operation, TypeRef};
 
-pub(super) fn render_group_file(api: &Api, group: &ApiGroup) -> syn::File {
-    let mut items = vec![];
-    let has_map_input = group.operations.iter().any(|group_operation| {
-        let operation = &api.operations[group_operation.operation_index];
-        super::input_fields(operation)
-            .iter()
-            .any(|field| field.required && field.ty.contains_map())
-    });
-    if has_map_input {
-        items.push(Item::Use(parse_quote!(
-            use std::collections::BTreeMap;
-        )));
-    }
-    items.push(Item::Use(render_group_use(api, group)));
-    items.push(Item::Struct(render_group_struct(group)));
-    items.push(Item::Impl(render_group_impl(api, group)));
+pub(super) fn render_group_file(api: &Api, family: &Family, group: &ApiGroup) -> syn::File {
+    let mut items = render_group_uses(api, family, group)
+        .into_iter()
+        .map(Item::Use)
+        .collect::<Vec<_>>();
+    items.extend(render_group_struct(family, group));
+    items.push(Item::Impl(render_group_impl(api, family, group)));
 
     syn::File {
         shebang: None,
@@ -27,7 +22,7 @@ pub(super) fn render_group_file(api: &Api, group: &ApiGroup) -> syn::File {
     }
 }
 
-fn render_group_use(api: &Api, group: &ApiGroup) -> syn::ItemUse {
+fn render_group_uses(api: &Api, family: &Family, group: &ApiGroup) -> Vec<syn::ItemUse> {
     let mut names = vec![];
     for group_operation in &group.operations {
         let operation = &api.operations[group_operation.operation_index];
@@ -45,26 +40,50 @@ fn render_group_use(api: &Api, group: &ApiGroup) -> syn::ItemUse {
     names.sort_by_key(ToString::to_string);
     names.dedup();
 
-    parse_quote!(use super::{Api as RootApi, #(#names),*};)
+    let (names, generic_use) = family.root_imports(names);
+    let root_use = parse_quote!(use super::{Api as RootApi, #(#names),*};);
+    iter::once(root_use).chain(generic_use).collect()
 }
 
-fn render_group_struct(group: &ApiGroup) -> syn::ItemStruct {
+fn render_group_struct(family: &Family, group: &ApiGroup) -> Vec<Item> {
+    let storage = family.storage();
     let docs = super::doc_attrs(group.description.as_deref());
-    parse_quote!(
-        #(#docs)*
-        #[derive(Debug, Clone, Copy)]
-        pub struct Api<'a> {
-            pub(crate) api: &'a RootApi,
-        }
-    )
+    vec![
+        parse_quote!(
+            #(#docs)*
+            pub struct Api<'a, #storage = satay_runtime::AllocStorage> {
+                pub(crate) api: &'a RootApi<#storage>,
+            }
+        ),
+        // Written out so the policy type needs neither `Debug` nor `Clone`.
+        parse_quote!(
+            impl<#storage> fmt::Debug for Api<'_, #storage> {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.debug_struct("Api").field("api", &self.api).finish()
+                }
+            }
+        ),
+        parse_quote!(
+            impl<#storage> Clone for Api<'_, #storage> {
+                fn clone(&self) -> Self {
+                    *self
+                }
+            }
+        ),
+        parse_quote!(
+            impl<#storage> Copy for Api<'_, #storage> {}
+        ),
+    ]
 }
 
-fn render_group_impl(api: &Api, group: &ApiGroup) -> syn::ItemImpl {
+fn render_group_impl(api: &Api, family: &Family, group: &ApiGroup) -> syn::ItemImpl {
+    let storage = family.storage();
     let methods = group
         .operations
         .iter()
         .map(|group_operation| {
             render_group_operation_method(
+                family,
                 &api.operations[group_operation.operation_index],
                 group,
                 group_operation,
@@ -73,13 +92,14 @@ fn render_group_impl(api: &Api, group: &ApiGroup) -> syn::ItemImpl {
         .collect::<Vec<_>>();
 
     parse_quote!(
-        impl<'a> Api<'a> {
+        impl<'a, #storage: satay_runtime::Storage> Api<'a, #storage> {
             #(#methods)*
         }
     )
 }
 
 fn render_group_operation_method(
+    family: &Family,
     operation: &Operation,
     group: &ApiGroup,
     group_operation: &GroupOperation,
@@ -104,16 +124,24 @@ fn render_group_operation_method(
     );
     let args = required_fields.iter().map(|field| {
         let name = super::ident(&field.rust_name);
-        let ty = super::input_builder_arg_type(&field.ty);
+        let ty = super::input_builder_arg_type(family, &field.ty);
         quote::quote!(#name: #ty)
     });
     let arg_names = required_fields
         .iter()
         .map(|field| super::ident(&field.rust_name));
+    let ActionGenerics {
+        arguments,
+        input_arguments,
+        defaults,
+        ..
+    } = ActionGenerics::new(family, operation);
+    // Each call picks the lifetime of the policy values it passes in.
+    let lifetime = input_arguments.map(|_| quote::quote!(<'s>));
 
     quote::quote!(
         #(#docs)*
-        pub fn #method(&self #(, #args)*) -> #action<'a> {
+        pub fn #method #lifetime(&self #(, #args)*) -> #action<#arguments> #defaults {
             #action::new(self.api #(, #arg_names)*)
         }
     )

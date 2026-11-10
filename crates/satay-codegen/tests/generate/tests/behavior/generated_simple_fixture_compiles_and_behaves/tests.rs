@@ -1,11 +1,11 @@
 use super::generated::*;
+use satay_runtime::AllocStorage;
 
 #[test]
 fn constructs_request_parts_without_io() {
-    let parts = operations::get_user::get_user_parts(
-        GetUserInput::<String>::new("user/42").include_details(true),
-    )
-    .expect("request parts");
+    let parts =
+        operations::get_user::get_user_parts(GetUserInput::new("user/42").include_details(true))
+            .expect("request parts");
 
     assert_eq!(parts.method, http::Method::GET);
     assert_eq!(parts.uri, "/users/user%2F42?includeDetails=true");
@@ -29,15 +29,14 @@ fn action_builder_constructs_json_request_without_io() {
 
 #[test]
 fn encodes_json_request_body() {
-    let request = operations::update_user::encode_update_user(
-        UpdateUserInput::<String>::new("42")
-            .notify(false)
-            .body(UpdateUserRequest {
+    let request =
+        operations::update_user::encode_update_user(UpdateUserInput::new("42").notify(false).body(
+            UpdateUserRequest {
                 age: None,
                 name: "Ada".to_owned(),
-            }),
-    )
-    .expect("encoded request");
+            },
+        ))
+        .expect("encoded request");
 
     assert_eq!(request.method(), http::Method::PUT);
     assert_eq!(request.uri(), "/users/42?notify=false");
@@ -49,9 +48,8 @@ fn encodes_json_request_body() {
     let body: serde_json::Value = serde_json::from_slice(request.body()).unwrap();
     assert_eq!(body, serde_json::json!({ "name": "Ada" }));
 
-    let empty_request =
-        operations::update_user::encode_update_user(UpdateUserInput::<String>::new("42"))
-            .expect("encoded request without body");
+    let empty_request = operations::update_user::encode_update_user(UpdateUserInput::new("42"))
+        .expect("encoded request without body");
     assert_eq!(empty_request.uri(), "/users/42");
     assert!(
         empty_request
@@ -69,7 +67,7 @@ fn decodes_json_response_enums() {
         headers: http::HeaderMap::new(),
         body: br#"{"id":"42","name":"Ada","status":"active","age":36,"tags":["admin"]}"#.to_vec(),
     };
-    let decoded = operations::get_user::GetUserAction::<String>::decode(response.as_bytes())
+    let decoded = operations::get_user::GetUserAction::<AllocStorage>::decode(response.as_bytes())
         .expect("decoded response");
 
     match decoded {

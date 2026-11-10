@@ -118,3 +118,14 @@ pub trait Storage {
         entries: impl IntoIterator<Item = (Self::Text<'a>, V)>,
     ) -> Result<Self::Map<'a, V>, Self::Error>;
 }
+
+/// A policy whose values own their storage and never borrow from a context.
+///
+/// Such a policy needs no caller-provided instance: [`Self::CONTEXT`] constructs
+/// values at any lifetime. Consumers use it wherever construction has no context
+/// to thread through, such as ordinary `Deserialize` or `Clone` implementations.
+/// Arena-like policies must not implement this trait.
+pub trait OwnedStorage: Storage + 'static {
+    /// The shared context used when the caller supplies none.
+    const CONTEXT: &'static Self;
+}
