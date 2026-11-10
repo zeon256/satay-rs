@@ -205,3 +205,27 @@ fn all_owned_representations_outlive_the_context() {
     assert_eq!(values.as_ref(), &[1]);
     assert_eq!(entries.get("cat"), Some(&1));
 }
+
+impl satay_storage::OwnedStorage for Bounded {
+    const CONTEXT: &'static Self = &Self;
+}
+
+#[test]
+fn owned_policies_construct_without_a_caller_context() {
+    // The caller picks the lifetime; no storage instance is in scope.
+    fn label<'a, S: satay_storage::OwnedStorage>(value: &str) -> Result<S::Text<'a>, S::Error> {
+        S::CONTEXT.try_text(value)
+    }
+
+    assert_eq!(label::<Bounded>("cat").unwrap().as_ref(), "cat");
+    assert!(matches!(
+        label::<Bounded>("too long for eight"),
+        Err(CapacityError::TextTooLong)
+    ));
+    #[cfg(feature = "alloc")]
+    {
+        let text: String = label::<satay_storage::AllocStorage>("cat").unwrap();
+        let boxed: Box<str> = label::<satay_storage::BoxedStorage>("cat").unwrap();
+        assert_eq!(text, &*boxed);
+    }
+}

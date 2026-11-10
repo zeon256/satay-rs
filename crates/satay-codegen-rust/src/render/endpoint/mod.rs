@@ -2,7 +2,11 @@ use syn::{Ident, Item, parse_quote};
 
 use crate::model::{Api, Operation, TypeRef};
 
+use super::family::Family;
+
 mod input;
+
+pub(super) use input::has_text_default;
 mod json;
 pub(super) mod parts;
 mod response;
@@ -30,23 +34,22 @@ pub(super) fn render_endpoint_mod(_operation: &Operation) -> syn::File {
     }
 }
 
-pub(super) fn render_endpoint_parts_file(api: &Api, operation: &Operation) -> syn::File {
+pub(super) fn render_endpoint_parts_file(
+    api: &Api,
+    family: &Family,
+    operation: &Operation,
+) -> syn::File {
     let mut items = vec![];
-    if operation_contains_map(operation) {
-        items.push(Item::Use(parse_quote!(
-            use std::collections::BTreeMap;
-        )));
-    }
     if let Some(use_types) = build_parts_types_use(api, operation) {
         items.push(Item::Use(use_types));
     }
-    items.push(Item::Struct(input::render_input(operation)));
-    items.push(Item::Impl(input::render_input_impl(operation)));
-    if let Some(default_impl) = input::render_input_default_impl(operation) {
+    items.extend(input::render_input(family, operation));
+    items.push(Item::Impl(input::render_input_impl(family, operation)));
+    if let Some(default_impl) = input::render_input_default_impl(family, operation) {
         items.push(Item::Impl(default_impl));
     }
-    items.push(Item::Enum(response::render_response(operation)));
-    items.push(Item::Fn(parts::render_parts_function(operation)));
+    items.extend(response::render_response(family, operation));
+    items.push(Item::Fn(parts::render_parts_function(family, operation)));
 
     syn::File {
         shebang: None,
@@ -55,18 +58,13 @@ pub(super) fn render_endpoint_parts_file(api: &Api, operation: &Operation) -> sy
     }
 }
 
-pub(super) fn render_endpoint_json_file(api: &Api, operation: &Operation) -> syn::File {
+pub(super) fn render_endpoint_json_file(
+    api: &Api,
+    family: &Family,
+    operation: &Operation,
+) -> syn::File {
     let mut items = vec![];
-    if operation
-        .responses
-        .iter()
-        .any(|response| response.body.as_ref().is_some_and(TypeRef::contains_map))
-    {
-        items.push(parse_quote!(
-            use std::collections::BTreeMap;
-        ));
-    }
-    if let Some(use_types) = build_json_types_use(api, operation) {
+    if let Some(use_types) = build_json_types_use(api, family, operation) {
         items.push(Item::Use(use_types));
     }
     let input_name = super::ident(&operation.input_name);
@@ -75,29 +73,18 @@ pub(super) fn render_endpoint_json_file(api: &Api, operation: &Operation) -> syn
     items.push(Item::Use(
         parse_quote!(use super::parts::{#input_name, #response_name, #parts_fn};),
     ));
-    items.push(Item::Fn(json::render_encode_function(operation)));
-    items.push(Item::Fn(json::render_decode_function(operation)));
+    items.push(Item::Fn(json::render_encode_function(family, operation)));
+    items.extend(
+        json::render_decode_functions(family, operation)
+            .into_iter()
+            .map(Item::Fn),
+    );
 
     syn::File {
         shebang: None,
         attrs: vec![],
         items,
     }
-}
-
-fn operation_contains_map(operation: &Operation) -> bool {
-    operation
-        .parameters
-        .iter()
-        .any(|param| param.ty.contains_map())
-        || operation
-            .request_body
-            .as_ref()
-            .is_some_and(|body| body.ty.contains_map())
-        || operation
-            .responses
-            .iter()
-            .any(|response| response.body.as_ref().is_some_and(TypeRef::contains_map))
 }
 
 fn build_parts_types_use(api: &Api, operation: &Operation) -> Option<syn::ItemUse> {
@@ -118,16 +105,31 @@ fn build_parts_types_use(api: &Api, operation: &Operation) -> Option<syn::ItemUs
     build_types_use(api, needed_names)
 }
 
-fn build_json_types_use(api: &Api, operation: &Operation) -> Option<syn::ItemUse> {
+fn build_json_types_use(api: &Api, family: &Family, operation: &Operation) -> Option<syn::ItemUse> {
     let mut needed_names: Vec<Ident> = vec![];
 
     for response in &operation.responses {
         if let Some(body) = &response.body {
-            collect_type_refs(body, &mut needed_names);
+            collect_decoded_type_refs(family, body, &mut needed_names);
         }
     }
 
     build_types_use(api, needed_names)
+}
+
+/// Collects the names a decoder spells. Aliases of family projections decode
+/// through their target's shape, so the alias itself is never named.
+fn collect_decoded_type_refs(family: &Family, ty: &TypeRef, names: &mut Vec<Ident>) {
+    match ty {
+        TypeRef::Named(name) => match family.projected_alias(name) {
+            Some(target) => collect_decoded_type_refs(family, target, names),
+            None => names.push(super::ident(name)),
+        },
+        TypeRef::Array(inner) | TypeRef::Map(inner) | TypeRef::Option(inner) => {
+            collect_decoded_type_refs(family, inner, names);
+        }
+        other => collect_type_refs(other, names),
+    }
 }
 
 fn build_types_use(api: &Api, mut all_names: Vec<Ident>) -> Option<syn::ItemUse> {

@@ -4,25 +4,16 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Ident, Item, parse_quote};
 
+use super::endpoint::has_text_default;
+use super::family::Family;
 use crate::RootModule;
 use crate::ident::{type_ident, unique_ident};
 use crate::model::{
     Api, ApiGroup, ApiKeyLocation, ApiKeySecurityScheme, Field, Operation, TypeRef,
 };
 
-pub(super) fn render_api_file(api: &Api, root_module: RootModule) -> syn::File {
+pub(super) fn render_api_file(api: &Api, family: &Family, root_module: RootModule) -> syn::File {
     let mut items = vec![];
-    let has_map_input = api.operations.iter().any(|operation| {
-        super::input_fields(operation)
-            .iter()
-            .any(|field| field.ty.contains_map())
-    });
-
-    if has_map_input {
-        items.push(Item::Use(parse_quote!(
-            use std::collections::BTreeMap;
-        )));
-    }
 
     items.extend(
         build_api_group_module_uses(api, root_module)
@@ -35,20 +26,15 @@ pub(super) fn render_api_file(api: &Api, root_module: RootModule) -> syn::File {
     }
 
     items.extend(
-        build_api_operation_module_uses(api)
+        build_api_operation_module_uses(api, family)
             .into_iter()
             .map(Item::Use),
     );
 
-    items.push(Item::Struct(render_api_struct(api)));
-    items.push(Item::Impl(render_api_default_impl()));
-    items.push(Item::Impl(render_api_impl(api)));
+    items.extend(render_api_items(api, family));
 
     for operation in &api.operations {
-        items.push(Item::Struct(render_action_struct(operation)));
-        items.push(Item::Impl(render_action_impl(operation)));
-        items.push(Item::Impl(render_action_trait_impl(operation)));
-        items.push(Item::Impl(render_owned_action_trait_impl(operation)));
+        items.extend(render_action_items(family, operation));
     }
 
     syn::File {
@@ -90,48 +76,35 @@ fn build_api_operation_use(api: &Api) -> Option<syn::ItemUse> {
     Some(parse_quote!(use super::{#(#names),*};))
 }
 
-fn build_api_operation_module_uses(api: &Api) -> Vec<syn::ItemUse> {
+fn build_api_operation_module_uses(api: &Api, family: &Family) -> Vec<syn::ItemUse> {
     api.operations
         .iter()
         .map(|operation| {
             let module = super::ident(&operation.fn_name);
             let parts = super::ident(&format!("{}_parts", operation.fn_name));
             let decode = super::ident(&format!("decode_{}_response", operation.fn_name));
-            parse_quote!(use super::#module::{#decode, #parts};)
+            if family.response_is_generic(operation) {
+                let decode_in = super::ident(&format!("decode_{}_response_in", operation.fn_name));
+                parse_quote!(use super::#module::{#decode, #decode_in, #parts};)
+            } else {
+                parse_quote!(use super::#module::{#decode, #parts};)
+            }
         })
         .collect()
 }
 
-fn render_api_struct(api: &Api) -> syn::ItemStruct {
-    let auth_fields = api.api_key_security_schemes.iter().map(|scheme| {
-        let name = super::ident(&scheme.rust_name);
-        quote!(#name: Option<String>)
-    });
-
-    parse_quote!(
-        #[derive(Debug, Clone)]
-        pub struct Api {
-            base_url: String,
-            #(#auth_fields,)*
-        }
-    )
-}
-
-fn render_api_default_impl() -> syn::ItemImpl {
-    parse_quote!(
-        impl Default for Api {
-            fn default() -> Self {
-                Self::new()
-            }
-        }
-    )
-}
-
-fn render_api_impl(api: &Api) -> syn::ItemImpl {
-    let auth_initializers = api.api_key_security_schemes.iter().map(|scheme| {
-        let name = super::ident(&scheme.rust_name);
-        quote!(#name: None)
-    });
+/// Renders the root client. Its storage parameter selects the policy for
+/// request inputs and for responses decoded without a storage context.
+fn render_api_items(api: &Api, family: &Family) -> Vec<syn::Item> {
+    let storage = family.storage();
+    let fields = api
+        .api_key_security_schemes
+        .iter()
+        .map(|scheme| super::ident(&scheme.rust_name))
+        .collect::<Vec<_>>();
+    let field_labels = fields
+        .iter()
+        .map(|field| super::lit_str(&field.to_string()));
     let auth_setters = api
         .api_key_security_schemes
         .iter()
@@ -140,44 +113,97 @@ fn render_api_impl(api: &Api) -> syn::ItemImpl {
     let group_accessors = api
         .groups
         .iter()
-        .map(render_group_accessor)
+        .map(|group| render_group_accessor(family, group))
         .collect::<Vec<_>>();
     let apply_api_keys = render_apply_api_keys_body(api);
 
-    parse_quote!(
-        impl Api {
-            pub fn new() -> Self {
-                Self {
-                    base_url: super::SERVER_URL.to_owned(),
-                    #(#auth_initializers,)*
+    vec![
+        parse_quote!(
+            pub struct Api<#storage = satay_runtime::AllocStorage> {
+                base_url: String,
+                #(#fields: Option<String>,)*
+                storage: marker::PhantomData<fn() -> #storage>,
+            }
+        ),
+        // Written out so the policy type needs neither `Debug` nor `Clone`.
+        parse_quote!(
+            impl<#storage> fmt::Debug for Api<#storage> {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.debug_struct("Api")
+                        .field("base_url", &self.base_url)
+                        #(.field(#field_labels, &self.#fields))*
+                        .finish()
                 }
             }
-
-            pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
-                self.base_url = base_url.into();
-                self
-            }
-
-            #(#auth_setters)*
-
-            #(#group_accessors)*
-
-            fn apply<B>(&self, parts: &mut satay_runtime::RequestParts<B>) -> Result<(), satay_runtime::Error> {
-                #apply_api_keys
-                if self.base_url.is_empty() {
-                    return Ok(());
+        ),
+        parse_quote!(
+            impl<#storage> Clone for Api<#storage> {
+                fn clone(&self) -> Self {
+                    Self {
+                        base_url: self.base_url.clone(),
+                        #(#fields: self.#fields.clone(),)*
+                        storage: marker::PhantomData,
+                    }
                 }
-                let path_and_query = parts.uri.as_str();
-                let base_url = self.base_url.trim_end_matches('/');
-                let separator = if path_and_query.starts_with('/') { "" } else { "/" };
-                parts.uri = format!("{base_url}{separator}{path_and_query}");
-                Ok(())
             }
-        }
-    )
+        ),
+        parse_quote!(
+            impl<#storage: satay_runtime::Storage> Default for Api<#storage> {
+                fn default() -> Self {
+                    Api::new().storage()
+                }
+            }
+        ),
+        parse_quote!(
+            impl Api<satay_runtime::AllocStorage> {
+                pub fn new() -> Self {
+                    Self {
+                        base_url: super::SERVER_URL.to_owned(),
+                        #(#fields: None,)*
+                        storage: marker::PhantomData,
+                    }
+                }
+            }
+        ),
+        parse_quote!(
+            impl<#storage: satay_runtime::Storage> Api<#storage> {
+                pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
+                    self.base_url = base_url.into();
+                    self
+                }
+
+                #(#auth_setters)*
+
+                #(#group_accessors)*
+
+                /// Selects the storage policy for request inputs and for responses
+                /// decoded without a storage context.
+                pub fn storage<T: satay_runtime::Storage>(self) -> Api<T> {
+                    Api {
+                        base_url: self.base_url,
+                        #(#fields: self.#fields,)*
+                        storage: marker::PhantomData,
+                    }
+                }
+
+                fn apply<B>(&self, parts: &mut satay_runtime::RequestParts<B>) -> Result<(), satay_runtime::Error> {
+                    #apply_api_keys
+                    if self.base_url.is_empty() {
+                        return Ok(());
+                    }
+                    let path_and_query = parts.uri.as_str();
+                    let base_url = self.base_url.trim_end_matches('/');
+                    let separator = if path_and_query.starts_with('/') { "" } else { "/" };
+                    parts.uri = format!("{base_url}{separator}{path_and_query}");
+                    Ok(())
+                }
+            }
+        ),
+    ]
 }
 
-fn render_group_accessor(group: &ApiGroup) -> TokenStream {
+fn render_group_accessor(family: &Family, group: &ApiGroup) -> TokenStream {
+    let storage = family.storage();
     let method = super::ident(&group.rust_name);
     let module = super::ident(&group.rust_name);
     let docs = match &group.wire_name {
@@ -187,7 +213,7 @@ fn render_group_accessor(group: &ApiGroup) -> TokenStream {
 
     quote!(
         #(#docs)*
-        pub fn #method(&self) -> #module::Api<'_> {
+        pub fn #method(&self) -> #module::Api<'_, #storage> {
             #module::Api { api: self }
         }
     )
@@ -209,8 +235,51 @@ fn render_api_key_setter(scheme: &ApiKeySecurityScheme) -> TokenStream {
     )
 }
 
-fn render_action_constructor(operation: &Operation) -> TokenStream {
+/// How one operation's action spells its generics.
+pub(super) struct ActionGenerics {
+    /// `'a, 's, S: Storage + 's`, or `'a, S: Storage` when the input is concrete.
+    pub parameters: TokenStream,
+    /// `'a, 's, S` or `'a, S`.
+    pub arguments: TokenStream,
+    /// `'_, '_, S` or `'_, S`.
+    pub elided: TokenStream,
+    /// `<'s, S>` on the input, when it is family-generic.
+    pub input_arguments: Option<TokenStream>,
+    /// Bound for constructing the input when it stores text defaults.
+    pub defaults: Option<TokenStream>,
+}
+
+impl ActionGenerics {
+    pub fn new(family: &Family, operation: &Operation) -> Self {
+        let storage = family.storage();
+        if !family.input_is_generic(operation) {
+            return Self {
+                parameters: quote!('a, #storage: satay_runtime::Storage),
+                arguments: quote!('a, #storage),
+                elided: quote!('_, #storage),
+                input_arguments: None,
+                defaults: None,
+            };
+        }
+        let owned = family.owned_bound();
+        Self {
+            parameters: quote!('a, 's, #storage: satay_runtime::Storage + 's),
+            arguments: quote!('a, 's, #storage),
+            elided: quote!('_, '_, #storage),
+            input_arguments: Some(quote!(<'s, #storage>)),
+            defaults: has_text_default(operation).then(|| quote!(where #storage: #owned)),
+        }
+    }
+}
+
+fn render_action_constructor(
+    family: &Family,
+    operation: &Operation,
+    generics: &ActionGenerics,
+) -> TokenStream {
+    let storage = family.storage();
     let input = super::ident(&operation.input_name);
+    let defaults = &generics.defaults;
     let required_fields = super::input_fields(operation)
         .into_iter()
         .filter(|field| field.required)
@@ -228,7 +297,7 @@ fn render_action_constructor(operation: &Operation) -> TokenStream {
     };
     let new_args = required_fields.iter().map(|field| {
         let name = super::ident(&field.rust_name);
-        let ty = super::input_builder_arg_type(&field.ty);
+        let ty = super::input_builder_arg_type(family, &field.ty);
         quote!(#name: #ty)
     });
     let new_arg_names = required_fields
@@ -236,7 +305,7 @@ fn render_action_constructor(operation: &Operation) -> TokenStream {
         .map(|field| super::ident(&field.rust_name));
 
     quote!(
-        pub(crate) fn new(#root_api_arg: &'a Api #(, #new_args)*) -> Self {
+        pub(crate) fn new(#root_api_arg: &'a Api<#storage> #(, #new_args)*) -> Self #defaults {
             Self {
                 #root_api_field,
                 input: #input::new(#(#new_arg_names),*),
@@ -293,100 +362,185 @@ fn render_apply_api_keys_body(api: &Api) -> TokenStream {
     )
 }
 
-fn render_action_struct(operation: &Operation) -> syn::ItemStruct {
+fn render_action_items(family: &Family, operation: &Operation) -> Vec<syn::Item> {
+    let storage = family.storage();
+    let generics = ActionGenerics::new(family, operation);
+    let ActionGenerics {
+        parameters,
+        arguments,
+        elided,
+        input_arguments,
+        ..
+    } = &generics;
     let action = action_ident(operation);
+    let action_label = super::lit_str(&action.to_string());
     let input = super::ident(&operation.input_name);
+    let response = super::ident(&operation.response_name);
     let docs = render_action_docs(operation);
-
-    parse_quote!(
-        #(#docs)*
-        #[must_use = "configure this action and execute it or call `.request()`"]
-        #[derive(Debug, Clone)]
-        pub struct #action<'a> {
-            api: &'a Api,
-            input: #input,
-        }
-    )
-}
-
-fn render_action_trait_impl(operation: &Operation) -> syn::ItemImpl {
-    let action = action_ident(operation);
-    let response = super::ident(&operation.response_name);
-
-    parse_quote!(
-        impl satay_runtime::Action for #action<'_> {
-            type RequestBody = Vec<u8>;
-            type Response<'de> = #response;
-
-            fn request(self) -> Result<http::Request<Vec<u8>>, satay_runtime::Error> {
-                self.request()
-            }
-
-            fn decode(
-                response: satay_runtime::ResponseParts<&[u8]>,
-            ) -> Result<Self::Response<'_>, satay_runtime::Error> {
-                Self::decode(response)
-            }
-        }
-    )
-}
-
-fn render_owned_action_trait_impl(operation: &Operation) -> syn::ItemImpl {
-    let action = action_ident(operation);
-    let response = super::ident(&operation.response_name);
-
-    parse_quote!(
-        impl satay_runtime::OwnedAction for #action<'_> {
-            type OwnedResponse = #response;
-
-            fn decode_owned(
-                response: satay_runtime::ResponseParts<&[u8]>,
-            ) -> Result<Self::OwnedResponse, satay_runtime::Error> {
-                Self::decode(response)
-            }
-        }
-    )
-}
-
-fn render_action_impl(operation: &Operation) -> syn::ItemImpl {
-    let action = action_ident(operation);
-    let response = super::ident(&operation.response_name);
     let parts_fn = super::ident(&format!("{}_parts", operation.fn_name));
     let decode_fn = super::ident(&format!("decode_{}_response", operation.fn_name));
-    let request_expr = super::request_from_parts_expr(operation);
+    let decode_in_fn = super::ident(&format!("decode_{}_response_in", operation.fn_name));
+    let request_expr = super::request_from_parts_expr(family, operation);
     let setters = super::input_fields(operation)
         .into_iter()
         .filter(|field| !field.required)
-        .map(render_action_setter)
+        .map(|field| render_action_setter(family, field))
         .collect::<Vec<_>>();
-    let constructor = render_action_constructor(operation);
+    let constructor = render_action_constructor(family, operation, &generics);
+    let response_generic = family.response_is_generic(operation);
+    let owned_decoding = family.owned_decoding_bound();
 
-    parse_quote!(
-        impl<'a> #action<'a> {
-            #constructor
+    // Cloning the input rebuilds its policy values, which needs an owned policy.
+    let clone_parameters = if input_arguments.is_some() {
+        let owned = family.owned_bound();
+        quote!('a, 's, #storage: #owned)
+    } else {
+        parameters.clone()
+    };
+    let declaration = if input_arguments.is_some() {
+        quote!('a, 's, #storage: satay_runtime::Storage + 's = satay_runtime::AllocStorage)
+    } else {
+        quote!('a, #storage: satay_runtime::Storage = satay_runtime::AllocStorage)
+    };
+    // Responses decoded without a context live in the client's policy, which
+    // must then construct values on its own. Decoding into provided storage
+    // accepts any policy, independent of the client's.
+    let (decoders, trait_bound, owned_response, storage_response, decode_in_call) =
+        if response_generic {
+            (
+                quote!(
+                    pub fn decode<'r>(
+                        response: satay_runtime::ResponseParts<&[u8]>,
+                    ) -> Result<#response<'r, #storage>, satay_runtime::Error>
+                    where
+                        #storage: #owned_decoding,
+                    {
+                        #decode_fn(response)
+                    }
 
-            #(#setters)*
+                    /// Decodes the response, constructing its values in `storage`.
+                    pub fn decode_in<'r, T: satay_runtime::Storage<Error: fmt::Display>>(
+                        response: satay_runtime::ResponseParts<&[u8]>,
+                        storage: &'r T,
+                    ) -> Result<#response<'r, T>, satay_runtime::Error> {
+                        #decode_in_fn(response, storage)
+                    }
+                ),
+                owned_decoding.clone(),
+                quote!(#response<'static, #storage>),
+                quote!(#response<'r, T>),
+                quote!(Self::decode_in(response, storage)),
+            )
+        } else {
+            (
+                quote!(
+                    pub fn decode(
+                        response: satay_runtime::ResponseParts<&[u8]>,
+                    ) -> Result<#response, satay_runtime::Error> {
+                        #decode_fn(response)
+                    }
+                ),
+                quote!(satay_runtime::Storage),
+                quote!(#response),
+                quote!(#response),
+                quote!({
+                    let _ = storage;
+                    Self::decode(response)
+                }),
+            )
+        };
 
-            pub fn request(self) -> Result<http::Request<Vec<u8>>, satay_runtime::Error> {
-                let api = self.api;
-                let mut parts = #parts_fn(self.input)?;
-                api.apply(&mut parts)?;
-                #request_expr
+    vec![
+        parse_quote!(
+            #(#docs)*
+            #[must_use = "configure this action and execute it or call `.request()`"]
+            pub struct #action<#declaration> {
+                api: &'a Api<#storage>,
+                input: #input #input_arguments,
             }
-
-            pub fn decode(
-                response: satay_runtime::ResponseParts<&[u8]>,
-            ) -> Result<#response, satay_runtime::Error> {
-                #decode_fn(response)
+        ),
+        parse_quote!(
+            impl<#parameters> fmt::Debug for #action<#arguments> {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    f.debug_struct(#action_label)
+                        .field("api", &self.api)
+                        .field("input", &self.input)
+                        .finish()
+                }
             }
-        }
-    )
+        ),
+        parse_quote!(
+            impl<#clone_parameters> Clone for #action<#arguments> {
+                fn clone(&self) -> Self {
+                    Self {
+                        api: self.api,
+                        input: self.input.clone(),
+                    }
+                }
+            }
+        ),
+        parse_quote!(
+            impl<#parameters> #action<#arguments> {
+                #constructor
+
+                #(#setters)*
+
+                pub fn request(self) -> Result<http::Request<Vec<u8>>, satay_runtime::Error> {
+                    let api = self.api;
+                    let mut parts = #parts_fn(self.input)?;
+                    api.apply(&mut parts)?;
+                    #request_expr
+                }
+
+                #decoders
+            }
+        ),
+        parse_quote!(
+            impl<#storage: #trait_bound> satay_runtime::Action for #action<#elided> {
+                type RequestBody = Vec<u8>;
+                type Response<'de> = #owned_response;
+
+                fn request(self) -> Result<http::Request<Vec<u8>>, satay_runtime::Error> {
+                    self.request()
+                }
+
+                fn decode(
+                    response: satay_runtime::ResponseParts<&[u8]>,
+                ) -> Result<Self::Response<'_>, satay_runtime::Error> {
+                    Self::decode(response)
+                }
+            }
+        ),
+        parse_quote!(
+            impl<#storage: #trait_bound> satay_runtime::OwnedAction for #action<#elided> {
+                type OwnedResponse = #owned_response;
+
+                fn decode_owned(
+                    response: satay_runtime::ResponseParts<&[u8]>,
+                ) -> Result<Self::OwnedResponse, satay_runtime::Error> {
+                    Self::decode(response)
+                }
+            }
+        ),
+        parse_quote!(
+            impl<#storage: #trait_bound> satay_runtime::StorageAction for #action<#elided> {
+                type StorageResponse<'r, T: satay_runtime::Storage + 'r> = #storage_response;
+
+                fn decode_in<'r, T: satay_runtime::Storage<Error: fmt::Display>>(
+                    response: satay_runtime::ResponseParts<&[u8]>,
+                    storage: &'r T,
+                ) -> Result<Self::StorageResponse<'r, T>, satay_runtime::Error> {
+                    #decode_in_call
+                }
+            }
+        ),
+    ]
 }
 
-fn render_action_setter(field: Field) -> TokenStream {
+fn render_action_setter(family: &Family, field: Field) -> TokenStream {
     let setter = super::input_setter_name(&field);
     let name = super::ident(&field.rust_name);
-    let ty = super::input_builder_arg_type(&field.ty);
+    let ty = super::input_builder_arg_type(family, &field.ty);
     let docs = super::doc_attrs(field.description.as_deref());
 
     quote!(

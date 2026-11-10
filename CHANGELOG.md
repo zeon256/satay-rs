@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** *(codegen,runtime)* generated models, inputs, and responses containing text, arrays, or maps are generic over a `satay_storage::Storage` policy: `Pet<'s, S = AllocStorage>` with `S::Text<'s>`, `S::Contiguous<'s, T>`, and `S::Map<'s, V>` fields. The default keeps `String`, `Vec<T>`, and `BTreeMap<String, V>`. Arrays without text make a model generic too.
+- **Breaking:** *(runtime)* `StringStorage` is removed. `Api::string_storage::<T>()` is now `Api::storage::<T>()` and takes a policy such as `BoxedStorage`; a custom string container becomes a small `Storage` implementation that needs no Serde support.
+- **Breaking:** *(codegen)* storage-generic models implement `Debug`, `PartialEq`, and `Serialize` for every policy, and `Clone`/`Deserialize` for `OwnedStorage` policies, through generated implementations instead of derives. Expressions that build such a model without type context must name the policy, for example `let pet: Pet = Pet { .. }`.
+
+### Added
+
+- *(storage)* `OwnedStorage`, a policy whose values need no storage context, implemented by `AllocStorage` and `BoxedStorage`.
+- *(runtime)* `shape` module deriving formatting, equality, cloning, and Serde codecs from the `Storage` contract; `StorageAction`, `BufferedResponse::decode_in`, and `from_json_slice_in` decode into caller-provided storage such as an arena.
+- *(codegen)* `decode_<operation>_response_in` helpers and `decode_in` on generated actions.
+
 ## [0.17.6](https://github.com/zeon256/satay-rs/compare/satay-runtime-v0.17.5...satay-runtime-v0.17.6) - 2026-09-24
 
 ### Other

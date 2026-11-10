@@ -96,37 +96,106 @@ A custom transport needs to preserve the parts Satay cares about:
 
 The WebSocket example adds a small wire protocol and an extension trait so call sites can use `.send_over_ws(&mut transport).await` instead of manually calling `request()`, sending the request, and calling `decode(...)`.
 
-## String storage
+## Storage policies
 
-Generated models, inputs, and actions use a string type parameter with `String`
-as the default. Select another container for an API without regenerating it:
+Generated models, inputs, and responses that contain text, arrays, or maps take a
+storage policy and the lifetime of its context: `BusService<'s, S>`. The policy is a
+[`satay_storage::Storage`](../crates/satay-storage) type family, re-exported from
+`satay_runtime`, and each field uses its member directly:
+
+| OpenAPI | Field type | `AllocStorage` (default) | `BoxedStorage` |
+| --- | --- | --- | --- |
+| `string` | `S::Text<'s>` | `String` | `Box<str>` |
+| `array` | `S::Contiguous<'s, T>` | `Vec<T>` | `Box<[T]>` |
+| map | `S::Map<'s, V>` | `BTreeMap<String, V>` | `BTreeMap<Box<str>, V>` |
+
+One policy propagates through nested models, aliases, unions, open-enum unknown
+values, operation inputs, and responses, including arrays that hold no text.
+Constrained newtypes keep `String`/`Vec`; parsed values, closed enums, `JsonValue`,
+API configuration, and request/response byte buffers keep their representations.
+
+Select an owned policy for a client without regenerating it:
 
 ```rust
-let api = generated::Api::new().string_storage::<Box<str>>();
-// Or CompactString, with compact_str's serde feature enabled.
-let decoded = api.bus().get_arrival(83139).send_with(&client).await?;
+let api = generated::Api::new().storage::<satay_runtime::BoxedStorage>();
+let decoded = api.bus().get_services().send_with(&client).await?;
 ```
 
-Low-level calls sometimes need explicit types because Rust does not use generic
-parameter defaults to resolve every inference ambiguity:
+The client's policy covers request inputs and responses decoded without a storage
+context (`send_with`, `decode`, `decode_owned`). Those need
+`satay_runtime::OwnedStorage`: a policy whose values never borrow from a context.
+
+### Decoding into caller-provided storage
+
+A buffered response decodes into any policy, chosen at the call. Text is copied into
+the storage context, so the result borrows from that context and not from the
+response buffer:
 
 ```rust
-let input = generated::GetUserInput::<Box<str>>::new("42");
-let user: generated::User<Box<str>> = serde_json::from_slice(body)?;
+let arena = ArenaStorage::default(); // your `Storage` over, say, a bumpalo arena
+let response = api.bus().get_services().send_buffered_with(&client).await?;
+let services = response.decode_in(&arena)?; // GetBusServicesResponse<'_, ArenaStorage>
 ```
 
-`StringStorage` is implemented automatically for containers supporting string
-access, conversion from `String`, cloning, debug formatting, equality and ordering.
-Generated JSON codecs additionally require Serde serialization and owned
-deserialization. Storage propagates through nested models, arrays, maps (including
-keys), aliases, and open-enum unknown values. Constrained string newtypes retain
-`String`; parsed values, closed enums, `JsonValue`, API configuration, and encoding
-buffers keep their existing representations.
+`satay_runtime::from_json_slice_in(body, &storage)` decodes a single model the same
+way, and every generic response has a `decode_<operation>_response_in` helper.
+Decoding into a context is fallible through the policy's `Storage::Error`, which is
+reported as a decode error. A context need not reclaim what a rejected value (a
+failed union branch, a lossy field) already allocated.
 
-Generated borrowed-string decoding is a later step: substituting `Cow` currently
-produces owned strings. The runtime GAT and `from_json_slice` already support custom
-actions that borrow. Such models cannot outlive their `BufferedResponse`. Projected
-generated responses still deserialize through an owned JSON value.
+### Writing a policy
+
+Implement `Storage` for a local type: three associated types and their
+constructors. Generated models derive everything else from that contract, so the
+policy and its containers need no Serde, `Debug`, `Clone`, or comparison support.
+Add `OwnedStorage` when values own their storage:
+
+```rust
+struct Compact;
+
+impl satay_runtime::Storage for Compact {
+    type Error = std::convert::Infallible;
+    type Text<'a> = compact_str::CompactString;
+    type Contiguous<'a, T: 'a> = Vec<T>;
+    type Map<'a, V: 'a> = std::collections::BTreeMap<compact_str::CompactString, V>;
+    // try_text, try_contiguous, try_map
+}
+
+impl satay_runtime::OwnedStorage for Compact {
+    const CONTEXT: &'static Self = &Self;
+}
+```
+
+| Capability | Requires |
+| --- | --- |
+| `Debug`, `PartialEq`, `Serialize`, request encoding, `decode_in` | `S: Storage` (`Storage::Error: Display` to decode) |
+| `Deserialize`, `send_with`, `decode` | `S: OwnedStorage` |
+| `Clone`, text parameter defaults | `S: OwnedStorage<Error = Infallible>` |
+
+Transport adapters send values implementing `satay_runtime::Action`. An action
+whose response is storage-generic implements it for owned client policies only;
+with any other client policy, call `request()` and `decode_in` directly.
+
+Map equality ignores entry order, and map iteration order is the policy's.
+
+### Naming the policy
+
+Field types are projections of the policy, so a value alone does not identify it.
+Type positions use the default; expressions without type context need it named:
+
+```rust
+let user: generated::User = generated::User { name: "Ada".to_owned(), tags: vec![] };
+let input = generated::GetUserInput::<satay_runtime::BoxedStorage>::new("42");
+let user: generated::User<'_, satay_runtime::BoxedStorage> = serde_json::from_slice(body)?;
+```
+
+Values passed to client methods take the client's policy and need no annotation.
+
+Decoding always copies text into storage; borrowing strings from the response
+buffer is not a storage policy. The runtime GAT and `from_json_slice` still support
+custom actions that borrow, and such models cannot outlive their
+`BufferedResponse`. Projected generated responses deserialize through an owned
+JSON value before entering storage.
 
 ## Custom request bodies
 

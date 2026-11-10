@@ -213,7 +213,7 @@ components:
 
     let update_user_request = find_struct(&types, "UpdateUserRequest");
     assert_eq!(field_names(update_user_request), ["name"]);
-    assert_field(update_user_request, "name", "S");
+    assert_field(update_user_request, "name", "S::Text<'s>");
     assert!(
         !field_is_optional(update_user_request, "name"),
         "required property must not carry the serde optional marker"
@@ -232,7 +232,7 @@ components:
 
     let user = find_struct(&types, "User");
     assert_eq!(field_names(user), ["id", "status", "age"]);
-    assert_field(user, "id", "S");
+    assert_field(user, "id", "S::Text<'s>");
     assert_field(user, "status", "UserStatus");
     assert_field(user, "age", "Option<i64>");
     assert!(
@@ -247,7 +247,7 @@ components:
     // not. Declaration order is preserved.
     assert_eq!(
         field_names(api_struct),
-        ["base_url", "account_key", "api_key", "__satay_storage"]
+        ["base_url", "account_key", "api_key", "storage"]
     );
     assert!(contains_tokens(
         &field(api_struct, "account_key"),
@@ -273,10 +273,10 @@ components:
         field_names(input),
         ["user_id", "body", "include_details", "body_2"]
     );
-    assert_field(input, "user_id", "S");
+    assert_field(input, "user_id", "S::Text<'s>");
     assert_field(input, "body", "Option<i32>");
     assert_field(input, "include_details", "bool");
-    assert_field(input, "body_2", "UpdateUserRequest<S>");
+    assert_field(input, "body_2", "UpdateUserRequest<'s, S>");
     // NOTE: the serde optional marker exists only on model structs; parameter
     // requiredness is expressed by `Option`-wrapping (optional parameters get a
     // builder method, required ones are constructor-only).
@@ -292,9 +292,9 @@ components:
     token_order(
         new,
         &[
-            "user_id: impl Into<S>",
+            "user_id: impl Into<S::Text<'s>>",
             "include_details: bool",
-            "body_2: UpdateUserRequest<S>",
+            "body_2: UpdateUserRequest<'s, S>",
         ],
     );
 
@@ -312,7 +312,7 @@ components:
     ));
 
     let json_file = parse_rust(file(&files, "get_user/json.rs"));
-    let decode = find_fn(&json_file, "decode_get_user_response");
+    let decode = find_fn(&json_file, "decode_get_user_response_in");
     let response = find_enum(&parts, "GetUserResponse");
     assert_eq!(
         variant_names(response),
@@ -324,9 +324,9 @@ components:
         decode,
         &[
             "200 =>",
-            "from_json_slice::<User<S>>(body)",
+            "shape::from_json_slice::<shape::Model<User<'s, S>>, S>(body, storage)",
             "404 =>",
-            "GetUserResponse::<S>::NotFound",
+            "GetUserResponse::NotFound",
             "_ =>",
         ],
     );
@@ -382,18 +382,24 @@ components:
     let reading = find_struct(&types, "Reading");
     assert_eq!(field_names(reading), ["id", "nickname"]);
     assert_field(reading, "id", "u32");
-    assert_field(reading, "nickname", "Option<S>");
+    assert_field(reading, "nickname", "Option<S::Text<'s>>");
     // NOTE: the codec string is a string literal inside the serde attribute, so
     // the check is token-level against the quoted literal.
     assert!(
-        contains_tokens(&field(reading, "id"), r#""serde_string::as_u32""#),
+        contains_tokens(
+            &field(reading, "id"),
+            r#""serde_string::as_u32::serialize""#
+        ),
         "alias id must decode through the u32 string codec"
     );
 
     let reading_id = find_type_alias(&types, "ReadingId");
     assert!(contains_tokens(&reading_id, "u32"));
     let optional_name = find_type_alias(&types, "OptionalName");
-    assert!(contains_tokens(&optional_name, "Option<S>"));
+    assert!(contains_tokens(
+        &optional_name,
+        "Option<<S as satay_runtime::Storage>::Text<'s>,>"
+    ));
 
     let parts = parse_rust(file(&files, "get_reading/parts.rs"));
     let input = find_struct(&parts, "GetReadingInput");
@@ -598,7 +604,7 @@ components:
 
     let types = parse_rust(file(&files, "types.rs"));
     let user = find_struct(&types, "User");
-    assert_field(user, "profile", "Option<Profile<S>>");
+    assert_field(user, "profile", "Option<Profile<'s, S>>");
 
     let profile = find_struct(&types, "Profile");
     assert_eq!(field_names(profile), ["id"]);
@@ -647,7 +653,7 @@ components:
 
     let types = parse_rust(file(&files, "types.rs"));
     let user = find_struct(&types, "User");
-    assert_field(user, "profile", "Option<Profile<S>>");
+    assert_field(user, "profile", "Option<Profile<'s, S>>");
 
     let profile = find_struct(&types, "Profile");
     assert_eq!(field_names(profile), ["id"]);
@@ -716,23 +722,23 @@ components:
     assert!(
         contains_tokens(
             &variant(response, "ClientError"),
-            "http::StatusCode, ErrorResponse<S>"
+            "http::StatusCode, ErrorResponse<'s, S>"
         ),
         "range responses carry their concrete status and projected body"
     );
 
     let json_file = parse_rust(file(&files, "get_user/json.rs"));
-    let decode = find_fn(&json_file, "decode_get_user_response");
+    let decode = find_fn(&json_file, "decode_get_user_response_in");
     token_order(
         decode,
         &[
             "200 =>",
-            "from_json_slice::<User<S>>(body)",
+            "shape::from_json_slice::<shape::Model<User<'s, S>>, S>(body, storage)",
             "404 =>",
-            "GetUserResponse::<S>::NotFound",
+            "GetUserResponse::NotFound",
             "400..=499 =>",
-            "from_json_slice::<ErrorResponse<S>>(body)",
-            "GetUserResponse::<S>::ClientError(status, value)",
+            "shape::from_json_slice::<shape::Model<ErrorResponse<'s, S>>, S>(body, storage)",
+            "GetUserResponse::ClientError(status, value)",
             "_ =>",
         ],
     );
@@ -796,10 +802,10 @@ paths:
         field_names(input),
         ["q", "page", "limit", "x_trace", "count"]
     );
-    assert_field(input, "q", "Option<S>");
-    assert_field(input, "page", "Option<S>");
+    assert_field(input, "q", "Option<S::Text<'s>>");
+    assert_field(input, "page", "Option<S::Text<'s>>");
     assert_field(input, "limit", "Option<i64>");
-    assert_field(input, "x_trace", "Option<S>");
+    assert_field(input, "x_trace", "Option<S::Text<'s>>");
     assert_field(input, "count", "Option<PingCountParameter>");
     for name in ["q", "page", "limit", "x_trace", "count"] {
         assert!(

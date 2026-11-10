@@ -157,12 +157,12 @@ paths:
         crate::generate(&spec).unwrap();
         let files = super::generate_valid(&spec);
         let json = parse_rust(super::file(&files, "value/json.rs"));
-        let decode = find_fn(&json, "decode_value_response");
+        let decode = find_fn(&json, "decode_value_response_in");
         // The unwrapped wire field stays an optional projected value even
         // when the wrapper schema carries unselected constraints.
         let tokens = norm(decode);
         assert!(tokens.contains("from_projected_json_slice"));
-        assert!(tokens.contains("Option < S >"));
+        assert!(tokens.contains("shape : : Optional"));
         assert!(tokens.contains("\"value\""));
     }
 }

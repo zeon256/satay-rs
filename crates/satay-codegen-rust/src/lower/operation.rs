@@ -24,7 +24,7 @@ use satay_ir::{
 use std::collections::BTreeSet;
 
 pub(super) fn security_schemes(api: &ir::Api) -> Vec<ApiKeySecurityScheme> {
-    let mut used = ["apply", "base_url", "string_storage", "http", "new"]
+    let mut used = ["apply", "base_url", "storage", "http", "new"]
         .map(str::to_owned)
         .into_iter()
         .collect();

@@ -43,7 +43,7 @@ fn map_fields_serialize() {
     let mut metadata = BTreeMap::new();
     metadata.insert("region".to_owned(), "eu-west-1".to_owned());
 
-    let environment = Environment {
+    let environment: Environment = Environment {
         metadata,
         config: None,
         input_examples: None,

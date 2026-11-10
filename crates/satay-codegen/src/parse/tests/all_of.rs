@@ -98,17 +98,17 @@ components:
 
     // NOTE: the private Rust model is gone; the flattening facts are now
     // asserted on the generated Rust output. Requiredness shows up as the
-    // plain `S` field type, optionality as `Option<S>`.
+    // plain `S::Text<'s>` field type, optionality as `Option<S::Text<'s>>`.
     let files = generate_valid(spec);
     let types = parse_rust(file(&files, "types.rs"));
 
     let child = find_struct(&types, "Child");
     assert_doc(&child.attrs, "A flattened child.");
     assert_eq!(field_names(child), ["id", "tag", "name", "nickname"]);
-    assert_field(child, "id", "S");
-    assert_field(child, "tag", "S");
-    assert_field(child, "name", "S");
-    assert_field(child, "nickname", "Option<S>");
+    assert_field(child, "id", "S::Text<'s>");
+    assert_field(child, "tag", "S::Text<'s>");
+    assert_field(child, "name", "S::Text<'s>");
+    assert_field(child, "nickname", "Option<S::Text<'s>>");
 
     let decorated = find_struct(&types, "Decorated");
     assert_eq!(field_names(decorated), ["id", "tag"]);
@@ -118,7 +118,7 @@ components:
     let response = find_enum(&parts, "GetChildResponse");
     let ok = variant(response, "Ok");
     assert!(
-        contains_tokens(ok, "Child<S>"),
+        contains_tokens(ok, "Child<'s, S>"),
         "response body must be the flattened `Child` type, got `{}`",
         norm(ok)
     );
@@ -218,16 +218,20 @@ components:
     let files = generate_valid(spec);
 
     // NOTE: the private model's `TypeRef::Array(Named(...))` fact maps to the
-    // generated `Vec<...DataItem<S>>` field type on the list struct.
+    // generated `S::Contiguous<'s, ...>` field type on the list struct.
     let types = parse_rust(file(&files, "types.rs"));
     let list = find_struct(&types, "ChatCompletionMessageList");
-    assert_field(list, "data", "Vec<ChatCompletionMessageListDataItem<S>>");
+    assert_field(
+        list,
+        "data",
+        "S::Contiguous<'s, ChatCompletionMessageListDataItem<'s, S>>",
+    );
 
     let item = find_struct(&types, "ChatCompletionMessageListDataItem");
     assert_eq!(field_names(item), ["role", "content", "id"]);
-    assert_field(item, "role", "S");
-    assert_field(item, "content", "S");
-    assert_field(item, "id", "S");
+    assert_field(item, "role", "S::Text<'s>");
+    assert_field(item, "content", "S::Text<'s>");
+    assert_field(item, "id", "S::Text<'s>");
 }
 
 #[test]
@@ -654,11 +658,11 @@ components:
     let types = parse_rust(file(&files, "types.rs"));
 
     let parent = find_struct(&types, "Parent");
-    assert_field(parent, "child", "Option<ParentChild<S>>");
+    assert_field(parent, "child", "Option<ParentChild<'s, S>>");
 
     let child = find_struct(&types, "ParentChild");
     assert_eq!(field_names(child), ["id"]);
-    assert_field(child, "id", "Option<S>");
+    assert_field(child, "id", "Option<S::Text<'s>>");
 }
 
 #[test]
@@ -943,7 +947,7 @@ components:
 
     let holder = find_struct(&types, "Holder");
     assert_eq!(field_names(holder), ["choice"]);
-    assert_field(holder, "choice", "Option<Choice<S>>");
+    assert_field(holder, "choice", "Option<Choice<'s, S>>");
     assert_doc(&field(holder, "choice").attrs, "Pick one.");
 }
 
@@ -984,13 +988,13 @@ components:
     let types = parse_rust(file(&files, "types.rs"));
 
     let holder = find_struct(&types, "Holder");
-    assert_field(holder, "child", "Option<HolderChild<S>>");
+    assert_field(holder, "child", "Option<HolderChild<'s, S>>");
 
     // Struct-target wrappers keep the flattening carve-out: the referenced
     // object's properties land on a dedicated named struct.
     let child = find_struct(&types, "HolderChild");
     assert_eq!(field_names(child), ["id"]);
-    assert_field(child, "id", "S");
+    assert_field(child, "id", "S::Text<'s>");
 }
 
 #[test]
