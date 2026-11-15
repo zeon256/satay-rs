@@ -148,13 +148,7 @@ fn owned_policies_obey_collection_and_map_contracts() {
     {
         let values = storage.try_contiguous([3, 1, 2]).unwrap();
         assert_eq!(values.as_ref(), &[3, 1, 2]);
-        assert!(
-            storage
-                .try_contiguous::<()>([])
-                .unwrap()
-                .as_ref()
-                .is_empty()
-        );
+        assert_eq!(storage.try_contiguous::<()>([]).unwrap().as_ref(), [(); 0]);
         let map = storage
             .try_map([
                 (storage.try_text("z").unwrap(), 1),

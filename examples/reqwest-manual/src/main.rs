@@ -1,3 +1,5 @@
+//! Fetches LTA bus arrivals by sending a generated request with `reqwest` directly.
+
 include!(concat!(env!("OUT_DIR"), "/satay_generated.rs"));
 
 use std::env;

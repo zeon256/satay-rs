@@ -1,18 +1,27 @@
+//! `ureq` transport for Satay generated actions.
+//!
+//! [`UreqActionExt`] sends an action with a [`ureq::Agent`].
+
 pub use satay_runtime;
 pub use ureq;
 
 use std::io::{self, Read};
 
+/// Failure sending a Satay action with `ureq`.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Building the request or decoding the response failed.
     #[error("satay error: {0}")]
     Satay(#[from] satay_runtime::Error),
+    /// Sending the request failed.
     #[error("ureq error: {0}")]
     Ureq(#[from] Box<ureq::Error>),
+    /// Reading the response body failed.
     #[error("io error: {0}")]
     Io(#[from] io::Error),
 }
 
+/// Sends Satay actions with a `ureq` agent.
 pub trait UreqActionExt: satay_runtime::Action + Sized {
     /// Sends this action and returns its owned decoded response.
     ///

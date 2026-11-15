@@ -1,3 +1,9 @@
+//! `reqwest` transport for Satay generated actions.
+//!
+//! [`ReqwestActionExt`] sends an action with an async [`reqwest::Client`]; with
+//! the `blocking` feature, `ReqwestBlockingActionExt` does the same with a
+//! `reqwest::blocking::Client`.
+
 pub use reqwest;
 pub use satay_runtime;
 
@@ -5,14 +11,18 @@ pub use satay_runtime;
 use reqwest::blocking;
 use std::{future, mem};
 
+/// Failure sending a Satay action with `reqwest`.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Building the request or decoding the response failed.
     #[error("satay error: {0}")]
     Satay(#[from] satay_runtime::Error),
+    /// Sending the request or reading the response body failed.
     #[error("reqwest error: {0}")]
     Reqwest(#[from] reqwest::Error),
 }
 
+/// Sends Satay actions with an async `reqwest` client.
 pub trait ReqwestActionExt: satay_runtime::Action + Sized + Send {
     /// Sends this action and returns its owned decoded response.
     ///
@@ -67,6 +77,7 @@ pub trait ReqwestActionExt: satay_runtime::Action + Sized + Send {
 impl<T: satay_runtime::Action + Send> ReqwestActionExt for T {}
 
 #[cfg(feature = "blocking")]
+/// Sends Satay actions with a blocking `reqwest` client.
 pub trait ReqwestBlockingActionExt: satay_runtime::Action + Sized {
     /// Sends this action and returns its owned decoded response.
     ///

@@ -22,3 +22,6 @@ serde_json = { version = "1", optional = true }
 
 [build-dependencies]
 satay-codegen = { path = "../../crates/satay-codegen" }
+
+[lints]
+workspace = true

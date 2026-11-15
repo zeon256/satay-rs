@@ -37,7 +37,7 @@ fn tests_the_api_without_http() -> Result<(), Box<dyn Error>> {
     );
     assert_eq!(arrival.odata_metadata.scheme(), "https");
     assert_eq!(arrival.bus_stop_code, 83139);
-    assert!(arrival.services.is_empty());
+    assert_eq!(arrival.services, []);
 
     Ok(())
 }

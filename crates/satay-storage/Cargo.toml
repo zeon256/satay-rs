@@ -6,7 +6,6 @@ license.workspace = true
 rust-version.workspace = true
 description = "no_std storage type families for text, contiguous collections, and maps"
 repository = "https://github.com/zeon256/satay-rs"
-homepage = "https://github.com/zeon256/satay-rs"
 documentation = "https://docs.rs/satay-storage"
 
 [features]

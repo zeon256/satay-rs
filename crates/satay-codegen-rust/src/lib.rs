@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 #![allow(
+    missing_docs,
     clippy::cast_possible_truncation,
     clippy::doc_markdown,
     clippy::elidable_lifetime_names,

@@ -1,3 +1,5 @@
+//! `satay` command line interface: generates Rust client code from `OpenAPI` documents.
+
 #![forbid(unsafe_code)]
 
 use std::fs;

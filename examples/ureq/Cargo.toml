@@ -22,3 +22,6 @@ ureq = "3"
 
 [build-dependencies]
 satay-codegen = { path = "../../crates/satay-codegen" }
+
+[lints]
+workspace = true
