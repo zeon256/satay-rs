@@ -96,10 +96,13 @@ components:
     assert_attr_contains(&union.attrs, "cfg_attr", "serde(untagged)");
 
     assert_eq!(variant_names(union), ["User", "Organization"]);
-    assert_eq!(norm(&variant(union, "User").fields), norm_str("(User<S>)"));
+    assert_eq!(
+        norm(&variant(union, "User").fields),
+        norm_str("(User<'s, S>)")
+    );
     assert_eq!(
         norm(&variant(union, "Organization").fields),
-        norm_str("(Organization<S>)")
+        norm_str("(Organization<'s, S>)")
     );
 }
 
@@ -203,7 +206,11 @@ components:
     );
 
     let assistant = find_struct(&types_rs, "AssistantObject");
-    assert_field(assistant, "tools", "Vec<AssistantObjectToolsItem>");
+    assert_field(
+        assistant,
+        "tools",
+        "S::Contiguous<'s, AssistantObjectToolsItem>",
+    );
     let code_type = find_enum(&types_rs, "AssistantToolsCodeType");
     assert_eq!(variant_names(code_type), ["CodeInterpreter"]);
     let tools_item = find_enum(&types_rs, "AssistantObjectToolsItem");
@@ -376,15 +383,18 @@ fn one_of_generates_nullable_inline_primitive_union_branch() {
 
     let types_rs = parse_rust(find_file(&files, "types.rs"));
     let message = find_struct(&types_rs, "Message");
-    assert_field(message, "content", "Option<MessageContent<S>>");
+    assert_field(message, "content", "Option<MessageContent<'s, S>>");
 
     let content = find_enum(&types_rs, "MessageContent");
     assert_attr_contains(&content.attrs, "cfg_attr", "serde(untagged)");
     assert_eq!(variant_names(content), ["String", "Array"]);
-    assert_eq!(norm(&variant(content, "String").fields), norm_str("(S)"));
+    assert_eq!(
+        norm(&variant(content, "String").fields),
+        norm_str("(S::Text<'s>)")
+    );
     assert_eq!(
         norm(&variant(content, "Array").fields),
-        norm_str("(Vec<ContentPart<S>>)")
+        norm_str("(S::Contiguous<'s, ContentPart<'s, S>>)")
     );
 }
 

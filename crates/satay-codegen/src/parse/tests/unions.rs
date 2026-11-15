@@ -176,19 +176,19 @@ components:
     assert_eq!(variant_names(search_result), ["User", "Organization"]);
     assert_eq!(
         variant_payload_types(search_result),
-        [norm_str("User<S>"), norm_str("Organization<S>")]
+        [norm_str("User<'s, S>"), norm_str("Organization<'s, S>")]
     );
 
     let envelope = find_struct(&types, "Envelope");
     assert_eq!(field_names(envelope), ["item"]);
-    assert_field(envelope, "item", "EnvelopeItem<S>");
+    assert_field(envelope, "item", "EnvelopeItem<'s, S>");
 
     let envelope_item = find_enum(&types, "EnvelopeItem");
     assert_attr_contains(&envelope_item.attrs, "cfg_attr", "serde(untagged)");
     assert_eq!(variant_names(envelope_item), ["Organization", "User"]);
     assert_eq!(
         variant_payload_types(envelope_item),
-        [norm_str("Organization<S>"), norm_str("User<S>")]
+        [norm_str("Organization<'s, S>"), norm_str("User<'s, S>")]
     );
 
     // The operation response body decodes the SearchResult component.
@@ -197,7 +197,7 @@ components:
     assert_eq!(variant_names(response), ["Ok", "UnexpectedStatus"]);
     assert_eq!(
         variant_payload_types(response)[0],
-        norm_str("SearchResult<S>")
+        norm_str("SearchResult<'s, S>")
     );
 }
 
@@ -290,7 +290,11 @@ components:
     );
 
     let assistant = find_struct(&types, "AssistantObject");
-    assert_field(assistant, "tools", "Vec<AssistantObjectToolsItem>");
+    assert_field(
+        assistant,
+        "tools",
+        "S::Contiguous<'s, AssistantObjectToolsItem>",
+    );
 
     let tools_item = find_enum(&types, "AssistantObjectToolsItem");
     assert_attr_contains(&tools_item.attrs, "cfg_attr", "serde(untagged)");
@@ -513,14 +517,17 @@ components:
 
     let message = find_struct(&types, "Message");
     // The null branch drops out as an optional field.
-    assert_field(message, "content", "Option<MessageContent<S>>");
+    assert_field(message, "content", "Option<MessageContent<'s, S>>");
 
     let content = find_enum(&types, "MessageContent");
     assert_attr_contains(&content.attrs, "cfg_attr", "serde(untagged)");
     assert_eq!(variant_names(content), ["String", "Array"]);
     assert_eq!(
         variant_payload_types(content),
-        [norm_str("S"), norm_str("Vec<ContentPart<S>>")]
+        [
+            norm_str("S::Text<'s>"),
+            norm_str("S::Contiguous<'s, ContentPart<'s, S>>")
+        ]
     );
 }
 
@@ -629,11 +636,11 @@ components:
     assert_eq!(
         variant_payload_types(value),
         [
-            norm_str("S"),
+            norm_str("S::Text<'s>"),
             norm_str("i64"),
             norm_str("f64"),
             norm_str("bool"),
-            norm_str("Vec<S>"),
+            norm_str("S::Contiguous<'s, S::Text<'s>>"),
         ]
     );
 }
@@ -702,7 +709,11 @@ components:
     let types = parse_rust(file(&files, "types.rs"));
 
     let transcription = find_struct(&types, "AudioTranscription");
-    assert_field(transcription, "model", "Option<AudioTranscriptionModel<S>>");
+    assert_field(
+        transcription,
+        "model",
+        "Option<AudioTranscriptionModel<'s, S>>",
+    );
 
     let model = find_enum(&types, "AudioTranscriptionModel");
     assert_doc(&model.attrs, "The model to use for transcription.");
@@ -1098,14 +1109,14 @@ components:
     let types = parse_rust(file(&files, "types.rs"));
 
     let wrapper = find_struct(&types, "Wrapper");
-    assert_field(wrapper, "keep", "Option<WrapperKeep<S>>");
+    assert_field(wrapper, "keep", "Option<WrapperKeep<'s, S>>");
 
     let keep = find_enum(&types, "WrapperKeep");
     assert_attr_contains(&keep.attrs, "cfg_attr", "serde(untagged)");
     assert_eq!(variant_names(keep), ["Widget", "All"]);
     assert_eq!(
         variant_payload_types(keep),
-        [norm_str("Widget<S>"), norm_str("WrapperKeepAll")]
+        [norm_str("Widget<'s, S>"), norm_str("WrapperKeepAll")]
     );
 
     let all = find_enum(&types, "WrapperKeepAll");
@@ -1158,7 +1169,7 @@ components:
     assert_eq!(variant_names(keep), ["Widget", "All"]);
     assert_eq!(
         variant_payload_types(keep),
-        [norm_str("Widget<S>"), norm_str("WrapperKeepAll")]
+        [norm_str("Widget<'s, S>"), norm_str("WrapperKeepAll")]
     );
 
     let all = find_enum(&types, "WrapperKeepAll");
@@ -1401,8 +1412,8 @@ components:
     assert_eq!(
         variant_payload_types(tool_call),
         [
-            norm_str("FunctionToolCall<S>"),
-            norm_str("CustomToolCall<S>")
+            norm_str("FunctionToolCall<'s, S>"),
+            norm_str("CustomToolCall<'s, S>")
         ]
     );
 
@@ -1514,8 +1525,8 @@ components:
     assert_eq!(
         variant_payload_types(tool_call),
         [
-            norm_str("FunctionToolCall<S>"),
-            norm_str("CustomToolCall<S>")
+            norm_str("FunctionToolCall<'s, S>"),
+            norm_str("CustomToolCall<'s, S>")
         ]
     );
 
@@ -1593,7 +1604,7 @@ components:
     assert_eq!(variant_names(pet), ["Dog", "Cat"]);
     assert_eq!(
         variant_payload_types(pet),
-        [norm_str("Dog<S>"), norm_str("Cat<S>")]
+        [norm_str("Dog<'s, S>"), norm_str("Cat<'s, S>")]
     );
 
     // Branches embed the `kind` tag property as singleton fields.
@@ -3380,8 +3391,8 @@ components:
 
     let holder = find_struct(&types, "Holder");
     assert_eq!(field_names(holder), ["first", "second"]);
-    assert_field(holder, "first", "HolderFirst<S>");
-    assert_field(holder, "second", "HolderSecond<S>");
+    assert_field(holder, "first", "HolderFirst<'s, S>");
+    assert_field(holder, "second", "HolderSecond<'s, S>");
 }
 
 #[test]
@@ -3611,7 +3622,7 @@ components:
     assert_eq!(variant_names(entry), ["Union", "String"]);
     assert_eq!(
         variant_payload_types(entry),
-        [norm_str("EntryUnion"), norm_str("S")]
+        [norm_str("EntryUnion"), norm_str("S::Text<'s>")]
     );
 
     let nested = find_enum(&types, "EntryUnion");
@@ -3675,7 +3686,7 @@ components:
     let types = parse_rust(file(&files, "types.rs"));
 
     let holder = find_struct(&types, "Holder");
-    assert_field(holder, "item", "Option<HolderItem<S>>");
+    assert_field(holder, "item", "Option<HolderItem<'s, S>>");
 
     // NOTE: the private model's tag_value fact is now covered by the generated
     // serde rename on the variant.
@@ -3937,7 +3948,7 @@ components:
     assert_eq!(variant_names(params), ["AutoParams", "ManualParams"]);
     assert_eq!(
         variant_payload_types(params),
-        [norm_str("AutoParams"), norm_str("ManualParams<S>")]
+        [norm_str("AutoParams"), norm_str("ManualParams<'s, S>")]
     );
 }
 
@@ -4214,7 +4225,7 @@ components:
 
     let message = find_struct(&types, "Message");
     assert_eq!(field_names(message), ["role"]);
-    assert_field(message, "role", "S");
+    assert_field(message, "role", "S::Text<'s>");
     // The field stays required: no optional-default serde attrs were rendered.
     assert!(!contains_tokens(
         message,

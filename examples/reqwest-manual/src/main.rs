@@ -1,3 +1,5 @@
+//! Fetches LTA bus arrivals by sending a generated request with `reqwest` directly.
+
 include!(concat!(env!("OUT_DIR"), "/satay_generated.rs"));
 
 use std::env;
@@ -28,7 +30,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         body: response.bytes().await?,
     };
 
-    match GetBusArrivalAction::<String>::decode(response.as_bytes())? {
+    match GetBusArrivalAction::<satay_runtime::AllocStorage>::decode(response.as_bytes())? {
         GetBusArrivalResponse::Ok(arrival) => {
             println!(
                 "{} services for bus stop {}",

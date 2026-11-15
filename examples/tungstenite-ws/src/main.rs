@@ -1,3 +1,5 @@
+//! Sends a generated action over a local WebSocket connection with `tokio-tungstenite`.
+
 include!(concat!(env!("OUT_DIR"), "/satay_generated.rs"));
 
 mod error;

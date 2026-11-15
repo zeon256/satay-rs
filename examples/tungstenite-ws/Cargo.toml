@@ -24,3 +24,6 @@ tokio-tungstenite = "0.27"
 
 [build-dependencies]
 satay-codegen = { path = "../../crates/satay-codegen" }
+
+[lints]
+workspace = true

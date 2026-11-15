@@ -22,3 +22,6 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 [build-dependencies]
 satay-codegen = { path = "../../crates/satay-codegen" }
+
+[lints]
+workspace = true

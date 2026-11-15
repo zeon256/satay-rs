@@ -18,15 +18,16 @@ fn tests_the_api_without_http() -> Result<(), Box<dyn Error>> {
     assert!(query.contains("BusStopCode=83139"));
     assert!(query.contains("ServiceNo=15"));
 
-    let response = GetBusArrivalAction::<String>::decode(satay_runtime::ResponseParts {
-        status: http::StatusCode::OK,
-        headers: http::HeaderMap::new(),
-        body: br#"{
+    let response =
+        GetBusArrivalAction::<satay_runtime::AllocStorage>::decode(satay_runtime::ResponseParts {
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            body: br#"{
                 "odata.metadata": "https://datamall2.mytransport.sg/ltaodataservice/v3/BusArrival",
                 "BusStopCode": "83139",
                 "Services": []
             }"#,
-    })?;
+        })?;
 
     let GetBusArrivalResponse::Ok(arrival) = response else {
         panic!("expected 200 OK bus arrival response");
@@ -37,7 +38,7 @@ fn tests_the_api_without_http() -> Result<(), Box<dyn Error>> {
     );
     assert_eq!(arrival.odata_metadata.scheme(), "https");
     assert_eq!(arrival.bus_stop_code, 83139);
-    assert!(arrival.services.is_empty());
+    assert_eq!(arrival.services, []);
 
     Ok(())
 }

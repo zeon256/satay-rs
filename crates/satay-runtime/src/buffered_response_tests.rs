@@ -1,6 +1,7 @@
 use super::*;
 use http::header::HeaderName;
 use std::borrow::Cow;
+use std::fmt;
 
 struct BorrowingAction;
 
@@ -30,6 +31,17 @@ impl OwnedAction for BorrowingAction {
 
     fn decode_owned(response: ResponseParts<&[u8]>) -> Result<String, Error> {
         Ok(Self::decode(response)?.name.into_owned())
+    }
+}
+
+impl StorageAction for BorrowingAction {
+    type StorageResponse<'s, S: Storage + 's> = S::Text<'s>;
+
+    fn decode_in<'s, S: Storage<Error: fmt::Display>>(
+        response: ResponseParts<&[u8]>,
+        storage: &'s S,
+    ) -> Result<S::Text<'s>, Error> {
+        shape::from_projected_json_slice::<shape::Text, S>(response.body, "name", None, storage)
     }
 }
 
@@ -66,4 +78,17 @@ fn escaped_strings_are_owned_and_invalid_json_is_reported_at_decode() {
     let record: Record<'_> = from_json_slice(br#"{"name":"Mo\u0063hi"}"#).unwrap();
     assert!(matches!(record.name, Cow::Owned(ref value) if value == "Mochi"));
     assert!(from_json_slice::<Record<'_>>(b"invalid").is_err());
+}
+
+#[test]
+fn storage_decoding_copies_into_the_policy_and_releases_the_buffer() {
+    let response = BufferedResponse::<BorrowingAction, _>::new(ResponseParts {
+        status: http::StatusCode::OK,
+        headers: http::HeaderMap::new(),
+        body: br#"{"name":"Mochi"}"#.to_vec(),
+    });
+    let boxed: Box<str> = response.decode_in(&BoxedStorage).unwrap();
+    let standard: String = response.decode_in(&AllocStorage).unwrap();
+    drop(response);
+    assert_eq!((&*boxed, standard.as_str()), ("Mochi", "Mochi"));
 }

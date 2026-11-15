@@ -555,27 +555,6 @@ impl TypeRef {
             other => other,
         }
     }
-
-    /// True when the rendered type spells out `BTreeMap`, so the generated
-    /// file needs a `use std::collections::BTreeMap;` import.
-    pub(crate) fn contains_map(&self) -> bool {
-        match self {
-            Self::Map(_) => true,
-            Self::Array(inner) | Self::Option(inner) => inner.contains_map(),
-            Self::Constrained { inner, .. } => inner.contains_map(),
-            Self::String
-            | Self::ParsedString(_)
-            | Self::Coordinates(_)
-            | Self::ParsedInteger(_)
-            | Self::Integer(_)
-            | Self::F32
-            | Self::F64
-            | Self::Bool
-            | Self::JsonValue
-            | Self::Range(_)
-            | Self::Named(_) => false,
-        }
-    }
 }
 
 impl IntegerType {

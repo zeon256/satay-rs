@@ -5,7 +5,6 @@ edition.workspace = true
 license.workspace = true
 description = "Reqwest adapter for Satay generated actions"
 repository = "https://github.com/zeon256/satay-rs"
-homepage = "https://github.com/zeon256/satay-rs"
 documentation = "https://docs.rs/satay-reqwest"
 rust-version.workspace = true
 
@@ -22,3 +21,6 @@ thiserror.workspace = true
 [dev-dependencies]
 http.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
+
+[lints]
+workspace = true

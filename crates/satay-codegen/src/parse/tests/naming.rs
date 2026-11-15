@@ -106,7 +106,7 @@ components:
     storageKey:
       type: apiKey
       in: header
-      name: string_storage
+      name: storage
     httpKey:
       type: apiKey
       in: query
@@ -115,13 +115,7 @@ components:
     );
 
     let api_file = parse_rust(file(&files, "api.rs"));
-    for name in [
-        "new_2",
-        "apply_2",
-        "base_url_2",
-        "http_2",
-        "string_storage_2",
-    ] {
+    for name in ["new_2", "apply_2", "base_url_2", "http_2", "storage_2"] {
         assert!(
             has_method(&api_file, "Api", name),
             "missing API key builder method {name}"
@@ -129,7 +123,7 @@ components:
     }
     // The colliding originals remain under their non-colliding identities.
     assert!(has_method(&api_file, "Api", "base_url"));
-    assert!(has_method(&api_file, "Api", "string_storage"));
+    assert!(has_method(&api_file, "Api", "storage"));
 }
 
 #[test]

@@ -5,7 +5,6 @@ edition.workspace = true
 license.workspace = true
 description = "Generate Rust client code from OpenAPI 3.1 documents"
 repository = "https://github.com/zeon256/satay-rs"
-homepage = "https://github.com/zeon256/satay-rs"
 documentation = "https://docs.rs/satay-codegen"
 rust-version.workspace = true
 
@@ -26,3 +25,6 @@ syn = { workspace = true, features = ["visit-mut"] }
 # Pre-fetch the dependency used by generated crates before their offline resolution.
 compact_str = { version = "0.9", features = ["serde"] }
 tempfile.workspace = true
+
+[lints]
+workspace = true

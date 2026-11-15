@@ -35,14 +35,14 @@ components:
 
     let types = parse_rust(file(&files, "types.rs"));
     let environment = find_struct(&types, "Environment");
-    assert_field(environment, "metadata", "BTreeMap<S, S>");
+    assert_field(environment, "metadata", "S::Map<'s, S::Text<'s>>");
     // Required properties are not Option-wrapped and carry no serde default.
     let metadata = field(environment, "metadata");
     assert!(
         !metadata
             .attrs
             .iter()
-            .any(|attr| norm(attr).contains(&norm_str("serde (default"))),
+            .any(|attr| norm(attr).contains(&norm_str("skip_serializing_if"))),
         "required field `Environment.metadata` must not be optional"
     );
 }
@@ -84,7 +84,7 @@ components:
     let types = parse_rust(file(&files, "types.rs"));
     // The property is not required, so the map is Option-wrapped in the output.
     let toolset = find_struct(&types, "Toolset");
-    assert_field(toolset, "configs", "Option<BTreeMap<S, ToolConfig>>");
+    assert_field(toolset, "configs", "Option<S::Map<'s, ToolConfig>>");
 }
 
 #[test]
@@ -120,7 +120,7 @@ components:
     assert_field(
         output_format,
         "schema",
-        "BTreeMap<S, satay_runtime::JsonValue>",
+        "S::Map<'s, satay_runtime::JsonValue>",
     );
 }
 
@@ -199,12 +199,12 @@ components:
     assert_field(
         bash_tool,
         "input_examples",
-        "Option<Vec<BTreeMap<S, satay_runtime::JsonValue>>>",
+        "Option<S::Contiguous<'s, S::Map<'s, satay_runtime::JsonValue>>>",
     );
     assert_attr_contains(
         &field(bash_tool, "input_examples").attrs,
         "cfg_attr",
-        r#"serde(default, skip_serializing_if = "Option::is_none")"#,
+        r#"skip_serializing_if = "Option::is_none""#,
     );
 }
 
@@ -248,7 +248,7 @@ components:
 
     let types = parse_rust(file(&files, "types.rs"));
     let toolset = find_struct(&types, "Toolset");
-    assert_field(toolset, "configs", "Option<BTreeMap<S, ToolConfig>>");
+    assert_field(toolset, "configs", "Option<S::Map<'s, ToolConfig>>");
     assert!(
         !contains_ident(&types, "ToolsetConfigs"),
         "nullable map wrapper must not synthesize a wrapper component"
@@ -292,7 +292,7 @@ components:
     assert_field(
         update_request,
         "metadata",
-        "Option<BTreeMap<S, Option<UpdateRequestMetadataValue<S>>>>",
+        "Option<S::Map<'s, Option<UpdateRequestMetadataValue<'s, S>>>>",
     );
 
     let union = find_enum(&types, "UpdateRequestMetadataValue");
@@ -309,7 +309,7 @@ components:
         other => panic!("expected tuple variant, got {}", norm(other)),
     };
     assert_eq!(string_fields.unnamed.len(), 1);
-    assert_eq!(norm(&string_fields.unnamed[0].ty), norm_str("S"));
+    assert_eq!(norm(&string_fields.unnamed[0].ty), norm_str("S::Text<'s>"));
 }
 
 #[test]
@@ -357,7 +357,7 @@ components:
     let types = parse_rust(file(&files, "types.rs"));
     let input_schema = find_struct(&types, "InputSchema");
     assert_eq!(field_names(input_schema), ["r#type"]);
-    assert_field(input_schema, "r#type", "S");
+    assert_field(input_schema, "r#type", "S::Text<'s>");
 }
 
 #[test]
@@ -529,12 +529,12 @@ components:
     let alias = find_type_alias(&types, "Freeform");
     assert_eq!(
         norm(&alias.ty),
-        norm_str("BTreeMap<S, satay_runtime::JsonValue>")
+        norm_str("<S as satay_runtime::Storage>::Map<'s, satay_runtime::JsonValue,>")
     );
 
     // Alias refs are inlined at lowering; the field carries the map shape.
     let holder = find_struct(&types, "Holder");
-    assert_field(holder, "value", "BTreeMap<S, satay_runtime::JsonValue>");
+    assert_field(holder, "value", "S::Map<'s, satay_runtime::JsonValue>");
 }
 
 #[test]
@@ -563,7 +563,12 @@ components:
 
     let types = parse_rust(file(&files, "types.rs"));
     let alias = find_type_alias(&types, "Labels");
-    assert_eq!(norm(&alias.ty), norm_str("BTreeMap<S, S>"));
+    assert_eq!(
+        norm(&alias.ty),
+        norm_str(
+            "<S as satay_runtime::Storage>::Map<'s, <S as satay_runtime::Storage>::Text<'s>,>"
+        )
+    );
 }
 
 #[test]

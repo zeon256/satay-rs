@@ -1,3 +1,5 @@
+//! Fetches LTA bus arrivals with a generated client sent through `satay-reqwest`.
+
 include!(concat!(env!("OUT_DIR"), "/satay_generated.rs"));
 
 use generated::{Api, GetBusArrivalResponse};

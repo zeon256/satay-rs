@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, collections::BTreeMap, string::String, vec::Vec};
 use core::{borrow::Borrow, convert::Infallible};
 
-use crate::{Map, Storage};
+use crate::{Map, OwnedStorage, Storage};
 
 /// Global-allocator storage using `String`, `Vec<T>`, and `BTreeMap<String, V>`.
 ///
@@ -36,6 +36,10 @@ impl Storage for AllocStorage {
     }
 }
 
+impl OwnedStorage for AllocStorage {
+    const CONTEXT: &'static Self = &Self;
+}
+
 /// Global-allocator storage using `Box<str>`, `Box<[T]>`, and tree maps.
 ///
 /// Collections are collected through a `Vec` and converted to boxed slices.
@@ -67,6 +71,10 @@ impl Storage for BoxedStorage {
     ) -> Result<Self::Map<'a, V>, Self::Error> {
         Ok(entries.into_iter().collect())
     }
+}
+
+impl OwnedStorage for BoxedStorage {
+    const CONTEXT: &'static Self = &Self;
 }
 
 /// Tree-map access with logarithmic lookup by text.

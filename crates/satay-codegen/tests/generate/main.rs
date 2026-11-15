@@ -4,6 +4,8 @@
     clippy::too_many_lines
 )]
 
+//! End-to-end tests generating, compiling, and exercising client crates.
+
 mod all_of;
 mod ast;
 mod behavior;

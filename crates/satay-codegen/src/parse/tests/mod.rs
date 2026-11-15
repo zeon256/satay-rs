@@ -1,4 +1,5 @@
 #![allow(
+    clippy::assert_is_empty,
     clippy::match_wildcard_for_single_variants,
     clippy::needless_raw_string_hashes,
     clippy::too_many_lines

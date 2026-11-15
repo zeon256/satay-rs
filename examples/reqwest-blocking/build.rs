@@ -1,3 +1,5 @@
+//! Generates the example client from `../openapi.yaml` into `OUT_DIR`.
+
 use std::env;
 use std::error::Error;
 use std::fs;

@@ -54,13 +54,15 @@ pub(super) fn parse_api_groups(
         }
     }
 
-    let mut used_modules = BTreeSet::from(["api".to_owned(), "types".to_owned()]);
+    // Group modules are imported by name into `api.rs`, next to these roots.
+    let mut used_modules =
+        BTreeSet::from(["api", "types", "convert", "fmt", "marker", "shape"].map(str::to_owned));
     used_modules.extend(operations.iter().map(|operation| operation.fn_name.clone()));
 
     let mut used_accessors = BTreeSet::from([
         "apply".to_owned(),
         "base_url".to_owned(),
-        "string_storage".to_owned(),
+        "storage".to_owned(),
         "new".to_owned(),
     ]);
     used_accessors.extend(
